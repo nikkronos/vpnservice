@@ -2,7 +2,21 @@
 BOT_TOKEN=your_bot_token_here
 ADMIN_ID=your_telegram_id
 
-# Server / VPN node (для будущей автоматизации)
+# Server / VPN node (для автоматизации)
+# ВАЖНО: реальные значения прописываются только в env_vars.txt на сервере/локально, этот файл — пример.
 VPN_SERVER_HOST=81.200.146.32
 VPN_SERVER_USER=root
+
+# WireGuard settings (используются для генерации клиентских конфигов)
+# Публичный ключ сервера (можно получить командой `wg show wg0 public-key`)
+WG_SERVER_PUBLIC_KEY=your_server_public_key_here
+
+# Интерфейс и сеть WireGuard
+WG_INTERFACE=wg0
+WG_NETWORK_CIDR=10.0.0.0/24
+
+# Параметры подключения клиентов
+WG_ENDPOINT_HOST=81.200.146.32
+WG_ENDPOINT_PORT=51820
+WG_DNS=1.1.1.1
 

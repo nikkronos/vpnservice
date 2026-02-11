@@ -3,3 +3,6 @@ env_vars.txt
 __pycache__/
 *.pyc
 
+# Runtime data (пользователи, peers, приватные ключи и т.п.)
+bot/data/
+

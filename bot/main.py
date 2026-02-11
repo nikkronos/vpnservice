@@ -1,10 +1,19 @@
+import io
 import logging
 
 import telebot
 from telebot import types
 
 from .config import load_config
-from .storage import User, find_user, get_all_users, upsert_user, is_owner
+from .storage import (
+    User,
+    find_peer_by_telegram_id,
+    find_user,
+    get_all_users,
+    is_owner,
+    upsert_user,
+)
+from .wireguard_peers import WireGuardError, create_peer_and_config_for_user
 
 
 logging.basicConfig(level=logging.INFO)
@@ -32,10 +41,12 @@ def main() -> None:
         text_lines = [
             "Привет! Это VPN бот.",
             "",
-            "Сейчас бот в режиме MVP и работает только с вручную подготовленным конфигом.",
+            "Сейчас бот в режиме self-service: владелец добавляет пользователей,",
+            "а бот выдаёт персональные конфиги WireGuard (по одному на Telegram-аккаунт).",
+            "",
             "Доступные команды:",
-            "/get_config — получить текущий конфиг",
-            "/regen — запросить регенерацию конфига (пока только уведомление администратору)",
+            "/get_config — получить или переслать свой конфиг",
+            "/regen — запросить обновление конфига (перегенерировать ключи)",
             "/status — показать базовую информацию о доступе",
             "/my_config — синоним /get_config",
         ]
@@ -52,11 +63,22 @@ def main() -> None:
             )
             upsert_user(owner)
 
+    def _send_config_file(chat_id: int, config_text: str, filename: str) -> None:
+        """
+        Отправляет текстовый конфиг как файл пользователю.
+        """
+        file_obj = io.BytesIO(config_text.encode("utf-8"))
+        file_obj.name = filename
+        bot.send_document(chat_id, file_obj, visible_file_name=filename)
+
     @bot.message_handler(commands=["get_config"])
     def cmd_get_config(message: types.Message) -> None:  # type: ignore[override]
         """
-        MVP: пока без автоматической генерации на сервере.
-        Дальше сюда добавим логику SSH/скриптов для выдачи актуального clientX.conf.
+        Self-service логика:
+        - проверяем, зарегистрирован ли пользователь;
+        - если peer уже есть — формируем конфиг на основе существующих данных;
+        - если peer нет — создаём его в WireGuard и сохраняем в peers.json;
+        - отправляем пользователю .conf файл.
         """
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
@@ -70,18 +92,55 @@ def main() -> None:
             )
             return
 
-        if message.from_user.id != admin_id:
+        chat_id = message.chat.id
+        telegram_id = message.from_user.id
+
+        # Владелец уже имеет вручную настроенный client1; для него пока оставляем
+        # существующий процесс и не создаём нового peer автоматически.
+        if telegram_id == admin_id:
             safe_reply(
                 message,
-                "Сейчас конфиг для тебя подготовлен вручную.\n"
-                "В следующем этапе бот будет выдавать персональный файл и QR.",
+                "У тебя (как у владельца) уже есть рабочий доступ client1,\n"
+                "подключенный вручную. Для тестирования новых функций добавь отдельного\n"
+                "пользователя через /add_user и проверь /get_config от его имени.",
             )
             return
 
+        try:
+            peer = find_peer_by_telegram_id(telegram_id)
+            if peer and peer.active:
+                # Peer уже существует; пока не переиспользуем или не пересоздаём конфиг автоматически,
+                # чтобы не плодить дубликаты и не ломать существующие подключения.
+                safe_reply(
+                    message,
+                    "Для тебя уже создан VPN‑доступ.\n"
+                    "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
+                    "ничего делать не нужно.\n"
+                    "Если ты потерял конфиг или нужно его обновить, договорись с владельцем, "
+                    "когда можно будет выполнить регенерацию через /regen (эта функция будет доработана отдельно).",
+                )
+                return
+
+            # Peer ещё нет — создаём новый peer и конфиг
+            peer, client_config = create_peer_and_config_for_user(telegram_id)
+
+        except WireGuardError as exc:
+            logger.exception("Ошибка при обработке /get_config для %s: %s", telegram_id, exc)
+            safe_reply(
+                message,
+                "Произошла ошибка при подготовке конфига WireGuard.\n"
+                "Попробуй позже или сообщи владельцу, чтобы он проверил логи бота.",
+            )
+            return
+
+        filename = f"vpn_{peer.telegram_id}.conf"
+        _send_config_file(chat_id, client_config, filename)
+
         safe_reply(
             message,
-            "Сейчас конфиг client1.conf для тебя подготовлен вручную.\n"
-            "Дальше научим бота отдавать актуальные конфиги автоматически.",
+            "Создан новый VPN‑доступ и отправлен конфиг.\n"
+            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
+            "Импортируй файл в приложение WireGuard на своём устройстве и включи туннель.",
         )
 
     @bot.message_handler(commands=["regen"])
