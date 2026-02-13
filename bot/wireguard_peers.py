@@ -5,7 +5,7 @@ import subprocess
 from typing import Dict, Optional, Tuple
 
 from .config import _parse_env_file
-from .storage import Peer, get_all_peers, upsert_peer
+from .storage import Peer, get_all_peers, upsert_peer, find_peer_by_telegram_id
 
 
 logger = logging.getLogger(__name__)
