@@ -15,6 +15,7 @@ class User:
     username: Optional[str]
     role: str = "user"  # "owner" | "user"
     active: bool = True
+    preferred_server_id: Optional[str] = None  # "main" (РФ) | "eu1" (Европа) | None (дефолт)
 
 
 @dataclass
@@ -62,6 +63,7 @@ def get_all_users() -> List[User]:
                     username=payload.get("username"),
                     role=payload.get("role", "user"),
                     active=bool(payload.get("active", True)),
+                    preferred_server_id=payload.get("preferred_server_id"),
                 )
             )
         except ValueError:
@@ -79,6 +81,7 @@ def find_user(telegram_id: int) -> Optional[User]:
         username=payload.get("username"),
         role=payload.get("role", "user"),
         active=bool(payload.get("active", True)),
+        preferred_server_id=payload.get("preferred_server_id"),
     )
 
 
@@ -118,23 +121,29 @@ def get_all_peers() -> List[Peer]:
     return peers
 
 
-def find_peer_by_telegram_id(telegram_id: int) -> Optional[Peer]:
+def find_peer_by_telegram_id(telegram_id: int, server_id: Optional[str] = None) -> Optional[Peer]:
     """
     Ищет peer, связанный с указанным Telegram ID.
-    На текущем этапе предполагается максимум один активный peer на пользователя.
+    
+    Если указан server_id, ищет peer именно на этом сервере.
+    Если server_id не указан, возвращает первый найденный активный peer (для обратной совместимости).
     """
     data = _load_raw(PEERS_FILE)
     payload = data.get(str(telegram_id))
     if not payload:
         return None
     try:
-        return Peer(
+        peer = Peer(
             telegram_id=int(payload.get("telegram_id", telegram_id)),
             wg_ip=payload["wg_ip"],
             public_key=payload["public_key"],
             server_id=payload.get("server_id", "main"),
             active=bool(payload.get("active", True)),
         )
+        # Если указан server_id, проверяем совпадение
+        if server_id is not None and peer.server_id != server_id:
+            return None
+        return peer
     except (ValueError, KeyError):
         return None
 

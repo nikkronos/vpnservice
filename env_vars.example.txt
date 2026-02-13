@@ -7,16 +7,30 @@ ADMIN_ID=your_telegram_id
 VPN_SERVER_HOST=81.200.146.32
 VPN_SERVER_USER=root
 
-# WireGuard settings (используются для генерации клиентских конфигов)
+# WireGuard settings для ноды "main" (Россия, Timeweb)
 # Публичный ключ сервера (можно получить командой `wg show wg0 public-key`)
 WG_SERVER_PUBLIC_KEY=your_server_public_key_here
 
-# Интерфейс и сеть WireGuard
+# Интерфейс и сеть WireGuard для main
 WG_INTERFACE=wg0
 WG_NETWORK_CIDR=10.0.0.0/24
 
-# Параметры подключения клиентов
+# Параметры подключения клиентов к main
 WG_ENDPOINT_HOST=81.200.146.32
 WG_ENDPOINT_PORT=51820
 WG_DNS=1.1.1.1
+
+# WireGuard settings для второй ноды "eu1" (Европа)
+# Раскомментируй и заполни, когда вторая нода будет готова:
+# WG_EU1_SERVER_PUBLIC_KEY=your_eu_server_public_key_here
+# WG_EU1_INTERFACE=wg0
+# WG_EU1_NETWORK_CIDR=10.0.0.0/24
+# WG_EU1_ENDPOINT_HOST=your_eu_server_ip
+# WG_EU1_ENDPOINT_PORT=51820
+# WG_EU1_DNS=1.1.1.1
+# 
+# Если бот работает на другом сервере, а EU-нода на удалённом VPS:
+# WG_EU1_SSH_HOST=your_eu_server_ip
+# WG_EU1_SSH_USER=root
+# WG_EU1_SSH_KEY_PATH=/path/to/ssh/key  # опционально, если не используется стандартный ~/.ssh/id_rsa
 

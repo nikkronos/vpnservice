@@ -32,3 +32,23 @@
   - конфиг добавлен в WireGuard на iPhone через сканирование QR-кода;
   - подключение работает.
 
+## 2026-02-11
+
+- Реализован self-service через Telegram-бота:
+  - спроектирована модель данных для пользователей (`users.json`) и VPN-подключений (`peers.json`);
+  - добавлен модуль `bot/storage.py` с dataclass `Peer` и функциями для работы с peers;
+  - добавлен модуль `bot/wireguard_peers.py` для интеграции с WireGuard (генерация ключей, подбор IP, добавление peer через `wg set`, формирование `.conf`);
+  - переработан `bot/main.py` под сценарий self-service (команды `/start`, `/get_config`, `/my_config`, `/add_user`, `/users` с учётом новой модели данных).
+- Настроены переменные окружения для VPN-проекта:
+  - в `env_vars.txt` добавлены параметры `WG_SERVER_PUBLIC_KEY`, `WG_INTERFACE`, `WG_NETWORK_CIDR`, `WG_ENDPOINT_HOST`, `WG_ENDPOINT_PORT`, `WG_DNS`;
+  - `WG_SERVER_PUBLIC_KEY` получен с помощью `wg show wg0 public-key` на сервере.
+- Настроено обновление кода на сервере `/opt/vpnservice`:
+  - сконфигурирован доступ к GitHub через Personal Access Token для `nikkronos/vpnservice`;
+  - аккуратно разрешён конфликт между старым локальным `bot/storage.py` и новой версией из репозитория (старый файл сохранён как бэкап);
+  - выполнен `git pull`, подтянуты новые файлы (`bot/main.py`, `bot/storage.py`, `bot/wireguard_peers.py`, `bot/__init__.py`, specs), перезапущен `vpn-bot.service`.
+- Протестирован self-service для друзей:
+  - владелец добавляет друга командой `/add_user` (ответом на сообщение или по Telegram ID);
+  - друг пишет боту `/start` и `/get_config`, бот создаёт peer в WireGuard, сохраняет его в `peers.json` и отправляет конфигурационный файл `vpn_<telegram_id>.conf`;
+  - как минимум один друг успешно подключился к VPN: YouTube и Instagram работают через туннель.
+- Обновлены планы по развитию infrastructure и multi-node в `ROADMAP_VPN.md` (добавлены задачи по оценке нагрузки и внедрению нескольких нод/регионов).
+

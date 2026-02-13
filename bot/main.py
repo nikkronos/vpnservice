@@ -13,7 +13,11 @@ from .storage import (
     is_owner,
     upsert_user,
 )
-from .wireguard_peers import WireGuardError, create_peer_and_config_for_user
+from .wireguard_peers import (
+    WireGuardError,
+    create_peer_and_config_for_user,
+    get_available_servers,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +50,7 @@ def main() -> None:
             "",
             "Доступные команды:",
             "/get_config — получить или переслать свой конфиг",
+            "/server — выбрать сервер (РФ/EU)",
             "/regen — запросить обновление конфига (перегенерировать ключи)",
             "/status — показать базовую информацию о доступе",
             "/my_config — синоним /get_config",
@@ -106,23 +111,27 @@ def main() -> None:
             )
             return
 
+        # Определяем, какой сервер использовать
+        preferred_server_id = user.preferred_server_id or "main"  # дефолт — main (РФ)
+        
         try:
-            peer = find_peer_by_telegram_id(telegram_id)
+            # Ищем peer на выбранном сервере
+            peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
             if peer and peer.active:
-                # Peer уже существует; пока не переиспользуем или не пересоздаём конфиг автоматически,
-                # чтобы не плодить дубликаты и не ломать существующие подключения.
+                # Peer уже существует на выбранном сервере — формируем конфиг заново
+                # (пока не храним приватный ключ, поэтому пересоздаём peer для генерации конфига)
+                # В будущем можно хранить приватный ключ или регенерировать только при /regen
                 safe_reply(
                     message,
-                    "Для тебя уже создан VPN‑доступ.\n"
+                    f"Для тебя уже создан VPN‑доступ на сервере <b>{preferred_server_id}</b>.\n"
                     "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
                     "ничего делать не нужно.\n"
-                    "Если ты потерял конфиг или нужно его обновить, договорись с владельцем, "
-                    "когда можно будет выполнить регенерацию через /regen (эта функция будет доработана отдельно).",
+                    "Если ты потерял конфиг или нужно его обновить, используй /regen для регенерации.",
                 )
                 return
 
-            # Peer ещё нет — создаём новый peer и конфиг
-            peer, client_config = create_peer_and_config_for_user(telegram_id)
+            # Peer ещё нет на выбранном сервере — создаём новый peer и конфиг
+            peer, client_config = create_peer_and_config_for_user(telegram_id, server_id=preferred_server_id)
 
         except WireGuardError as exc:
             logger.exception("Ошибка при обработке /get_config для %s: %s", telegram_id, exc)
@@ -136,11 +145,15 @@ def main() -> None:
         filename = f"vpn_{peer.telegram_id}.conf"
         _send_config_file(chat_id, client_config, filename)
 
+        servers_info = get_available_servers()
+        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+        
         safe_reply(
             message,
-            "Создан новый VPN‑доступ и отправлен конфиг.\n"
+            f"Создан новый VPN‑доступ на сервере <b>{server_name}</b> и отправлен конфиг.\n"
             f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
-            "Импортируй файл в приложение WireGuard на своём устройстве и включи туннель.",
+            "Импортируй файл в приложение WireGuard на своём устройстве и включи туннель.\n"
+            f"\nЧтобы выбрать другой сервер, используй команду /server.",
         )
 
     @bot.message_handler(commands=["regen"])
@@ -152,13 +165,131 @@ def main() -> None:
             "В будущем здесь будет автоматическое пересоздание ключей и конфигов.",
         )
 
+    @bot.message_handler(commands=["server"])
+    def cmd_server(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Команда для выбора сервера (ноды) VPN.
+        Показывает кнопки с доступными серверами и позволяет пользователю выбрать предпочтительный.
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        
+        user = find_user(message.from_user.id)
+        if not user or not user.active:
+            safe_reply(
+                message,
+                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
+                "Попроси владельца добавить тебя командой /add_user.",
+            )
+            return
+        
+        servers_info = get_available_servers()
+        current_server_id = user.preferred_server_id or "main"
+        
+        # Создаём inline-кнопки для выбора сервера
+        keyboard = types.InlineKeyboardMarkup()
+        for server_id, info in servers_info.items():
+            label = info["name"]
+            if server_id == current_server_id:
+                label = f"✅ {label} (текущий)"
+            keyboard.add(types.InlineKeyboardButton(
+                text=label,
+                callback_data=f"server_select_{server_id}"
+            ))
+        
+        current_server_name = servers_info.get(current_server_id, {}).get("name", current_server_id)
+        current_desc = servers_info.get(current_server_id, {}).get("description", "")
+        
+        text_lines = [
+            f"<b>Выбор сервера VPN</b>",
+            "",
+            f"Текущий сервер: <b>{current_server_name}</b>",
+            f"{current_desc}",
+            "",
+            "Выбери сервер, на котором будет создан твой VPN‑доступ:",
+        ]
+        
+        bot.reply_to(message, "\n".join(text_lines), reply_markup=keyboard)
+    
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("server_select_"))
+    def callback_server_select(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Обработчик выбора сервера через inline-кнопку."""
+        if not call.from_user:
+            bot.answer_callback_query(call.id, "Ошибка: не удалось определить пользователя.")
+            return
+        
+        user = find_user(call.from_user.id)
+        if not user or not user.active:
+            bot.answer_callback_query(call.id, "Ты не зарегистрирован в VPN‑сервисе.")
+            return
+        
+        server_id = call.data.replace("server_select_", "")
+        servers_info = get_available_servers()
+        
+        if server_id not in servers_info:
+            bot.answer_callback_query(call.id, f"Неизвестный сервер: {server_id}")
+            return
+        
+        # Обновляем предпочтение пользователя
+        user.preferred_server_id = server_id
+        upsert_user(user)
+        
+        server_name = servers_info[server_id]["name"]
+        server_desc = servers_info[server_id]["description"]
+        
+        bot.answer_callback_query(
+            call.id,
+            f"Выбран сервер: {server_name}",
+            show_alert=False,
+        )
+        
+        bot.edit_message_text(
+            f"✅ <b>Сервер выбран</b>\n\n"
+            f"Твой предпочтительный сервер: <b>{server_name}</b>\n"
+            f"{server_desc}\n\n"
+            f"Теперь при вызове /get_config будет создан доступ на этом сервере.",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+        )
+    
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
-        # Минимальный статус; позже можно расширить (срок доступа, текущий сервер, статистика).
-        safe_reply(
-            message,
-            "VPN доступ активен.\nТекущая нода: Timeweb (81.200.146.32).",
-        )
+        """Показывает статус доступа пользователя."""
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        
+        user = find_user(message.from_user.id)
+        if not user or not user.active:
+            safe_reply(
+                message,
+                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
+                "Попроси владельца добавить тебя командой /add_user.",
+            )
+            return
+        
+        preferred_server_id = user.preferred_server_id or "main"
+        servers_info = get_available_servers()
+        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+        
+        peer = find_peer_by_telegram_id(message.from_user.id, server_id=preferred_server_id)
+        
+        if peer and peer.active:
+            status_text = (
+                f"VPN доступ <b>активен</b>.\n"
+                f"Сервер: <b>{server_name}</b> ({preferred_server_id})\n"
+                f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
+            )
+        else:
+            status_text = (
+                f"VPN доступ <b>не создан</b>.\n"
+                f"Выбранный сервер: <b>{server_name}</b> ({preferred_server_id})\n"
+                f"Используй /get_config чтобы создать доступ."
+            )
+        
+        safe_reply(message, status_text)
 
     @bot.message_handler(commands=["my_config"])
     def cmd_my_config(message: types.Message) -> None:  # type: ignore[override]
