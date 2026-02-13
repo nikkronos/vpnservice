@@ -272,20 +272,35 @@ def main() -> None:
         
         preferred_server_id = user.preferred_server_id or "main"
         servers_info = get_available_servers()
-        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+        preferred_server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
         
+        # Сначала ищем peer на выбранном сервере
         peer = find_peer_by_telegram_id(message.from_user.id, server_id=preferred_server_id)
         
+        # Если не найден на выбранном, ищем на любом сервере (для обратной совместимости)
+        if not peer:
+            peer = find_peer_by_telegram_id(message.from_user.id, server_id=None)
+        
         if peer and peer.active:
+            # Показываем информацию о реальном peer (может быть на другом сервере)
+            actual_server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
             status_text = (
                 f"VPN доступ <b>активен</b>.\n"
-                f"Сервер: <b>{server_name}</b> ({preferred_server_id})\n"
+                f"Сервер: <b>{actual_server_name}</b> ({peer.server_id})\n"
                 f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
             )
+            # Если peer на другом сервере, чем выбранный — предупреждаем
+            if peer.server_id != preferred_server_id:
+                status_text += (
+                    f"\n\n"
+                    f"⚠️ Твой выбранный сервер: <b>{preferred_server_name}</b> ({preferred_server_id}), "
+                    f"но активный доступ на <b>{actual_server_name}</b>.\n"
+                    f"Чтобы создать доступ на выбранном сервере, используй /get_config."
+                )
         else:
             status_text = (
                 f"VPN доступ <b>не создан</b>.\n"
-                f"Выбранный сервер: <b>{server_name}</b> ({preferred_server_id})\n"
+                f"Выбранный сервер: <b>{preferred_server_name}</b> ({preferred_server_id})\n"
                 f"Используй /get_config чтобы создать доступ."
             )
         
