@@ -17,6 +17,7 @@ from .wireguard_peers import (
     WireGuardError,
     create_peer_and_config_for_user,
     get_available_servers,
+    regenerate_peer_and_config_for_user,
 )
 
 
@@ -175,11 +176,65 @@ def main() -> None:
 
     @bot.message_handler(commands=["regen"])
     def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
-        # На следующем этапе сюда добавим реальную регенерацию peer/конфига на сервере.
+        """
+        Команда для регенерации ключей и конфига существующего peer.
+        Удаляет старый peer из WireGuard, создаёт новый с новыми ключами и отправляет обновлённый конфиг.
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        
+        user = find_user(message.from_user.id)
+        if not user or not user.active:
+            safe_reply(
+                message,
+                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
+                "Попроси владельца добавить тебя командой /add_user.",
+            )
+            return
+        
+        chat_id = message.chat.id
+        telegram_id = message.from_user.id
+        
+        # Владелец использует client1 вручную, для него регенерация не нужна
+        if telegram_id == admin_id:
+            safe_reply(
+                message,
+                "У тебя (как у владельца) уже есть рабочий доступ client1,\n"
+                "подключенный вручную. Для регенерации используй стандартные инструменты WireGuard.",
+            )
+            return
+        
+        try:
+            # Определяем, на каком сервере искать peer для регенерации
+            preferred_server_id = user.preferred_server_id or "main"
+            
+            # Регенерируем peer (используем server_id существующего peer, если он отличается от preferred)
+            peer, client_config = regenerate_peer_and_config_for_user(telegram_id, server_id=preferred_server_id)
+            
+        except WireGuardError as exc:
+            logger.exception("Ошибка при регенерации peer для %s: %s", telegram_id, exc)
+            safe_reply(
+                message,
+                f"Не удалось регенерировать конфиг: {exc}\n"
+                "Убедись, что у тебя уже создан VPN‑доступ (используй /get_config для создания).",
+            )
+            return
+        
+        # Отправляем новый конфиг
+        filename = f"vpn_{peer.telegram_id}.conf"
+        _send_config_file(chat_id, client_config, filename)
+        
+        servers_info = get_available_servers()
+        server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
+        
         safe_reply(
             message,
-            "Запрос на регенерацию конфига принят (MVP: пока только текст). "
-            "В будущем здесь будет автоматическое пересоздание ключей и конфигов.",
+            f"✅ Конфиг регенерирован на сервере <b>{server_name}</b>.\n"
+            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
+            f"Новые ключи сгенерированы, старый peer удалён.\n\n"
+            f"⚠️ <b>Важно:</b> Обнови конфиг в приложении WireGuard на всех своих устройствах!\n"
+            f"Старый конфиг больше не будет работать.",
         )
 
     @bot.message_handler(commands=["server"])

@@ -163,6 +163,44 @@ def _add_peer_to_wireguard(interface: str, public_key: str, wg_ip: str, ssh_host
         raise WireGuardError(f"Не удалось добавить peer в WireGuard на сервере {ssh_host or 'local'}.") from exc
 
 
+def _remove_peer_from_wireguard(interface: str, public_key: str, ssh_host: Optional[str] = None, ssh_user: Optional[str] = None, ssh_key_path: Optional[str] = None) -> None:
+    """
+    Удаляет peer из конфигурации WireGuard через `wg set ... peer ... remove`.
+    
+    Если ssh_host указан — выполняет команду на удалённом сервере через SSH.
+    Если ssh_host не указан — выполняет локально (для ноды "main").
+    
+    ВАЖНО: это обновляет только runtime-конфигурацию. Для устойчивости через перезапуск
+    позже можно добавить отдельную процедуру синхронизации с /etc/wireguard/wg0.conf.
+    """
+    cmd = ["wg", "set", interface, "peer", public_key, "remove"]
+    
+    try:
+        if ssh_host:
+            # Удалённая нода через SSH
+            remote_cmd = " ".join(cmd)
+            ssh_target = f"{ssh_user}@{ssh_host}" if ssh_user else ssh_host
+            
+            ssh_cmd = ["ssh"]
+            if ssh_key_path:
+                ssh_cmd.extend(["-i", ssh_key_path])
+            ssh_cmd.extend(["-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes"])
+            ssh_cmd.append(ssh_target)
+            ssh_cmd.append(remote_cmd)
+            
+            logger.info("Удаляю peer с удалённой ноды %s через SSH: %s", ssh_host, remote_cmd)
+            subprocess.run(ssh_cmd, check=True)
+        else:
+            # Локальная нода
+            logger.info("Удаляю peer с локальной ноды: %s", " ".join(cmd))
+            subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        logger.exception("Ошибка при удалении peer из WireGuard: %s", exc)
+        # Не бросаем исключение, если peer уже не существует (это нормально при регенерации)
+        # Просто логируем предупреждение
+        logger.warning("Возможно, peer уже не существует в WireGuard (это нормально при регенерации)")
+
+
 def _build_client_config(
     private_key: str,
     wg_ip: str,
@@ -239,6 +277,103 @@ def create_peer_and_config_for_user(telegram_id: int, server_id: str = "main") -
     )
 
     return peer, client_config
+
+
+def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[str] = None) -> Tuple[Peer, str]:
+    """
+    Регенерирует ключи и конфиг для существующего peer.
+    
+    Процесс:
+    1. Находит существующий peer по telegram_id (и server_id, если указан).
+    2. Удаляет старый peer из WireGuard.
+    3. Генерирует новые ключи.
+    4. Добавляет новый peer в WireGuard с теми же IP и server_id.
+    5. Обновляет запись в peers.json.
+    6. Возвращает новый конфиг.
+    
+    Args:
+        telegram_id: Telegram ID пользователя.
+        server_id: Идентификатор ноды. Если не указан, используется server_id существующего peer.
+    
+    Returns:
+        (Peer, client_config_text) — новый peer и клиентский конфиг.
+    
+    Raises:
+        WireGuardError: если peer не найден или произошла ошибка при работе с WireGuard.
+    """
+    # Находим существующий peer
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+    if not existing_peer or not existing_peer.active:
+        raise WireGuardError(f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id or 'любом'}.")
+    
+    # Используем server_id существующего peer, если не был указан явно
+    target_server_id = server_id or existing_peer.server_id
+    if target_server_id != existing_peer.server_id:
+        raise WireGuardError(
+            f"Существующий peer находится на сервере {existing_peer.server_id}, "
+            f"а запрошена регенерация на {target_server_id}. Используй /get_config для создания peer на другом сервере."
+        )
+    
+    env = _load_env()
+    server_config = _get_server_config(target_server_id, env)
+    
+    # Удаляем старый peer из WireGuard
+    try:
+        _remove_peer_from_wireguard(
+            interface=server_config["interface"],
+            public_key=existing_peer.public_key,
+            ssh_host=server_config.get("ssh_host"),
+            ssh_user=server_config.get("ssh_user"),
+            ssh_key_path=server_config.get("ssh_key_path"),
+        )
+    except WireGuardError:
+        # Если удаление не удалось (peer уже не существует), продолжаем — это не критично
+        logger.warning("Не удалось удалить старый peer из WireGuard, продолжаем регенерацию")
+    
+    # Генерируем новые ключи
+    private_key, public_key = _generate_keypair()
+    
+    # Используем тот же IP, что был у старого peer
+    wg_ip = existing_peer.wg_ip
+    
+    # Добавляем новый peer в WireGuard с новыми ключами
+    _add_peer_to_wireguard(
+        interface=server_config["interface"],
+        public_key=public_key,
+        wg_ip=wg_ip,
+        ssh_host=server_config.get("ssh_host"),
+        ssh_user=server_config.get("ssh_user"),
+        ssh_key_path=server_config.get("ssh_key_path"),
+    )
+    
+    # Обновляем peer в локальном хранилище
+    new_peer = Peer(
+        telegram_id=telegram_id,
+        wg_ip=wg_ip,
+        public_key=public_key,
+        server_id=target_server_id,
+        active=True,
+    )
+    upsert_peer(new_peer)
+    
+    # Формируем новый клиентский конфиг
+    client_config = _build_client_config(
+        private_key=private_key,
+        wg_ip=wg_ip,
+        server_public_key=server_config["server_public_key"],
+        endpoint_host=server_config["endpoint_host"],
+        endpoint_port=str(server_config["endpoint_port"]),
+        dns=server_config["dns"],
+    )
+    
+    logger.info(
+        "Регенерирован peer для пользователя %s на сервере %s (новый public_key: %s...)",
+        telegram_id,
+        target_server_id,
+        public_key[:20],
+    )
+    
+    return new_peer, client_config
 
 
 def get_available_servers() -> Dict[str, Dict[str, str]]:
