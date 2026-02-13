@@ -116,21 +116,38 @@ def main() -> None:
         
         try:
             # Ищем peer на выбранном сервере
-            peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
-            if peer and peer.active:
-                # Peer уже существует на выбранном сервере — формируем конфиг заново
-                # (пока не храним приватный ключ, поэтому пересоздаём peer для генерации конфига)
-                # В будущем можно хранить приватный ключ или регенерировать только при /regen
+            peer_on_preferred = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
+            
+            # Также проверяем, есть ли peer на любом другом сервере
+            peer_any = find_peer_by_telegram_id(telegram_id, server_id=None)
+            
+            if peer_on_preferred and peer_on_preferred.active:
+                # Peer уже существует на выбранном сервере
+                servers_info = get_available_servers()
+                server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                 safe_reply(
                     message,
-                    f"Для тебя уже создан VPN‑доступ на сервере <b>{preferred_server_id}</b>.\n"
+                    f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}).\n"
                     "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
                     "ничего делать не нужно.\n"
                     "Если ты потерял конфиг или нужно его обновить, используй /regen для регенерации.",
                 )
                 return
+            
+            # Если есть peer на другом сервере, но пользователь выбрал новый — создаём peer на новом сервере
+            # (старый peer будет перезаписан в peers.json, так как ключ — telegram_id)
+            if peer_any and peer_any.active and peer_any.server_id != preferred_server_id:
+                servers_info = get_available_servers()
+                old_server_name = servers_info.get(peer_any.server_id, {}).get("name", peer_any.server_id)
+                new_server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+                logger.info(
+                    "Пользователь %s переключается с сервера %s на %s, создаём новый peer",
+                    telegram_id,
+                    peer_any.server_id,
+                    preferred_server_id,
+                )
 
-            # Peer ещё нет на выбранном сервере — создаём новый peer и конфиг
+            # Создаём новый peer на выбранном сервере
             peer, client_config = create_peer_and_config_for_user(telegram_id, server_id=preferred_server_id)
 
         except WireGuardError as exc:
