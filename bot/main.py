@@ -160,7 +160,7 @@ def main() -> None:
             )
             return
 
-        filename = f"vpn_{peer.telegram_id}.conf"
+        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()
@@ -222,7 +222,7 @@ def main() -> None:
             return
         
         # Отправляем новый конфиг
-        filename = f"vpn_{peer.telegram_id}.conf"
+        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
         
         servers_info = get_available_servers()
