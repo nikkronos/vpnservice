@@ -492,6 +492,55 @@ def main() -> None:
 
         safe_reply(message, "\n".join(lines))
 
+    @bot.message_handler(commands=["stats"])
+    def cmd_stats(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Для владельца: сводка — сколько пользователей, сколько выданных конфигов (по серверам).
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        if not is_owner(message.from_user.id, admin_id):
+            safe_reply(message, "Эта команда доступна только владельцу VPN.")
+            return
+
+        try:
+            users = get_all_users()
+            peers = get_all_peers()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Ошибка при чтении данных для /stats: %s", e)
+            safe_reply(message, "Ошибка при чтении данных. Попробуй позже.")
+            return
+
+        users_total = len(users)
+        users_active = sum(1 for u in users if u.active)
+        peers_total = len(peers)
+        peers_active = sum(1 for p in peers if p.active)
+
+        by_server: dict[str, int] = {}
+        for p in peers:
+            if p.active:
+                by_server[p.server_id] = by_server.get(p.server_id, 0) + 1
+
+        servers_info = get_available_servers()
+        server_lines = []
+        for sid, count in sorted(by_server.items()):
+            name = servers_info.get(sid, {}).get("name", sid)
+            server_lines.append(f"  • {name} ({sid}): {count}")
+
+        lines = [
+            "<b>📊 Сводка VPN</b>",
+            "",
+            f"<b>Пользователи:</b> {users_active} активных из {users_total} всего",
+            f"<b>Выдано конфигов (peers):</b> {peers_active} активных из {peers_total} всего",
+            "",
+            "<b>По серверам (активные peers):</b>",
+            "\n".join(server_lines) if server_lines else "  — пока нет",
+            "",
+            "<i>Одновременных подключений по устройствам бот не считает — один конфиг может быть на нескольких устройствах, но одновременно активен только один.</i>",
+        ]
+        safe_reply(message, "\n".join(lines))
+
     logger.info("Starting VPN Telegram bot (pyTelegramBotAPI)...")
     bot.infinity_polling(skip_pending=True)
 
