@@ -509,7 +509,11 @@ def main() -> None:
             peers = get_all_peers()
         except Exception as e:  # noqa: BLE001
             logger.exception("Ошибка при чтении данных для /stats: %s", e)
-            safe_reply(message, "Ошибка при чтении данных. Попробуй позже.")
+            safe_reply(
+                message,
+                f"Ошибка при чтении данных: {e!r}\n"
+                "Проверь на сервере наличие и права на bot/data/users.json и bot/data/peers.json.",
+            )
             return
 
         users_total = len(users)
