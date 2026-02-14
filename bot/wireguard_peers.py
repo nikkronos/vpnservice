@@ -29,25 +29,51 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
     Извлекает конфигурацию для указанной ноды из env_vars.txt.
     
     Формат переменных в env_vars.txt:
-    - Для server_id="main": WG_SERVER_PUBLIC_KEY, WG_INTERFACE, WG_NETWORK_CIDR, WG_ENDPOINT_HOST, WG_ENDPOINT_PORT, WG_DNS
-    - Для server_id="eu1": WG_EU1_SERVER_PUBLIC_KEY, WG_EU1_INTERFACE, WG_EU1_NETWORK_CIDR, WG_EU1_ENDPOINT_HOST, WG_EU1_ENDPOINT_PORT, WG_EU1_DNS
-    - Также для удалённых нод: WG_EU1_SSH_HOST, WG_EU1_SSH_USER (опционально: WG_EU1_SSH_KEY_PATH)
+    - Для server_id="main":
+      WG_SERVER_PUBLIC_KEY, WG_INTERFACE, WG_NETWORK_CIDR, WG_ENDPOINT_HOST, WG_ENDPOINT_PORT, WG_DNS
+    - Для server_id="eu1":
+      WG_EU1_SERVER_PUBLIC_KEY, WG_EU1_INTERFACE, WG_EU1_NETWORK_CIDR, WG_EU1_ENDPOINT_HOST, WG_EU1_ENDPOINT_PORT, WG_EU1_DNS
+      (также опционально: WG_EU1_SSH_HOST, WG_EU1_SSH_USER, WG_EU1_SSH_KEY_PATH)
     
-    Возвращает словарь с ключами: server_public_key, interface, network_cidr, endpoint_host, endpoint_port, dns, ssh_host, ssh_user, ssh_key_path.
+    Возвращает словарь с ключами:
+    server_public_key, interface, network_cidr, endpoint_host, endpoint_port, dns, ssh_host, ssh_user, ssh_key_path.
     """
-    prefix = "" if server_id == "main" else f"{server_id.upper()}_"
-    
-    config = {
-        "server_public_key": env.get(f"{prefix}WG_SERVER_PUBLIC_KEY") or env.get("WG_SERVER_PUBLIC_KEY"),
-        "interface": env.get(f"{prefix}WG_INTERFACE") or env.get("WG_INTERFACE", "wg0"),
-        "network_cidr": env.get(f"{prefix}WG_NETWORK_CIDR") or env.get("WG_NETWORK_CIDR", "10.0.0.0/24"),
-        "endpoint_host": env.get(f"{prefix}WG_ENDPOINT_HOST") or env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"),
-        "endpoint_port": env.get(f"{prefix}WG_ENDPOINT_PORT") or env.get("WG_ENDPOINT_PORT", "51820"),
-        "dns": env.get(f"{prefix}WG_DNS") or env.get("WG_DNS", "1.1.1.1"),
-        "ssh_host": env.get(f"{prefix}WG_SSH_HOST"),
-        "ssh_user": env.get(f"{prefix}WG_SSH_USER"),
-        "ssh_key_path": env.get(f"{prefix}WG_SSH_KEY_PATH"),
-    }
+    if server_id == "main":
+        # Базовая нода использует "плоские" переменные без префикса.
+        config = {
+            "server_public_key": env.get("WG_SERVER_PUBLIC_KEY"),
+            "interface": env.get("WG_INTERFACE", "wg0"),
+            "network_cidr": env.get("WG_NETWORK_CIDR", "10.0.0.0/24"),
+            "endpoint_host": env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"),
+            "endpoint_port": env.get("WG_ENDPOINT_PORT", "51820"),
+            "dns": env.get("WG_DNS", "1.1.1.1"),
+            "ssh_host": env.get("WG_SSH_HOST"),
+            "ssh_user": env.get("WG_SSH_USER"),
+            "ssh_key_path": env.get("WG_SSH_KEY_PATH"),
+        }
+    else:
+        # Для дополнительных нод используем схему WG_<SERVERID>_* (как в env_vars.example.txt).
+        upper_id = server_id.upper()
+        prefix = f"WG_{upper_id}_"
+
+        def _get(name: str, fallback_main: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
+            if prefix + name in env:
+                return env[prefix + name]
+            if fallback_main and fallback_main in env:
+                return env[fallback_main]
+            return default
+
+        config = {
+            "server_public_key": _get("SERVER_PUBLIC_KEY", fallback_main="WG_SERVER_PUBLIC_KEY"),
+            "interface": _get("INTERFACE", fallback_main="WG_INTERFACE", default="wg0"),
+            "network_cidr": _get("NETWORK_CIDR", fallback_main="WG_NETWORK_CIDR", default="10.0.0.0/24"),
+            "endpoint_host": _get("ENDPOINT_HOST", fallback_main="WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"),
+            "endpoint_port": _get("ENDPOINT_PORT", fallback_main="WG_ENDPOINT_PORT", default="51820"),
+            "dns": _get("DNS", fallback_main="WG_DNS", default="1.1.1.1"),
+            "ssh_host": _get("SSH_HOST"),
+            "ssh_user": _get("SSH_USER"),
+            "ssh_key_path": _get("SSH_KEY_PATH"),
+        }
     
     if not config["server_public_key"]:
         raise WireGuardError(f"WG_{prefix}SERVER_PUBLIC_KEY не задан в env_vars.txt для сервера {server_id}.")
@@ -382,16 +408,30 @@ def get_available_servers() -> Dict[str, Dict[str, str]]:
     
     Формат: {"server_id": {"name": "...", "description": "..."}}
     """
-    # Список серверов можно расширять через env_vars.txt или конфиг-файл.
-    # Пока хардкодим базовые варианты.
-    return {
+    # Базовый сервер "main" всегда доступен.
+    servers: Dict[str, Dict[str, str]] = {
         "main": {
             "name": "Россия (Timeweb)",
             "description": "Низкий пинг, высокая скорость. Подходит для YouTube, Instagram и других сервисов.",
         },
-        "eu1": {
-            "name": "Европа",
-            "description": "Доступ к ChatGPT и другим сервисам, недоступным в РФ. Пинг выше (~50-120 мс).",
-        },
     }
+
+    # Попытаться включить дополнительные ноды на основе env_vars.txt.
+    try:
+        env = _load_env()
+    except Exception:
+        env = {}
+
+    # Нода "eu1" (Европа) считается доступной, только если явно задан её публичный ключ и endpoint.
+    has_eu1 = bool(
+        env.get("WG_EU1_SERVER_PUBLIC_KEY")
+        and (env.get("WG_EU1_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"))
+    )
+    if has_eu1:
+        servers["eu1"] = {
+            "name": "Европа",
+            "description": "Доступ к ChatGPT и другим сервисам, недоступным в РФ. Пинг выше (~50–120 мс).",
+        }
+
+    return servers
 
