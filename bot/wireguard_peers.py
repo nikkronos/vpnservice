@@ -74,11 +74,18 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
             "ssh_user": _get("SSH_USER"),
             "ssh_key_path": _get("SSH_KEY_PATH"),
         }
+        # Для удалённых нод: если SSH_HOST не задан — используем ENDPOINT_HOST (тот же хост)
+        if server_id != "main" and config.get("endpoint_host") and not config.get("ssh_host"):
+            config["ssh_host"] = config["endpoint_host"]
+            if not config.get("ssh_user"):
+                config["ssh_user"] = "root"
+            logger.info("Для ноды %s SSH_HOST не задан в env, используем endpoint_host=%s", server_id, config["ssh_host"])
     
+    prefix = "WG_" if server_id == "main" else f"WG_{server_id.upper()}_"
     if not config["server_public_key"]:
-        raise WireGuardError(f"WG_{prefix}SERVER_PUBLIC_KEY не задан в env_vars.txt для сервера {server_id}.")
+        raise WireGuardError(f"{prefix}SERVER_PUBLIC_KEY не задан в env_vars.txt для сервера {server_id}.")
     if not config["endpoint_host"]:
-        raise WireGuardError(f"WG_{prefix}ENDPOINT_HOST или VPN_SERVER_HOST не задан в env_vars.txt для сервера {server_id}.")
+        raise WireGuardError(f"{prefix}ENDPOINT_HOST или VPN_SERVER_HOST не задан в env_vars.txt для сервера {server_id}.")
     
     return config
 
@@ -268,6 +275,11 @@ def create_peer_and_config_for_user(telegram_id: int, server_id: str = "main") -
     """
     env = _load_env()
     server_config = _get_server_config(server_id, env)
+
+    logger.info(
+        "Создаю peer для telegram_id=%s на ноде server_id=%s, ssh_host=%s, network_cidr=%s",
+        telegram_id, server_id, server_config.get("ssh_host"), server_config.get("network_cidr"),
+    )
 
     wg_ip = _allocate_ip(server_config["network_cidr"], server_id)
     private_key, public_key = _generate_keypair()
