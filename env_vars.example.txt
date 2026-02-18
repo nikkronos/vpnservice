@@ -2,6 +2,9 @@
 BOT_TOKEN=your_bot_token_here
 ADMIN_ID=your_telegram_id
 
+# Ссылка MTProto-прокси для Telegram (команда /proxy в боте). Опционально.
+# MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=...
+
 # Server / VPN node (для автоматизации)
 # ВАЖНО: реальные значения прописываются только в env_vars.txt на сервере/локально, этот файл — пример.
 VPN_SERVER_HOST=81.200.146.32
@@ -35,4 +38,7 @@ WG_DNS=1.1.1.1
 # WG_EU1_SSH_HOST=your_eu_server_ip
 # WG_EU1_SSH_USER=root
 # WG_EU1_SSH_KEY_PATH=/path/to/ssh/key  # опционально, если не используется стандартный ~/.ssh/id_rsa
+#
+# Скрипт добавления редиректа для VPN+GPT на eu1 (бот вызывает по SSH). По умолчанию /opt/vpnservice/scripts/add-ss-redirect.sh
+# WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh
 

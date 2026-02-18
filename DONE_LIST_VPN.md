@@ -94,6 +94,34 @@
     - `README_FOR_NEXT_AGENT.md`: добавлена информация о MTProto‑прокси в разделы "Серверы" и "Как этим пользоваться";
     - `ROADMAP_VPN.md`: отмечена выполненная задача по установке MTProto‑прокси.
 
+## 2026-02-18 — Интеграция бота: инструкции, MTProto-ссылка, VPN+GPT
+
+- **Команды бота**
+  - Добавлена команда `/instruction` — пошаговая инструкция по подключению (ПК и iPhone/iPad); тексты загружаются из `docs/bot-instruction-texts/instruction_pc_short.txt` и `instruction_ios_short.txt`.
+  - Добавлена команда `/proxy` — отправка ссылки MTProto‑прокси и краткой инструкции из `instruction_mtproto_short.txt`; ссылка читается из переменной окружения `MTPROTO_PROXY_LINK` (на Timeweb добавлена в `env_vars.txt`).
+  - После успешной выдачи конфига по `/get_config` бот автоматически отправляет объединённую инструкцию (ПК + iOS).
+  - В приветствии `/start` добавлены строки про `/instruction` и `/proxy`.
+
+- **Конфигурация бота**
+  - В `bot/config.py`: добавлены поля `base_dir`, `mtproto_proxy_link`; загрузка `MTPROTO_PROXY_LINK` из env (опционально).
+  - В `docs/deployment.md`: раздел «Обновление бота на Timeweb» — напоминание, что `env_vars.txt` на сервере не в Git и новые переменные нужно добавлять вручную; команды для `git pull`, перезапуска сервиса и просмотра логов.
+
+- **Опция VPN+GPT для Европы (eu1)**
+  - При выборе сервера «Европа» в `/server` добавлен второй шаг: выбор типа профиля — «Обычный VPN» или «VPN+GPT (обход блокировок ChatGPT)».
+  - Для VPN+GPT: выделение IP из пула **10.1.0.8–10.1.0.254**; после добавления peer в WireGuard бот по SSH на eu1 вызывает скрипт `add-ss-redirect.sh <IP>`, добавляющий iptables‑редирект TCP 80/443 на порт 1081 (ss-redir).
+  - Имя конфига для VPN+GPT: `vpn_<id>_eu1_gpt.conf`; в сообщении бота явно указан тип «VPN+GPT».
+  - В `bot/storage.py`: у `User` — поле `preferred_profile_type` (vpn / vpn_gpt); у `Peer` — поле `profile_type`; при регенерации конфига тип профиля сохраняется.
+  - В `bot/wireguard_peers.py`: функции `_allocate_ip_in_pool()`, `_run_add_ss_redirect()`; в `create_peer_and_config_for_user()` добавлен параметр `profile_type`; опциональная переменная env `WG_EU1_ADD_SS_REDIRECT_SCRIPT` (по умолчанию `/opt/vpnservice/scripts/add-ss-redirect.sh`).
+
+- **Скрипт add-ss-redirect.sh на eu1**
+  - Пример скрипта: `docs/scripts/add-ss-redirect.sh.example`; развёртывание и путь описаны в `docs/deployment.md`.
+  - На сервере eu1 (Fornex) скрипт развёрнут в `/opt/vpnservice/scripts/add-ss-redirect.sh`, выполнен `chmod +x`, проверен вызов с аргументом `10.1.0.8` и наличие правил в iptables.
+  - На Timeweb в `env_vars.txt` добавлена переменная `WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh` (опционально, путь по умолчанию совпадает).
+
+- **Документация и планы**
+  - Спека `docs/specs/spec-03-bot-integration-instructions.md`: отмечены выполненные пункты (инструкции, MTProto, VPN+GPT, скрипт).
+  - `ROADMAP_VPN.md`: отмечены выполненные задачи (выдача инструкции, команда /proxy, опция VPN+GPT в боте); оставлена задача «На сервере eu1 развернуть add-ss-redirect.sh» как выполненная по факту (скрипт развёрнут).
+
 # DONE_LIST_VPN
 
 История выполненных задач по проекту VPN.

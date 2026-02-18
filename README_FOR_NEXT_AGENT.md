@@ -90,20 +90,25 @@
     - на iPhone: включать профиль `iphone` (и выключать остальные VPN/прокси на устройстве).
   - у друга:
     - на ПК/iPhone/iPad: включать наши профили `friend-pc`, `friend-iphone`, `friend-ipad` соответственно (без V2RayTun).
+  - **Через бота (Европа):** в боте выбрать сервер «Европа» → тип «VPN+GPT» → `/get_config`; бот выдаст конфиг с IP из пула 10.1.0.8–254 и на eu1 добавит редирект на ss-redir — один профиль для VPN и обхода ChatGPT.
 - **Telegram через MTProto‑прокси** (обход блокировок Telegram):
   - у владельца и друга:
     - в Telegram (iOS/Android/Desktop): добавить MTProto‑прокси через ссылку `tg://proxy?server=185.21.8.91&port=443&secret=29d11c61ea1b644d75299dd0706c2da3`;
+    - или в боте: команда `/proxy` — бот пришлёт ссылку и краткую инструкцию;
     - прокси работает независимо от VPN (можно использовать только прокси для Telegram, без включения VPN);
     - пинг через прокси: ~45 мс (приемлемо для Telegram).
 
+## Бот (команды и конфиг)
+
+- **Команды:** `/start`, `/get_config`, `/my_config`, `/server`, `/regen`, `/instruction` (инструкция ПК + iOS), `/proxy` (ссылка MTProto и инструкция), `/status`; для владельца: `/add_user`, `/users`, `/stats`.
+- **Конфиг бота:** на Timeweb в `/opt/vpnservice/env_vars.txt` (не в Git): `BOT_TOKEN`, `ADMIN_ID`, `MTPROTO_PROXY_LINK`, переменные `WG_*` и `WG_EU1_*`, при необходимости `WG_EU1_ADD_SS_REDIRECT_SCRIPT`. Пример переменных — `env_vars.example.txt`.
+- **Инструкции для пользователей:** тексты в `docs/bot-instruction-texts/` (instruction_pc_short.txt, instruction_ios_short.txt, instruction_mtproto_short.txt). После выдачи конфига бот автоматически отправляет инструкцию по подключению.
+
 ## Что планируется дальше (высокоуровнево)
 
-- Оформить этот дизайн как спеки в `docs/specs/` (архитектура WireGuard+Shadowsocks+MTProto, сценарии подключения, чеклисты).
-- Добавить:
-  - второй/резервный VPN‑сервер (например, отдельный EU‑сервер только под Shadowsocks/WireGuard);
-  - автоматическую выдачу инструкций и ссылки MTProto через бота (см. docs/specs/spec-03-bot-integration-instructions.md и docs/bot-instruction-texts/).
-- **Бот:** для выдачи ссылки MTProto в переменных окружения бота (на сервере, где крутится бот) добавить `MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=29d11c61ea1b644d75299dd0706c2da3` (или читать из env_vars.txt). Тексты инструкций для пользователей лежат в `docs/bot-instruction-texts/`.
-- Вынести рабочие скрипты/ansible‑ролли/инструкции в отдельный репозиторий `nikkronos/vpnservice` (или синхронизировать с существующим).
+- Оформить и актуализировать спеки в `docs/specs/` (архитектура, сценарии, чеклисты).
+- Добавить второй/резервный VPN‑сервер при необходимости; улучшение совместимости сервисов (один профиль для YouTube + GPT + Telegram + сайтов) — см. `ROADMAP_VPN.md`.
+- Репозиторий кода бота и документации: `nikkronos/vpnservice`; коммиты из папки `Projects/VPN/`; на Timeweb — `git pull` в `/opt/vpnservice` и перезапуск `vpn-bot.service`; новые переменные env добавлять вручную в `env_vars.txt` на сервере.
 
 ## Критические замечания для следующего агента
 

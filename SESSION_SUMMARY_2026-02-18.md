@@ -77,6 +77,12 @@
      - `DONE_LIST_VPN.md` — зафиксированы изменения этой сессии (добавлена запись об установке MTProto).
      - `SESSION_SUMMARY_2026-02-18.md` — резюме текущей сессии.
 
+7. **Интеграция бота: инструкции, MTProto, VPN+GPT**
+   - Добавлены команды `/instruction` (инструкция ПК + iOS из `docs/bot-instruction-texts/`) и `/proxy` (ссылка из `MTPROTO_PROXY_LINK` + инструкция MTProto). После выдачи конфига по `/get_config` бот автоматически отправляет инструкцию по подключению.
+   - Для сервера «Европа» (eu1): при выборе показывается тип профиля — «Обычный VPN» или «VPN+GPT». VPN+GPT: пул IP 10.1.0.8–254, после создания peer бот по SSH на eu1 вызывает `add-ss-redirect.sh <IP>`, конфиг — `vpn_<id>_eu1_gpt.conf`.
+   - На eu1 развёрнут скрипт `/opt/vpnservice/scripts/add-ss-redirect.sh`; на Timeweb в `env_vars.txt` добавлены `MTPROTO_PROXY_LINK` и при необходимости `WG_EU1_ADD_SS_REDIRECT_SCRIPT`. В `docs/deployment.md` — раздел про обновление бота и про скрипт add-ss-redirect.
+   - Обновлены `DONE_LIST_VPN.md`, `README_FOR_NEXT_AGENT.md`, `ROADMAP_VPN.md`, спека spec-03, `env_vars.example.txt`.
+
 ## Важные изменения в конфигурации
 
 - **WireGuard**
