@@ -1,8 +1,19 @@
+# Секреты - НИКОГДА не коммитить!
 env_vars.txt
-.env
-__pycache__/
-*.pyc
+*.key
+*.pem
+*.crt
+*.secret
 
-# Runtime data (пользователи, peers, приватные ключи и т.п.)
-bot/data/
+# Временные файлы
+*.tmp
+*.log
+*.bak
 
+# Резервные копии с сервера (если будут синхронизироваться)
+vpn-backups/
+backups/
+
+# OS файлы
+.DS_Store
+Thumbs.db
