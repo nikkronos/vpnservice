@@ -1,6 +1,17 @@
-# Деплой и сервер VPN (Fornex)
+# Деплой и сервер VPN
 
-## Сервер Fornex
+## Распределение серверов
+
+| Сервер | Назначение | Что крутится |
+|--------|------------|--------------|
+| **Timeweb** | Хостинг бота и (ранее) нода РФ | Telegram‑бот VPN: код в `/opt/vpnservice`, сервис `vpn-bot.service`. Бот выдаёт конфиги, создаёт пиры на Timeweb (нода РФ) и на Fornex (нода eu1) по SSH. Переменные окружения бота: `env_vars.txt` на Timeweb (BOT_TOKEN, WG_*, WG_EU1_*, при необходимости MTPROTO_PROXY_LINK). |
+| **Fornex (eu1)** | VPN‑нода «Европа» | WireGuard (wg0), Shadowsocks‑клиент (ss-redir), MTProto‑прокси (Docker). IP 185.21.8.91. Конфиги: `/etc/wireguard/`, `/etc/shadowsocks-libev/`, бэкапы в `/root/vpn-backups/`. |
+
+Код бота хранится в репозитории `nikkronos/vpnservice`; на Timeweb в `/opt/vpnservice` делается `git pull` и перезапуск `vpn-bot.service`. Файлы между серверами: бот на Timeweb, VPN‑сервисы (WireGuard, SS, MTProto) на Fornex.
+
+---
+
+## Сервер Fornex (eu1)
 
 - **Провайдер**: Fornex
 - **ОС**: Ubuntu 24.04 LTS

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Добавляет редирект TCP 80/443 для указанного IP клиента WireGuard на порт 1081 (ss-redir).
+# Использование: sudo ./add-ss-redirect.sh 10.1.0.8
+# Запускается с сервера eu1 (Fornex) или по SSH из бота после создания peer типа VPN+GPT.
+
+set -e
+IP="${1:-}"
+if [ -z "$IP" ]; then
+  echo "Usage: $0 <client_ip/32>" >&2
+  echo "Example: $0 10.1.0.8" >&2
+  exit 1
+fi
+
+# Нормализуем до /32 если передали только IP
+if [[ "$IP" != *"/"* ]]; then
+  IP="${IP}/32"
+fi
+
+iptables -t nat -A PREROUTING -i wg0 -s "$IP" -p tcp -m multiport --dports 80,443 -j REDIRECT --to-ports 1081
+echo "Added redirect for $IP to port 1081"
