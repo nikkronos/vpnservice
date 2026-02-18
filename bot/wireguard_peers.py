@@ -36,7 +36,7 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
       (также опционально: WG_EU1_SSH_HOST, WG_EU1_SSH_USER, WG_EU1_SSH_KEY_PATH)
     
     Возвращает словарь с ключами:
-    server_public_key, interface, network_cidr, endpoint_host, endpoint_port, dns, ssh_host, ssh_user, ssh_key_path.
+    server_public_key, interface, network_cidr, endpoint_host, endpoint_port, dns, ssh_host, ssh_user, ssh_key_path, mtu (опционально).
     """
     if server_id == "main":
         # Базовая нода использует "плоские" переменные без префикса.
@@ -50,6 +50,7 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
             "ssh_host": env.get("WG_SSH_HOST"),
             "ssh_user": env.get("WG_SSH_USER"),
             "ssh_key_path": env.get("WG_SSH_KEY_PATH"),
+            "mtu": env.get("WG_MTU") or None,
         }
     else:
         # Для дополнительных нод используем схему WG_<SERVERID>_* (как в env_vars.example.txt).
@@ -73,6 +74,7 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
             "ssh_host": _get("SSH_HOST"),
             "ssh_user": _get("SSH_USER"),
             "ssh_key_path": _get("SSH_KEY_PATH"),
+            "mtu": _get("MTU"),
         }
         # Для удалённых нод: если SSH_HOST не задан — используем ENDPOINT_HOST (тот же хост)
         if server_id != "main" and config.get("endpoint_host") and not config.get("ssh_host"):
@@ -168,7 +170,9 @@ def _add_peer_to_wireguard(interface: str, public_key: str, wg_ip: str, ssh_host
     ВАЖНО: это обновляет только runtime-конфигурацию. Для устойчивости через перезапуск
     позже можно добавить отдельную процедуру синхронизации с /etc/wireguard/wg0.conf.
     """
-    cmd = ["wg", "set", interface, "peer", public_key, "allowed-ips", wg_ip]
+    if not (wg_ip and wg_ip.strip()):
+        raise WireGuardError("Недопустимый пустой адрес peer (allowed-ips); проверь peers.json и network_cidr в env.")
+    cmd = ["wg", "set", interface, "peer", public_key, "allowed-ips", wg_ip.strip()]
     
     try:
         if ssh_host:
@@ -241,16 +245,23 @@ def _build_client_config(
     endpoint_host: str,
     endpoint_port: str,
     dns: str,
+    mtu: Optional[str] = None,
 ) -> str:
     """
     Формирует текст клиентского WireGuard-конфига для нового пользователя.
+    Если задан mtu (например WG_EU1_MTU=1280), в [Interface] добавляется строка MTU.
     """
+    interface_lines = [
+        "[Interface]",
+        f"PrivateKey = {private_key}",
+        f"Address = {wg_ip}",
+        f"DNS = {dns}",
+    ]
+    if mtu and mtu.strip():
+        interface_lines.append(f"MTU = {mtu.strip()}")
     return (
-        "[Interface]\n"
-        f"PrivateKey = {private_key}\n"
-        f"Address = {wg_ip}\n"
-        f"DNS = {dns}\n"
-        "\n"
+        "\n".join(interface_lines)
+        + "\n\n"
         "[Peer]\n"
         f"PublicKey = {server_public_key}\n"
         f"Endpoint = {endpoint_host}:{endpoint_port}\n"
@@ -312,6 +323,7 @@ def create_peer_and_config_for_user(telegram_id: int, server_id: str = "main") -
         endpoint_host=server_config["endpoint_host"],
         endpoint_port=str(server_config["endpoint_port"]),
         dns=server_config["dns"],
+        mtu=server_config.get("mtu"),
     )
 
     return peer, client_config
@@ -402,6 +414,7 @@ def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[st
         endpoint_host=server_config["endpoint_host"],
         endpoint_port=str(server_config["endpoint_port"]),
         dns=server_config["dns"],
+        mtu=server_config.get("mtu"),
     )
     
     logger.info(
