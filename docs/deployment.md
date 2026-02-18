@@ -9,6 +9,27 @@
 
 Код бота хранится в репозитории `nikkronos/vpnservice`; на Timeweb в `/opt/vpnservice` делается `git pull` и перезапуск `vpn-bot.service`. Файлы между серверами: бот на Timeweb, VPN‑сервисы (WireGuard, SS, MTProto) на Fornex.
 
+### Обновление бота на Timeweb
+
+1. Подключись по SSH к серверу Timeweb.
+2. Обновить код и перезапустить сервис:
+   ```bash
+   cd /opt/vpnservice && git pull origin main
+   sudo systemctl restart vpn-bot.service
+   ```
+3. **Переменные окружения:** файл `env_vars.txt` на сервере **не в Git** (в репозитории только `env_vars.example.txt`). Если в проекте добавили новую переменную (например `MTPROTO_PROXY_LINK`), её нужно **вручную добавить в `/opt/vpnservice/env_vars.txt` на сервере**, затем перезапустить бота:
+   ```bash
+   sudo nano /opt/vpnservice/env_vars.txt
+   # добавить строку, например: MTPROTO_PROXY_LINK=tg://proxy?server=...
+   sudo systemctl restart vpn-bot.service
+   ```
+   Правки в `env_vars.txt` на своём ПК (в папке проекта) на работу бота на Timeweb **не влияют** — бот читает только файл на сервере.
+
+4. Проверить логи при сбоях:
+   ```bash
+   sudo journalctl -u vpn-bot.service -n 100 --no-pager
+   ```
+
 ---
 
 ## Сервер Fornex (eu1)

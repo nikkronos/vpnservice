@@ -1,5 +1,6 @@
 import io
 import logging
+from pathlib import Path
 
 import telebot
 from telebot import types
@@ -24,6 +25,17 @@ from .wireguard_peers import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _load_instruction_text(base_dir: Path, name: str) -> str:
+    """Загружает текст инструкции из docs/bot-instruction-texts/instruction_<name>_short.txt."""
+    path = base_dir / "docs" / "bot-instruction-texts" / f"instruction_{name}_short.txt"
+    if not path.exists():
+        return f"(Файл инструкции не найден: {path.name})"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:  # noqa: BLE001
+        return f"(Не удалось прочитать инструкцию {path.name})"
 
 
 def main() -> None:
@@ -54,6 +66,8 @@ def main() -> None:
             "/get_config — получить или переслать свой конфиг",
             "/server — выбрать сервер (РФ/EU)",
             "/regen — запросить обновление конфига (перегенерировать ключи)",
+            "/instruction — как подключиться (ПК / iPhone–iPad)",
+            "/proxy — ссылка для Telegram (прокси при блокировках)",
             "/status — показать базовую информацию о доступе",
             "/my_config — синоним /get_config",
         ]
@@ -173,6 +187,13 @@ def main() -> None:
             f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
             "Импортируй файл в приложение WireGuard на своём устройстве и включи туннель.\n"
             f"\nЧтобы выбрать другой сервер, используй команду /server.",
+        )
+        # Отправляем пошаговую инструкцию по подключению (ПК + iOS)
+        instr_pc = _load_instruction_text(config.base_dir, "pc")
+        instr_ios = _load_instruction_text(config.base_dir, "ios")
+        safe_reply(
+            message,
+            f"{instr_pc}\n\n——\n\n{instr_ios}",
         )
 
     @bot.message_handler(commands=["regen"])
@@ -378,6 +399,31 @@ def main() -> None:
             )
         
         safe_reply(message, status_text)
+
+    @bot.message_handler(commands=["instruction"])
+    def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
+        """Отправляет пошаговую инструкцию по подключению (ПК и iPhone/iPad)."""
+        instr_pc = _load_instruction_text(config.base_dir, "pc")
+        instr_ios = _load_instruction_text(config.base_dir, "ios")
+        safe_reply(
+            message,
+            f"{instr_pc}\n\n——\n\n{instr_ios}",
+        )
+
+    @bot.message_handler(commands=["proxy"])
+    def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
+        """Отправляет ссылку MTProto-прокси для Telegram и краткую инструкцию."""
+        if config.mtproto_proxy_link:
+            instr = _load_instruction_text(config.base_dir, "mtproto")
+            safe_reply(
+                message,
+                f"{config.mtproto_proxy_link}\n\n{instr}",
+            )
+        else:
+            safe_reply(
+                message,
+                "Ссылка на прокси для Telegram не настроена. Обратись к владельцу бота.",
+            )
 
     @bot.message_handler(commands=["my_config"])
     def cmd_my_config(message: types.Message) -> None:  # type: ignore[override]

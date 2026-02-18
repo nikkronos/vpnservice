@@ -7,6 +7,8 @@ from typing import Dict
 class BotConfig:
     bot_token: str
     admin_id: int
+    base_dir: pathlib.Path
+    mtproto_proxy_link: str | None = None
 
 
 def _parse_env_file(path: pathlib.Path) -> Dict[str, str]:
@@ -49,6 +51,15 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
     except ValueError as exc:
         raise RuntimeError("ADMIN_ID must be an integer") from exc
 
-    return BotConfig(bot_token=token, admin_id=admin_id)
+    mtproto_proxy_link = data.get("MTPROTO_PROXY_LINK") or None
+    if mtproto_proxy_link:
+        mtproto_proxy_link = mtproto_proxy_link.strip()
+
+    return BotConfig(
+        bot_token=token,
+        admin_id=admin_id,
+        base_dir=base_dir,
+        mtproto_proxy_link=mtproto_proxy_link,
+    )
 
 
