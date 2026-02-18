@@ -84,6 +84,14 @@ sudo docker logs mtproto-proxy --tail 10
 | 1081 | TCP (localhost) | ss-redir (Shadowsocks) |
 | 443 | TCP | MTProto‑прокси (Docker) |
 
+## Скрипт add-ss-redirect.sh (VPN+GPT)
+
+Для опции «VPN+GPT» в боте (Европа) бот по SSH вызывает на eu1 скрипт, который добавляет iptables‑редирект TCP 80/443 для IP клиента на порт 1081 (ss-redir). Так трафик HTTP/HTTPS пользователя идёт через Shadowsocks (обход блокировок ChatGPT и др.).
+
+- **Развёртывание на eu1:** скопировать содержимое из `docs/scripts/add-ss-redirect.sh.example` в скрипт на сервере, например `/opt/vpnservice/scripts/add-ss-redirect.sh`, и выполнить `chmod +x add-ss-redirect.sh`. Скрипт должен запускаться с `sudo`.
+- **Путь по умолчанию**, с которым бот обращается к скрипту: `/opt/vpnservice/scripts/add-ss-redirect.sh`. Переопределение: в `env_vars.txt` на Timeweb задать `WG_EU1_ADD_SS_REDIRECT_SCRIPT=/путь/на/eu1/add-ss-redirect.sh`.
+- Пул IP для VPN+GPT на eu1: **10.1.0.8–10.1.0.254** (обычные peer'ы eu1 используют 10.1.0.2–10.1.0.7).
+
 ## Резервное копирование и восстановление
 
 См. `docs/backup-restore.md`.

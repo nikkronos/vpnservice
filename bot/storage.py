@@ -16,6 +16,7 @@ class User:
     role: str = "user"  # "owner" | "user"
     active: bool = True
     preferred_server_id: Optional[str] = None  # "main" (РФ) | "eu1" (Европа) | None (дефолт)
+    preferred_profile_type: Optional[str] = None  # для eu1: "vpn" | "vpn_gpt"
 
 
 @dataclass
@@ -31,6 +32,7 @@ class Peer:
     public_key: str
     server_id: str = "main"  # идентификатор ноды/сервера, пока одна нода
     active: bool = True
+    profile_type: Optional[str] = None  # для eu1: "vpn" | "vpn_gpt" (обход ChatGPT через ss-redir)
 
 
 def _ensure_data_dir() -> None:
@@ -64,6 +66,7 @@ def get_all_users() -> List[User]:
                     role=payload.get("role", "user"),
                     active=bool(payload.get("active", True)),
                     preferred_server_id=payload.get("preferred_server_id"),
+                    preferred_profile_type=payload.get("preferred_profile_type"),
                 )
             )
         except ValueError:
@@ -82,6 +85,7 @@ def find_user(telegram_id: int) -> Optional[User]:
         role=payload.get("role", "user"),
         active=bool(payload.get("active", True)),
         preferred_server_id=payload.get("preferred_server_id"),
+        preferred_profile_type=payload.get("preferred_profile_type"),
     )
 
 
@@ -112,6 +116,7 @@ def get_all_peers() -> List[Peer]:
                     public_key=payload["public_key"],
                     server_id=payload.get("server_id", "main"),
                     active=bool(payload.get("active", True)),
+                    profile_type=payload.get("profile_type"),
                 )
             )
         except (ValueError, KeyError):
@@ -139,6 +144,7 @@ def find_peer_by_telegram_id(telegram_id: int, server_id: Optional[str] = None) 
             public_key=payload["public_key"],
             server_id=payload.get("server_id", "main"),
             active=bool(payload.get("active", True)),
+            profile_type=payload.get("profile_type"),
         )
         # Если указан server_id, проверяем совпадение
         if server_id is not None and peer.server_id != server_id:

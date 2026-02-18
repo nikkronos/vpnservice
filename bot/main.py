@@ -163,8 +163,17 @@ def main() -> None:
                     preferred_server_id,
                 )
 
+            # Тип профиля для eu1: Обычный VPN или VPN+GPT
+            profile_type = None
+            if preferred_server_id == "eu1":
+                profile_type = getattr(user, "preferred_profile_type", None)
+
             # Создаём новый peer на выбранном сервере
-            peer, client_config = create_peer_and_config_for_user(telegram_id, server_id=preferred_server_id)
+            peer, client_config = create_peer_and_config_for_user(
+                telegram_id,
+                server_id=preferred_server_id,
+                profile_type=profile_type,
+            )
 
         except WireGuardError as exc:
             logger.exception("Ошибка при обработке /get_config для %s: %s", telegram_id, exc)
@@ -175,18 +184,26 @@ def main() -> None:
             )
             return
 
-        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+        # Имя файла: для VPN+GPT — vpn_<id>_eu1_gpt.conf
+        if getattr(peer, "profile_type", None) == "vpn_gpt":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+        else:
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()
         server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+        profile_note = ""
+        if getattr(peer, "profile_type", None) == "vpn_gpt":
+            profile_note = "\nПрофиль: <b>VPN+GPT</b> — HTTP/HTTPS идёт через Shadowsocks (обход блокировок ChatGPT и др.).\n"
         
         safe_reply(
             message,
             f"Создан новый VPN‑доступ на сервере <b>{server_name}</b> и отправлен конфиг.\n"
             f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
+            f"{profile_note}"
             "Импортируй файл в приложение WireGuard на своём устройстве и включи туннель.\n"
-            f"\nЧтобы выбрать другой сервер, используй команду /server.",
+            f"\nЧтобы выбрать другой сервер или тип профиля, используй /server.",
         )
         # Отправляем пошаговую инструкцию по подключению (ПК + iOS)
         instr_pc = _load_instruction_text(config.base_dir, "pc")
@@ -325,12 +342,35 @@ def main() -> None:
             bot.answer_callback_query(call.id, f"Неизвестный сервер: {server_id}")
             return
         
-        # Обновляем предпочтение пользователя
-        user.preferred_server_id = server_id
-        upsert_user(user)
-        
         server_name = servers_info[server_id]["name"]
         server_desc = servers_info[server_id]["description"]
+
+        # Для Европы (eu1) — второй шаг: выбор типа профиля (Обычный VPN / VPN+GPT)
+        if server_id == "eu1":
+            bot.answer_callback_query(call.id, "Выбери тип профиля", show_alert=False)
+            keyboard = types.InlineKeyboardMarkup()
+            keyboard.add(types.InlineKeyboardButton(
+                text="Обычный VPN",
+                callback_data="profile_eu1_vpn",
+            ))
+            keyboard.add(types.InlineKeyboardButton(
+                text="VPN+GPT (обход блокировок ChatGPT)",
+                callback_data="profile_eu1_gpt",
+            ))
+            bot.edit_message_text(
+                f"<b>{server_name}</b>\n{server_desc}\n\n"
+                "Выбери тип профиля:",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            return
+
+        # Для остальных серверов — сразу сохраняем выбор
+        user.preferred_server_id = server_id
+        user.preferred_profile_type = None
+        upsert_user(user)
         
         bot.answer_callback_query(
             call.id,
@@ -342,6 +382,38 @@ def main() -> None:
             f"✅ <b>Сервер выбран</b>\n\n"
             f"Твой предпочтительный сервер: <b>{server_name}</b>\n"
             f"{server_desc}\n\n"
+            f"Теперь при вызове /get_config будет создан доступ на этом сервере.",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+        )
+    
+    @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt"))
+    def callback_profile_eu1(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Обработчик выбора типа профиля для Европы: Обычный VPN или VPN+GPT."""
+        if not call.from_user:
+            bot.answer_callback_query(call.id, "Ошибка: не удалось определить пользователя.")
+            return
+        
+        user = find_user(call.from_user.id)
+        if not user or not user.active:
+            bot.answer_callback_query(call.id, "Ты не зарегистрирован в VPN‑сервисе.")
+            return
+        
+        is_gpt = call.data == "profile_eu1_gpt"
+        user.preferred_server_id = "eu1"
+        user.preferred_profile_type = "vpn_gpt" if is_gpt else "vpn"
+        upsert_user(user)
+        
+        profile_label = "VPN+GPT (обход ChatGPT)" if is_gpt else "Обычный VPN"
+        bot.answer_callback_query(call.id, f"Профиль: {profile_label}", show_alert=False)
+        
+        servers_info = get_available_servers()
+        server_name = servers_info.get("eu1", {}).get("name", "Европа")
+        bot.edit_message_text(
+            f"✅ <b>Сервер выбран</b>\n\n"
+            f"Твой предпочтительный сервер: <b>{server_name}</b>\n"
+            f"Тип профиля: <b>{profile_label}</b>\n\n"
             f"Теперь при вызове /get_config будет создан доступ на этом сервере.",
             call.message.chat.id,
             call.message.message_id,

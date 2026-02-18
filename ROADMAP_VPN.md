@@ -65,10 +65,10 @@
   - [x] Описать интеграцию с Telegram‑ботом: инструкции, MTProto, опция VPN+GPT (docs/specs/spec-03-bot-integration-instructions.md).
   - [x] Подготовить короткие тексты инструкций для бота (docs/bot-instruction-texts/): ПК, iOS, MTProto.
   - [x] Добавить пример скрипта добавления редиректа на сервере (docs/scripts/add-ss-redirect.sh.example).
-  - [ ] В боте: выдавать пошаговую инструкцию после /get_config и/или по команде/кнопке «Как подключиться» (ПК / iOS).
-  - [ ] В боте: команда/кнопка «Ссылка для Telegram» — отправка MTPROTO_PROXY_LINK и краткой инструкции.
-  - [ ] В боте (eu1): опция «VPN+GPT» при выдаче конфига — создание peer с IP из пула редиректа, вызов add-ss-redirect.sh на сервере.
-  - [ ] На сервере eu1: развернуть add-ss-redirect.sh, проверить вызов по SSH из бота.
+  - [x] В боте: выдавать пошаговую инструкцию после /get_config и/или по команде /instruction (ПК / iOS).
+  - [x] В боте: команда /proxy — отправка MTPROTO_PROXY_LINK и краткой инструкции.
+  - [x] В боте (eu1): опция «VPN+GPT» при выдаче конфига — создание peer с IP из пула 10.1.0.8–254, вызов add-ss-redirect.sh на сервере по SSH.
+  - [ ] На сервере eu1: развернуть add-ss-redirect.sh (см. docs/deployment.md), проверить вызов по SSH из бота.
 
 ## 4. Долгосрочные идеи
 
