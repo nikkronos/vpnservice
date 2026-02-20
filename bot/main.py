@@ -18,6 +18,7 @@ from .storage import (
 from .wireguard_peers import (
     WireGuardError,
     create_peer_and_config_for_user,
+    execute_server_command,
     get_available_servers,
     regenerate_peer_and_config_for_user,
 )
@@ -579,6 +580,58 @@ def main() -> None:
             "Обратись к владельцу бота или используй /instruction для помощи с подключением."
         )
         safe_reply(message, help_text)
+
+    @bot.message_handler(commands=["server_exec"])
+    def cmd_server_exec(message: types.Message) -> None:  # type: ignore[override]
+        """Выполняет команду на сервере через SSH (только для владельца)."""
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        
+        if not is_owner(message.from_user.id, admin_id):
+            safe_reply(message, "Эта команда доступна только владельцу VPN.")
+            return
+        
+        # Парсим команду: /server_exec <server_id> <command>
+        text = message.text or ""
+        parts = text.split(None, 2)
+        if len(parts) < 3:
+            safe_reply(
+                message,
+                "Использование: /server_exec <server_id> <command>\n"
+                "Пример: /server_exec eu1 wg show\n"
+                "Пример: /server_exec eu1 'iptables -L FORWARD -n -v'",
+            )
+            return
+        
+        server_id = parts[1]
+        command = parts[2]
+        
+        try:
+            stdout, stderr = execute_server_command(server_id, command, timeout=30)
+            
+            # Формируем ответ
+            result_text = f"<b>Команда на {server_id}:</b> <code>{command}</code>\n\n"
+            
+            if stdout:
+                # Ограничиваем длину вывода (Telegram лимит ~4096 символов)
+                stdout_preview = stdout[:3500] + "..." if len(stdout) > 3500 else stdout
+                result_text += f"<b>Вывод:</b>\n<pre>{stdout_preview}</pre>\n"
+            
+            if stderr:
+                stderr_preview = stderr[:1000] + "..." if len(stderr) > 1000 else stderr
+                result_text += f"<b>Ошибки:</b>\n<pre>{stderr_preview}</pre>\n"
+            
+            if not stdout and not stderr:
+                result_text += "Команда выполнена, но вывода нет."
+            
+            safe_reply(message, result_text)
+            
+        except WireGuardError as exc:
+            safe_reply(message, f"❌ Ошибка: {exc}")
+        except Exception as exc:
+            logger.exception("Ошибка при выполнении /server_exec: %s", exc)
+            safe_reply(message, f"❌ Неожиданная ошибка: {exc}")
 
     @bot.message_handler(commands=["add_user"])
     def cmd_add_user(message: types.Message) -> None:  # type: ignore[override]

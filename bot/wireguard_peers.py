@@ -220,6 +220,60 @@ def _run_add_ss_redirect(
         raise WireGuardError(f"Не удалось добавить редирект Shadowsocks на сервере {ssh_host}. Обратись к владельцу.") from exc
 
 
+def execute_server_command(
+    server_id: str,
+    command: str,
+    timeout: int = 30,
+) -> Tuple[str, str]:
+    """
+    Выполняет команду на указанном сервере через SSH.
+    
+    Args:
+        server_id: Идентификатор сервера ("main", "eu1" и т.п.)
+        command: Команда для выполнения на сервере
+        timeout: Таймаут выполнения команды в секундах
+    
+    Returns:
+        (stdout, stderr) — вывод команды
+    
+    Raises:
+        WireGuardError: если команда не выполнена или сервер недоступен
+    """
+    env = _load_env()
+    server_config = _get_server_config(server_id, env)
+    
+    ssh_host = server_config.get("ssh_host")
+    ssh_user = server_config.get("ssh_user")
+    ssh_key_path = server_config.get("ssh_key_path")
+    
+    if not ssh_host:
+        raise WireGuardError(f"SSH_HOST не настроен для сервера {server_id}")
+    
+    ssh_target = f"{ssh_user}@{ssh_host}" if ssh_user else ssh_host
+    ssh_cmd = ["ssh"]
+    if ssh_key_path:
+        ssh_cmd.extend(["-i", ssh_key_path])
+    ssh_cmd.extend(["-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"])
+    ssh_cmd.append(ssh_target)
+    ssh_cmd.append(command)
+    
+    logger.info("Выполнение команды на %s (%s): %s", server_id, ssh_host, command)
+    try:
+        result = subprocess.run(
+            ssh_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,  # Не бросаем исключение при ненулевом коде возврата
+        )
+        return result.stdout, result.stderr
+    except subprocess.TimeoutExpired:
+        raise WireGuardError(f"Команда на сервере {server_id} превысила таймаут ({timeout} сек)")
+    except Exception as exc:
+        logger.exception("Ошибка при выполнении команды на %s: %s", server_id, exc)
+        raise WireGuardError(f"Не удалось выполнить команду на сервере {server_id}: {exc}") from exc
+
+
 def _generate_keypair() -> Tuple[str, str]:
     """
     Генерирует ключи для нового peer через утилиты wg/wg pubkey.
@@ -328,10 +382,12 @@ def _build_client_config(
     endpoint_port: str,
     dns: str,
     mtu: Optional[str] = None,
+    exclude_server_ip: bool = True,
 ) -> str:
     """
     Формирует текст клиентского WireGuard-конфига для нового пользователя.
     Если задан mtu (например WG_EU1_MTU=1280), в [Interface] добавляется строка MTU.
+    Если exclude_server_ip=True, SSH-трафик к серверу не будет идти через VPN (Split Tunneling).
     """
     interface_lines = [
         "[Interface]",
@@ -341,13 +397,20 @@ def _build_client_config(
     ]
     if mtu and mtu.strip():
         interface_lines.append(f"MTU = {mtu.strip()}")
+    
+    # AllowedIPs: если exclude_server_ip=True, исключаем IP сервера из VPN (для SSH)
+    if exclude_server_ip:
+        allowed_ips = f"AllowedIPs = 0.0.0.0/0, !{endpoint_host}/32\n"
+    else:
+        allowed_ips = "AllowedIPs = 0.0.0.0/0\n"
+    
     return (
         "\n".join(interface_lines)
         + "\n\n"
         "[Peer]\n"
         f"PublicKey = {server_public_key}\n"
         f"Endpoint = {endpoint_host}:{endpoint_port}\n"
-        "AllowedIPs = 0.0.0.0/0\n"
+        allowed_ips
         "PersistentKeepalive = 25\n"
     )
 
@@ -436,7 +499,7 @@ def create_peer_and_config_for_user(
     )
     upsert_peer(peer)
 
-    # Формируем текст клиентского конфига
+    # Формируем текст клиентского конфига (с Split Tunneling для SSH)
     client_config = _build_client_config(
         private_key=private_key,
         wg_ip=wg_ip,
@@ -445,6 +508,7 @@ def create_peer_and_config_for_user(
         endpoint_port=str(server_config["endpoint_port"]),
         dns=server_config["dns"],
         mtu=server_config.get("mtu"),
+        exclude_server_ip=True,  # SSH не будет идти через VPN
     )
 
     return peer, client_config
@@ -528,7 +592,7 @@ def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[st
     )
     upsert_peer(new_peer)
     
-    # Формируем новый клиентский конфиг
+    # Формируем новый клиентский конфиг (с Split Tunneling для SSH)
     client_config = _build_client_config(
         private_key=private_key,
         wg_ip=wg_ip,
@@ -537,6 +601,7 @@ def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[st
         endpoint_port=str(server_config["endpoint_port"]),
         dns=server_config["dns"],
         mtu=server_config.get("mtu"),
+        exclude_server_ip=True,  # SSH не будет идти через VPN
     )
     
     logger.info(
