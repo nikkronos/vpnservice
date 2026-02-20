@@ -1,0 +1,74 @@
+#!/bin/bash
+# Скрипт для мониторинга состояния VPN-сервера
+# Использование: ./monitor-server.sh
+
+echo "=== Мониторинг VPN-сервера ==="
+echo "Дата: $(date)"
+echo ""
+
+# 1. Проверка WireGuard
+echo "--- WireGuard ---"
+if systemctl is-active --quiet wg-quick@wg0; then
+    echo "✅ WireGuard активен"
+    echo ""
+    echo "Активные пиры:"
+    sudo wg show wg0 | grep -E "peer|allowed ips|transfer" | head -20
+    echo ""
+    echo "Статистика трафика (получено/отправлено):"
+    sudo wg show wg0 dump | awk '{if(NR>1) print "Peer:", substr($1,1,20) "...", "RX:", $6, "bytes", "TX:", $7, "bytes"}'
+else
+    echo "❌ WireGuard не активен"
+fi
+echo ""
+
+# 2. Проверка Shadowsocks
+echo "--- Shadowsocks (ss-redir) ---"
+if systemctl is-active --quiet ss-wg.service; then
+    echo "✅ ss-redir активен"
+    echo "Порт 1081:"
+    sudo ss -tlnp | grep 1081 || echo "Порт не слушается"
+else
+    echo "❌ ss-redir не активен"
+fi
+echo ""
+
+# 3. Проверка MTProto
+echo "--- MTProto Proxy ---"
+if sudo docker ps | grep -q mtproto-proxy; then
+    echo "✅ MTProto контейнер запущен"
+else
+    echo "❌ MTProto контейнер не запущен"
+fi
+echo ""
+
+# 4. Использование ресурсов
+echo "--- Ресурсы сервера ---"
+echo "CPU и RAM:"
+top -bn1 | grep "Cpu\|Mem\|Swap" | head -3
+echo ""
+echo "Использование диска:"
+df -h / | tail -1
+echo ""
+
+# 5. Сетевая активность
+echo "--- Сетевая активность ---"
+echo "Активные соединения WireGuard (UDP 51820):"
+sudo ss -unp | grep 51820 | wc -l
+echo ""
+
+# 6. Правила iptables для Shadowsocks
+echo "--- iptables (редирект на Shadowsocks) ---"
+echo "Правила редиректа TCP 80/443 на порт 1081:"
+sudo iptables -t nat -L PREROUTING -n | grep -E "1081|10\.1\.0\." | head -10
+echo ""
+
+# 7. Проверка IP forwarding
+echo "--- IP Forwarding ---"
+if [ "$(sysctl -n net.ipv4.ip_forward)" = "1" ]; then
+    echo "✅ IP forwarding включен"
+else
+    echo "❌ IP forwarding выключен"
+fi
+echo ""
+
+echo "=== Конец отчёта ==="

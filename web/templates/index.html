@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Мониторинг</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 VPN Мониторинг</h1>
+            <p class="subtitle">Статус сервиса и статистика использования</p>
+        </header>
+
+        <section class="stats">
+            <h2>📊 Общая статистика</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">{{ stats.active_users }}</div>
+                    <div class="stat-label">Активных пользователей</div>
+                    <div class="stat-total">из {{ stats.total_users }} всего</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">{{ stats.active_peers }}</div>
+                    <div class="stat-label">Активных подключений</div>
+                    <div class="stat-total">из {{ stats.total_peers }} всего</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="servers">
+            <h2>🖥️ Статус серверов</h2>
+            <div id="servers-list" class="servers-list">
+                <p>Загрузка...</p>
+            </div>
+        </section>
+
+        <section class="by-server">
+            <h2>📈 По серверам</h2>
+            <div id="by-server-chart" class="chart">
+                {% if stats.by_server %}
+                    {% for server_id, count in stats.by_server.items() %}
+                        <div class="chart-item">
+                            <span class="chart-label">{{ server_id }}</span>
+                            <div class="chart-bar">
+                                <div class="chart-fill" style="width: {{ (count / stats.active_peers * 100) if stats.active_peers > 0 else 0 }}%"></div>
+                            </div>
+                            <span class="chart-value">{{ count }}</span>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p>Нет активных подключений</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <footer>
+            <p>Последнее обновление: <span id="last-update"></span></p>
+            <p><a href="/api/stats" target="_blank">API статистики (JSON)</a></p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
