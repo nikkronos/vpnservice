@@ -257,16 +257,16 @@ def execute_server_command(
     ssh_cmd.extend(["-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"])
     ssh_cmd.append(ssh_target)
     # Используем bash для выполнения команды с правильным PATH
-    # Устанавливаем полный PATH для non-interactive shell, чтобы находить системные утилиты
-    # Используем двойные кавычки для bash -c и экранируем специальные символы внутри команды
-    # Экранируем двойные кавычки и обратные кавычки в команде
-    escaped_command = command.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
-    ssh_cmd.append(f'bash -c "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH && {escaped_command}"')
+    # Передаём команду через stdin для избежания проблем с экранированием
+    # Устанавливаем полный PATH для non-interactive shell
+    full_command = f"export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH\n{command}\n"
+    ssh_cmd.append("bash")
     
     logger.info("Выполнение команды на %s (%s): %s", server_id, ssh_host, command)
     try:
         result = subprocess.run(
             ssh_cmd,
+            input=full_command,
             capture_output=True,
             text=True,
             timeout=timeout,
