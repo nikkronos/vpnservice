@@ -21,6 +21,7 @@ from .wireguard_peers import (
     execute_server_command,
     get_available_servers,
     regenerate_peer_and_config_for_user,
+    replace_peer_with_profile_type,
 )
 
 
@@ -144,7 +145,42 @@ def main() -> None:
             peer_any = find_peer_by_telegram_id(telegram_id, server_id=None)
             
             if peer_on_preferred and peer_on_preferred.active:
-                # Peer уже существует на выбранном сервере
+                # На eu1 проверяем совпадение типа профиля с выбором пользователя
+                preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None
+                current_pt = getattr(peer_on_preferred, "profile_type", None)
+                if preferred_server_id == "eu1" and preferred_pt and current_pt != preferred_pt:
+                    # Пользователь выбрал другой тип профиля — пересоздаём peer с новым типом
+                    peer, client_config = replace_peer_with_profile_type(
+                        telegram_id, preferred_server_id, preferred_pt
+                    )
+                    pt = getattr(peer, "profile_type", None)
+                    if pt == "vpn_gpt":
+                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+                    elif pt == "unified":
+                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+                    else:
+                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+                    _send_config_file(chat_id, client_config, filename)
+                    servers_info = get_available_servers()
+                    server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+                    profile_note = (
+                        "\n\n🟣 <b>Профиль: Универсальный</b>\n"
+                        "Один профиль для всего: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks.\n"
+                        "Как у крупных VPN‑провайдеров.\n"
+                    ) if pt == "unified" else (
+                        "\n\n🟢 <b>Профиль: VPN+GPT</b>\n"
+                        "HTTP/HTTPS трафик идёт через Shadowsocks для обхода блокировок.\n"
+                    ) if pt == "vpn_gpt" else "\n\n🔵 <b>Профиль: Обычный VPN</b>\n"
+                    safe_reply(
+                        message,
+                        f"✅ Профиль переключён на сервере <b>{server_name}</b>.\n"
+                        f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
+                        f"{profile_note}\n"
+                        "📥 Импортируй новый конфиг в WireGuard. Старый конфиг больше не будет работать.\n"
+                        f"\n💡 Другой сервер/профиль — /server. Инструкция — /instruction.",
+                    )
+                    return
+                # Peer уже существует, тип профиля совпадает — просто сообщаем
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                 safe_reply(
@@ -266,9 +302,24 @@ def main() -> None:
         try:
             # Определяем, на каком сервере искать peer для регенерации
             preferred_server_id = user.preferred_server_id or "main"
-            
-            # Регенерируем peer (используем server_id существующего peer, если он отличается от preferred)
-            peer, client_config = regenerate_peer_and_config_for_user(telegram_id, server_id=preferred_server_id)
+            preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None
+
+            existing_peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
+            # Если на eu1 пользователь выбрал другой тип профиля — пересоздаём peer с новым типом и IP из нужного пула
+            if (
+                preferred_server_id == "eu1"
+                and preferred_pt
+                and existing_peer
+                and getattr(existing_peer, "profile_type", None) != preferred_pt
+            ):
+                peer, client_config = replace_peer_with_profile_type(
+                    telegram_id, preferred_server_id, preferred_pt
+                )
+            else:
+                # Регенерируем peer (те же ключи/тот же тип профиля)
+                peer, client_config = regenerate_peer_and_config_for_user(
+                    telegram_id, server_id=preferred_server_id
+                )
             
         except WireGuardError as exc:
             logger.exception("Ошибка при регенерации peer для %s: %s", telegram_id, exc)

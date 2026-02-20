@@ -628,6 +628,51 @@ def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[st
     return new_peer, client_config
 
 
+def replace_peer_with_profile_type(
+    telegram_id: int,
+    server_id: str,
+    new_profile_type: str,
+) -> Tuple[Peer, str]:
+    """
+    Удаляет существующий peer на сервере и создаёт новый с указанным типом профиля
+    (и IP из соответствующего пула). Используется при смене типа профиля (например,
+    с VPN+GPT на Универсальный) по выбору пользователя в /server.
+    """
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+    if not existing_peer or not existing_peer.active:
+        raise WireGuardError(
+            f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id}."
+        )
+
+    env = _load_env()
+    server_config = _get_server_config(server_id, env)
+
+    try:
+        _remove_peer_from_wireguard(
+            interface=server_config["interface"],
+            public_key=existing_peer.public_key,
+            ssh_host=server_config.get("ssh_host"),
+            ssh_user=server_config.get("ssh_user"),
+            ssh_key_path=server_config.get("ssh_key_path"),
+        )
+    except WireGuardError:
+        logger.warning("Не удалось удалить старый peer из WireGuard, продолжаем смену профиля")
+
+    peer, client_config = create_peer_and_config_for_user(
+        telegram_id,
+        server_id=server_id,
+        profile_type=new_profile_type,
+    )
+    logger.info(
+        "Сменён тип профиля для пользователя %s на сервере %s: новый profile_type=%s, wg_ip=%s",
+        telegram_id,
+        server_id,
+        new_profile_type,
+        peer.wg_ip,
+    )
+    return peer, client_config
+
+
 def get_available_servers() -> Dict[str, Dict[str, str]]:
     """
     Возвращает словарь доступных серверов с их метаданными (название, описание).

@@ -87,12 +87,22 @@ apt install -y wireguard wireguard-tools shadowsocks-libev
 }
 ```
 
+#### Два режима Shadowsocks на eu1
+
+- **Сервер** (`shadowsocks-libev.service`): конфиг `/etc/shadowsocks-libev/config.json` — слушает `0.0.0.0:8388`. Уже запущен.
+- **Клиент ss-redir** (редирект 80/443 на 1081): конфиг `/etc/shadowsocks-libev/ss-wg.json` — подключается к серверу и слушает `127.0.0.1:1081`. Нужен для VPN+GPT и Unified.
+
+Имя сервиса клиента — по имени конфига **без .json**: `ss-wg` → `shadowsocks-libev-redir@ss-wg.service`.
+
 #### Запуск ss-redir
 
 ```bash
-systemctl enable shadowsocks-libev-local@ss-wg.service
-systemctl start shadowsocks-libev-local@ss-wg.service
+systemctl enable shadowsocks-libev-redir@ss-wg.service
+systemctl start shadowsocks-libev-redir@ss-wg.service
 ```
+
+Проверка: `ss -tlnp | grep 1081` — должен слушать `127.0.0.1:1081`.  
+Не использовать `@config` — он использует config.json (серверный конфиг).
 
 #### Конфигурация WireGuard
 
