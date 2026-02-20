@@ -258,7 +258,7 @@ def execute_server_command(
     ssh_cmd.append(ssh_target)
     # Используем bash для выполнения команды с правильным PATH
     # Устанавливаем полный PATH для non-interactive shell, чтобы находить системные утилиты
-    # Правильно экранируем команду: используем двойные кавычки для bash -c и экранируем внутри
+    # Используем двойные кавычки для bash -c и экранируем специальные символы внутри команды
     # Экранируем двойные кавычки и обратные кавычки в команде
     escaped_command = command.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`')
     ssh_cmd.append(f'bash -c "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH && {escaped_command}"')
