@@ -255,7 +255,10 @@ def execute_server_command(
         ssh_cmd.extend(["-i", ssh_key_path])
     ssh_cmd.extend(["-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"])
     ssh_cmd.append(ssh_target)
-    ssh_cmd.append(command)
+    # Используем bash для выполнения команды с правильным PATH
+    # Экранируем одинарные кавычки в команде, заменяя их на '\''
+    escaped_command = command.replace("'", "'\\''")
+    ssh_cmd.append(f"bash -c '{escaped_command}'")
     
     logger.info("Выполнение команды на %s (%s): %s", server_id, ssh_host, command)
     try:
