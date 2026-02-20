@@ -410,8 +410,8 @@ def _build_client_config(
         "[Peer]\n"
         f"PublicKey = {server_public_key}\n"
         f"Endpoint = {endpoint_host}:{endpoint_port}\n"
-        allowed_ips
-        "PersistentKeepalive = 25\n"
+        + allowed_ips
+        + "PersistentKeepalive = 25\n"
     )
 
 
