@@ -1,0 +1,35 @@
+#!/bin/bash
+# Обновляет ipset unified_ss_dst: разрешает домены (ChatGPT и др.) и добавляет их IP.
+# Редирект на ss-redir применяется только к этому набору IP для клиентов 10.1.0.20-50.
+# Использование: sudo ./update-unified-ss-ips.sh
+# Рекомендуется запускать по cron (например раз в час).
+
+set -e
+
+IPSET_NAME="unified_ss_dst"
+DOMAINS=(
+  "openai.com"
+  "chat.openai.com"
+  "chatgpt.com"
+  "platform.openai.com"
+  "api.openai.com"
+)
+
+if ! ipset list "$IPSET_NAME" &>/dev/null; then
+  echo "Error: ipset $IPSET_NAME does not exist. Run setup-unified-iptables.sh first." >&2
+  exit 1
+fi
+
+ipset flush "$IPSET_NAME"
+
+for domain in "${DOMAINS[@]}"; do
+  while read -r line; do
+    ip=$(echo "$line" | awk '{print $1}')
+    if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      ipset add "$IPSET_NAME" "$ip" 2>/dev/null || true
+    fi
+  done < <(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u) || true
+  # Альтернатива если getent не даёт A записи: dig +short A "$domain" 2>/dev/null | while read ip; do ipset add "$IPSET_NAME" "$ip" 2>/dev/null; done
+done
+
+echo "Updated $IPSET_NAME with $(ipset list $IPSET_NAME | grep -c '^[0-9]') entries"

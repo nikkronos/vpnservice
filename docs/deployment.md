@@ -1,109 +1,327 @@
-# Деплой и сервер VPN
+# Инструкция по развёртыванию VPN Service
 
-## Распределение серверов
+## Обзор
 
-| Сервер | Назначение | Что крутится |
-|--------|------------|--------------|
-| **Timeweb** | Хостинг бота и (ранее) нода РФ | Telegram‑бот VPN: код в `/opt/vpnservice`, сервис `vpn-bot.service`. Бот выдаёт конфиги, создаёт пиры на Timeweb (нода РФ) и на Fornex (нода eu1) по SSH. Переменные окружения бота: `env_vars.txt` на Timeweb (BOT_TOKEN, WG_*, WG_EU1_*, при необходимости MTPROTO_PROXY_LINK). |
-| **Fornex (eu1)** | VPN‑нода «Европа» | WireGuard (wg0), Shadowsocks‑клиент (ss-redir), MTProto‑прокси (Docker). IP 185.21.8.91. Конфиги: `/etc/wireguard/`, `/etc/shadowsocks-libev/`, бэкапы в `/root/vpn-backups/`. |
+Этот документ описывает процесс развёртывания VPN-сервиса на серверах и настройку бота.
 
-Код бота хранится в репозитории `nikkronos/vpnservice`; на Timeweb в `/opt/vpnservice` делается `git pull` и перезапуск `vpn-bot.service`. Файлы между серверами: бот на Timeweb, VPN‑сервисы (WireGuard, SS, MTProto) на Fornex.
+## Серверы
 
-### Обновление бота на Timeweb
+### 1. main (Россия, Timeweb)
 
-1. Подключись по SSH к серверу Timeweb.
-2. Обновить код и перезапустить сервис:
-   ```bash
-   cd /opt/vpnservice && git pull origin main
-   sudo systemctl restart vpn-bot.service
-   ```
-3. **Переменные окружения:** файл `env_vars.txt` на сервере **не в Git** (в репозитории только `env_vars.example.txt`). Если в проекте добавили новую переменную (например `MTPROTO_PROXY_LINK`), её нужно **вручную добавить в `/opt/vpnservice/env_vars.txt` на сервере**, затем перезапустить бота:
-   ```bash
-   sudo nano /opt/vpnservice/env_vars.txt
-   # добавить строку, например: MTPROTO_PROXY_LINK=tg://proxy?server=...
-   sudo systemctl restart vpn-bot.service
-   ```
-   Правки в `env_vars.txt` на своём ПК (в папке проекта) на работу бота на Timeweb **не влияют** — бот читает только файл на сервере.
+**IP:** `81.200.146.32`  
+**Расположение:** `/opt/vpnservice`
 
-4. Проверить логи при сбоях:
-   ```bash
-   sudo journalctl -u vpn-bot.service -n 100 --no-pager
-   ```
-
----
-
-## Сервер Fornex (eu1)
-
-- **Провайдер**: Fornex
-- **ОС**: Ubuntu 24.04 LTS
-- **Назначение**: VPN‑сервер (WireGuard), интеграция с Shadowsocks, MTProto‑прокси для Telegram
-- **Внешний IP**: хранится на сервере и в конфигах клиентов (не коммитить в Git)
-
-## Расположение конфигов и сервисов
-
-| Компонент | Путь / сервис | Примечание |
-|-----------|----------------|------------|
-| WireGuard (сервер) | `/etc/wireguard/wg0.conf` | Конфиг интерфейса `wg0` |
-| WireGuard (клиентские конфиги) | `/etc/wireguard/*.conf` | `iphone.conf`, `friend-pc.conf` и т.д. |
-| Shadowsocks (клиент ss-redir) | `/etc/shadowsocks-libev/ss-wg.json` | Конфиг для редиректа |
-| Резервные копии | `/root/vpn-backups/YYYY-MM-DD/` | Бэкапы конфигов по датам |
-| MTProto‑прокси | Docker‑контейнер `mtproto-proxy` | Порт 443/TCP |
-
-## Systemd‑сервисы
-
-| Сервис | Назначение | Команды проверки |
-|--------|------------|-------------------|
-| `wg-quick@wg0` | WireGuard интерфейс `wg0` | `sudo systemctl status wg-quick@wg0`, `sudo wg show` |
-| `ss-wg.service` | Shadowsocks‑редирект (ss-redir) на порту 1081 | `sudo systemctl status ss-wg.service` |
-| `docker` | Docker daemon (для MTProto) | `sudo systemctl status docker`, `sudo docker ps \| grep mtproto-proxy` |
-
-## Команды проверки состояния
+#### Установка WireGuard
 
 ```bash
-# WireGuard
-sudo wg show
-sudo systemctl status wg-quick@wg0
-
-# Shadowsocks
-sudo systemctl status ss-wg.service
-ss -tlnp | grep 1081
-
-# iptables (редирект на 1081)
-sudo iptables -t nat -L PREROUTING -n | grep 1081
-
-# MTProto
-sudo docker ps | grep mtproto-proxy
-sudo docker logs mtproto-proxy --tail 10
+apt update
+apt install -y wireguard wireguard-tools
 ```
 
-## Порты
+#### Генерация ключей сервера
 
-| Порт | Протокол | Сервис |
-|------|----------|--------|
-| 51820 | UDP | WireGuard (wg0) |
-| 1081 | TCP (localhost) | ss-redir (Shadowsocks) |
-| 443 | TCP | MTProto‑прокси (Docker) |
+```bash
+wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
+chmod 600 /etc/wireguard/server_private.key
+```
 
-## Скрипт add-ss-redirect.sh (VPN+GPT)
+#### Конфигурация WireGuard
 
-Для опции «VPN+GPT» в боте (Европа) бот по SSH вызывает на eu1 скрипт, который добавляет iptables‑редирект TCP 80/443 для IP клиента на порт 1081 (ss-redir). Так трафик HTTP/HTTPS пользователя идёт через Shadowsocks (обход блокировок ChatGPT и др.).
+`/etc/wireguard/wg0.conf`:
+```ini
+[Interface]
+PrivateKey = <server_private_key>
+Address = 10.0.0.1/24
+ListenPort = 51820
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
 
-- **Развёртывание на eu1:** скопировать содержимое из `docs/scripts/add-ss-redirect.sh.example` в скрипт на сервере, например `/opt/vpnservice/scripts/add-ss-redirect.sh`, и выполнить `chmod +x add-ss-redirect.sh`. Скрипт должен запускаться с `sudo`.
-- **Путь по умолчанию**, с которым бот обращается к скрипту: `/opt/vpnservice/scripts/add-ss-redirect.sh`. Переопределение: в `env_vars.txt` на Timeweb задать `WG_EU1_ADD_SS_REDIRECT_SCRIPT=/путь/на/eu1/add-ss-redirect.sh`.
-- Пул IP для VPN+GPT на eu1: **10.1.0.8–10.1.0.254** (обычные peer'ы eu1 используют 10.1.0.2–10.1.0.7).
+[Peer]
+# Peer'ы добавляются ботом через wg set
+```
 
-## Резервное копирование и восстановление
+#### Включение IP forwarding
 
-См. `docs/backup-restore.md`.
+```bash
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
+```
 
-## SSH и доступ
+#### Настройка firewall (UFW)
 
-- Подключение: по SSH (пользователь и ключ/пароль хранятся вне репозитория).
-- После изменений конфигов: перезапуск соответствующих сервисов (см. выше и `docs/checklist-add-client.md`).
+```bash
+ufw allow 51820/udp
+ufw reload
+```
 
-## Связанные документы
+#### Запуск WireGuard
 
-- `docs/specs/spec-01-architecture-wg-ss.md` — архитектура
-- `docs/checklist-add-client.md` — добавление клиента
-- `docs/backup-restore.md` — бэкапы и восстановление
-- `README_FOR_NEXT_AGENT.md` — текущее состояние проекта
+```bash
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+```
+
+### 2. eu1 (Европа, Fornex)
+
+**IP:** `185.21.8.91`  
+**Подсеть:** `10.1.0.0/24`
+
+#### Установка WireGuard и Shadowsocks
+
+```bash
+apt update
+apt install -y wireguard wireguard-tools shadowsocks-libev
+```
+
+#### Конфигурация Shadowsocks
+
+`/etc/shadowsocks-libev/ss-wg.json`:
+```json
+{
+  "server": "185.21.8.91",
+  "server_port": 8388,
+  "local_address": "127.0.0.1",
+  "local_port": 1081,
+  "password": "<password>",
+  "method": "aes-256-gcm"
+}
+```
+
+#### Запуск ss-redir
+
+```bash
+systemctl enable shadowsocks-libev-local@ss-wg.service
+systemctl start shadowsocks-libev-local@ss-wg.service
+```
+
+#### Конфигурация WireGuard
+
+Аналогично main, но подсеть `10.1.0.1/24`.
+
+#### Скрипт add-ss-redirect.sh для VPN+GPT
+
+**Путь:** `/opt/vpnservice/scripts/add-ss-redirect.sh`
+
+```bash
+#!/bin/bash
+# Добавляет редирект TCP 80/443 для указанного IP клиента на ss-redir (порт 1081)
+# Использование: ./add-ss-redirect.sh <client_ip>
+
+CLIENT_IP=$1
+if [ -z "$CLIENT_IP" ]; then
+  echo "Usage: $0 <client_ip>"
+  exit 1
+fi
+
+iptables -t nat -A PREROUTING -i wg0 -s "$CLIENT_IP" -p tcp -m multiport --dports 80,443 -j REDIRECT --to-ports 1081
+```
+
+```bash
+chmod +x /opt/vpnservice/scripts/add-ss-redirect.sh
+```
+
+#### Настройка Unified профиля (ipset)
+
+**Однократная настройка:**
+
+1. Установить ipset:
+   ```bash
+   apt install -y ipset
+   ```
+
+2. Создать ipset и правило iptables (см. `docs/scripts/setup-unified-iptables.sh.example`):
+   ```bash
+   ipset create unified_ss_dst hash:ip family inet
+   iptables -t nat -A PREROUTING -i wg0 -m iprange --src-range 10.1.0.20-10.1.0.50 -p tcp -m set --match-set unified_ss_dst dst -m multiport --dports 80,443 -j REDIRECT --to-ports 1081
+   ```
+
+3. Сохранить ipset:
+   ```bash
+   ipset save > /etc/ipset.unified.conf
+   ```
+
+4. Настроить автовосстановление после перезагрузки:
+   - Создать systemd unit или скрипт в `/etc/network/if-up.d/`
+   - Пример unit: `/etc/systemd/system/restore-unified-ipset.service`
+
+**Обновление списка IP (cron):**
+
+Скрипт `update-unified-ss-ips.sh` (см. `docs/scripts/update-unified-ss-ips.sh.example`) разрешает домены ChatGPT и обновляет ipset.
+
+Добавить в cron:
+```bash
+0 * * * * /opt/vpnservice/scripts/update-unified-ss-ips.sh
+```
+
+## Бот (Timeweb)
+
+### Установка зависимостей
+
+```bash
+cd /opt/vpnservice
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Конфигурация
+
+Создать `env_vars.txt` (не в Git):
+```bash
+BOT_TOKEN=<bot_token>
+ADMIN_ID=<admin_telegram_id>
+
+# main (Timeweb)
+WG_SERVER_PUBLIC_KEY=<public_key>
+WG_INTERFACE=wg0
+WG_NETWORK_CIDR=10.0.0.0/24
+WG_ENDPOINT_HOST=81.200.146.32
+WG_ENDPOINT_PORT=51820
+WG_DNS=1.1.1.1,8.8.8.8
+
+# eu1 (Fornex)
+WG_EU1_SERVER_PUBLIC_KEY=<eu1_public_key>
+WG_EU1_INTERFACE=wg0
+WG_EU1_NETWORK_CIDR=10.1.0.0/24
+WG_EU1_ENDPOINT_HOST=185.21.8.91
+WG_EU1_ENDPOINT_PORT=51820
+WG_EU1_DNS=1.1.1.1,8.8.8.8
+WG_EU1_SSH_HOST=185.21.8.91
+WG_EU1_SSH_USER=root
+WG_EU1_SSH_KEY_PATH=/root/.ssh/id_rsa_eu1
+WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh
+```
+
+### Systemd сервис
+
+`/etc/systemd/system/vpn-bot.service`:
+```ini
+[Unit]
+Description=VPN Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vpnservice
+Environment="PATH=/opt/vpnservice/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/vpnservice/venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable vpn-bot.service
+systemctl start vpn-bot.service
+```
+
+### Обновление бота
+
+```bash
+cd /opt/vpnservice
+git pull
+systemctl restart vpn-bot.service
+systemctl status vpn-bot.service
+```
+
+**Важно:** Если добавлены новые переменные в `env_vars.example.txt`, их нужно **вручную** добавить в `env_vars.txt` на сервере (файл не в Git).
+
+### Логи
+
+```bash
+journalctl -u vpn-bot.service -f
+```
+
+## Проверка работы
+
+### Проверка WireGuard
+
+```bash
+wg show
+```
+
+### Проверка ss-redir (eu1)
+
+```bash
+systemctl status shadowsocks-libev-local@ss-wg.service
+netstat -tlnp | grep 1081
+```
+
+### Проверка ipset (eu1, Unified)
+
+```bash
+ipset list unified_ss_dst
+iptables -t nat -L PREROUTING -n -v | grep unified
+```
+
+### Тестирование бота
+
+1. Добавить пользователя: `/add_user @username`
+2. Выбрать сервер: `/server` → выбрать сервер
+3. Получить конфиг: `/get_config`
+4. Импортировать конфиг в WireGuard на клиенте
+5. Проверить подключение
+
+## Резервное копирование
+
+### Конфиги WireGuard
+
+```bash
+cp /etc/wireguard/wg0.conf /root/vpn-backups/$(date +%Y-%m-%d)/wg0.conf
+```
+
+### ipset (eu1)
+
+```bash
+ipset save > /root/vpn-backups/$(date +%Y-%m-%d)/ipset.unified.conf
+```
+
+### iptables правила
+
+```bash
+iptables-save > /root/vpn-backups/$(date +%Y-%m-%d)/iptables.rules
+```
+
+## Восстановление после перезагрузки
+
+### WireGuard
+
+Автоматически через `systemctl enable wg-quick@wg0`.
+
+### ipset (eu1, Unified)
+
+Создать systemd unit или скрипт:
+```bash
+ipset restore < /etc/ipset.unified.conf
+```
+
+### iptables правила
+
+Использовать `iptables-persistent` или восстановить из бэкапа:
+```bash
+iptables-restore < /root/vpn-backups/YYYY-MM-DD/iptables.rules
+```
+
+## Откат Unified профиля
+
+Если нужно откатить Unified:
+
+1. Удалить правило iptables:
+   ```bash
+   iptables -t nat -D PREROUTING -i wg0 -m iprange --src-range 10.1.0.20-10.1.0.50 -p tcp -m set --match-set unified_ss_dst dst -m multiport --dports 80,443 -j REDIRECT --to-ports 1081
+   ```
+
+2. Удалить ipset:
+   ```bash
+   ipset destroy unified_ss_dst
+   ```
+
+3. Удалить из cron скрипт обновления ipset
+
+4. В боте перестать выдавать Unified (оставить только Обычный и VPN+GPT)
+
+Существующие клиенты VPN+GPT (10.1.0.8–19 и 51–254) не затронуты.

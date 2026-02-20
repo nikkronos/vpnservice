@@ -140,18 +140,26 @@ def _allocate_ip(network_cidr: str, server_id: str) -> str:
     raise WireGuardError(f"Не удалось подобрать свободный IP для нового peer в сети WireGuard на сервере {server_id}.")
 
 
-def _allocate_ip_in_pool(network_cidr: str, server_id: str, last_octet_start: int, last_octet_end: int) -> str:
+def _allocate_ip_in_pool(
+    network_cidr: str,
+    server_id: str,
+    last_octet_start: int,
+    last_octet_end: int,
+    profile_type_filter: str = "vpn_gpt",
+    exclude_octet_start: Optional[int] = None,
+    exclude_octet_end: Optional[int] = None,
+) -> str:
     """
     Выделяет свободный IP из пула last_octet_start..last_octet_end в последнем октете (для 10.1.0.0/24).
-    Используется для VPN+GPT на eu1: пул 10.1.0.8–10.1.0.254.
-    Учитываются только peer'ы с server_id и profile_type=vpn_gpt.
+    Для VPN+GPT на eu1: пул 8–254 с исключением 20–50 (резерв под Unified).
+    Учитываются только peer'ы с server_id и profile_type=profile_type_filter.
     """
     net = ipaddress.ip_network(network_cidr, strict=False)
     if net.prefixlen != 24:
-        raise WireGuardError("Пул VPN+GPT поддерживается только для подсети /24.")
+        raise WireGuardError("Пул поддерживается только для подсети /24.")
     used_ips = set()
     for peer in get_all_peers():
-        if peer.server_id != server_id or getattr(peer, "profile_type", None) != "vpn_gpt":
+        if peer.server_id != server_id or getattr(peer, "profile_type", None) != profile_type_filter:
             continue
         try:
             iface = ipaddress.ip_interface(peer.wg_ip)
@@ -159,9 +167,11 @@ def _allocate_ip_in_pool(network_cidr: str, server_id: str, last_octet_start: in
         except (ValueError, IndexError):
             continue
     for last in range(last_octet_start, min(last_octet_end + 1, 255)):
+        if exclude_octet_start is not None and exclude_octet_end is not None:
+            if exclude_octet_start <= last <= exclude_octet_end:
+                continue
         if last in used_ips:
             continue
-        # Формируем IP: первые 3 октета из network_address + last
         parts = list(net.network_address.packed)
         parts[-1] = last
         host = ipaddress.IPv4Address(bytes(parts))
@@ -169,7 +179,17 @@ def _allocate_ip_in_pool(network_cidr: str, server_id: str, last_octet_start: in
             continue
         return f"{host}/32"
     raise WireGuardError(
-        f"Нет свободных IP в пуле VPN+GPT (10.1.0.{last_octet_start}–10.1.0.{last_octet_end}) на сервере {server_id}."
+        f"Нет свободных IP в пуле (10.1.0.{last_octet_start}–10.1.0.{last_octet_end}) на сервере {server_id}."
+    )
+
+
+def _allocate_ip_unified_pool(network_cidr: str, server_id: str) -> str:
+    """
+    Выделяет свободный IP из пула Unified на eu1: 10.1.0.20–10.1.0.50.
+    Учитываются только peer'ы с server_id и profile_type=unified.
+    """
+    return _allocate_ip_in_pool(
+        network_cidr, server_id, 20, 50, profile_type_filter="unified"
     )
 
 
@@ -340,24 +360,32 @@ def create_peer_and_config_for_user(
     """
     Создаёт нового peer для заданного Telegram ID на указанной ноде и возвращает (Peer, client_config_text).
 
-    - Выбирает свободный IP (обычный пул или пул VPN+GPT 10.1.0.8–254 для eu1).
+    - Выбирает свободный IP: обычный пул; для eu1 VPN+GPT — 8–254 (исключая 20–50); для eu1 Unified — 20–50.
     - Генерирует ключи для peer.
     - Добавляет peer в WireGuard через `wg set` (локально или через SSH для удалённых нод).
     - Для eu1 и profile_type="vpn_gpt" после добавления peer вызывает на сервере add-ss-redirect.sh.
+    - Для eu1 и profile_type="unified" редирект на сервере делается через ipset (скрипты setup-unified-iptables, update-unified-ss-ips).
     - Сохраняет информацию о peer в peers.json (без приватного ключа).
     - Формирует и возвращает текст клиентского конфига с endpoint выбранной ноды.
 
     Args:
         telegram_id: Telegram ID пользователя.
         server_id: Идентификатор ноды ("main" для РФ, "eu1" для Европы и т.п.).
-        profile_type: Для eu1 — "vpn_gpt" (пул редиректа + вызов add-ss-redirect.sh) или None/"vpn".
+        profile_type: Для eu1 — "vpn_gpt" (пул 8–19/51–254 + add-ss-redirect.sh), "unified" (пул 20–50, ipset на сервере) или None/"vpn".
     """
     env = _load_env()
     server_config = _get_server_config(server_id, env)
 
     use_gpt_pool = server_id == "eu1" and profile_type == "vpn_gpt"
-    if use_gpt_pool:
-        wg_ip = _allocate_ip_in_pool(server_config["network_cidr"], server_id, 8, 254)
+    use_unified_pool = server_id == "eu1" and profile_type == "unified"
+    if use_unified_pool:
+        wg_ip = _allocate_ip_unified_pool(server_config["network_cidr"], server_id)
+    elif use_gpt_pool:
+        # Пул 8–254 с исключением 20–50 (резерв под Unified)
+        wg_ip = _allocate_ip_in_pool(
+            server_config["network_cidr"], server_id, 8, 254,
+            exclude_octet_start=20, exclude_octet_end=50,
+        )
     else:
         wg_ip = _allocate_ip(server_config["network_cidr"], server_id)
 
@@ -378,7 +406,8 @@ def create_peer_and_config_for_user(
         ssh_key_path=server_config.get("ssh_key_path"),
     )
 
-    # Для VPN+GPT на eu1 добавляем редирект TCP 80/443 на ss-redir
+    # Для VPN+GPT на eu1 добавляем редирект TCP 80/443 на ss-redir.
+    # Для Unified редирект на сервере делается через ipset (скрипты setup-unified-iptables, update-unified-ss-ips).
     if use_gpt_pool:
         script_path = server_config.get("add_ss_redirect_script") or "/opt/vpnservice/scripts/add-ss-redirect.sh"
         client_ip = wg_ip.split("/")[0].strip()
@@ -391,13 +420,19 @@ def create_peer_and_config_for_user(
         )
 
     # Сохраняем peer в локальное хранилище (без приватного ключа)
+    if use_unified_pool:
+        pt = "unified"
+    elif use_gpt_pool:
+        pt = "vpn_gpt"
+    else:
+        pt = None
     peer = Peer(
         telegram_id=telegram_id,
         wg_ip=wg_ip,
         public_key=public_key,
         server_id=server_id,
         active=True,
-        profile_type="vpn_gpt" if use_gpt_pool else None,
+        profile_type=pt,
     )
     upsert_peer(peer)
 

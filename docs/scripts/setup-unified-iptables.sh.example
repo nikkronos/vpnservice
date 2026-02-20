@@ -1,0 +1,31 @@
+#!/bin/bash
+# Однократная настройка iptables и ipset для профиля "Универсальный" (Unified).
+# Редирект только в IP из ipset unified_ss_dst, только для клиентов 10.1.0.20-10.1.0.50.
+# Использование: sudo ./setup-unified-iptables.sh
+# Запускать на eu1 (Fornex). Не трогает существующие правила для VPN+GPT.
+
+set -e
+
+IPSET_NAME="unified_ss_dst"
+SRC_RANGE="10.1.0.20-10.1.0.50"
+REDIRECT_PORT="1081"
+
+# ipset
+if ! ipset list "$IPSET_NAME" &>/dev/null; then
+  ipset create "$IPSET_NAME" hash:ip family inet
+  echo "Created ipset $IPSET_NAME"
+else
+  echo "ipset $IPSET_NAME already exists"
+fi
+
+# Одно правило iptables: только трафик от 10.1.0.20-50 к IP из ipset, порты 80/443 → 1081
+if ! iptables -t nat -C PREROUTING -i wg0 -m iprange --src-range "$SRC_RANGE" -p tcp -m set --match-set "$IPSET_NAME" dst -m multiport --dports 80,443 -j REDIRECT --to-ports "$REDIRECT_PORT" 2>/dev/null; then
+  iptables -t nat -A PREROUTING -i wg0 -m iprange --src-range "$SRC_RANGE" -p tcp -m set --match-set "$IPSET_NAME" dst -m multiport --dports 80,443 -j REDIRECT --to-ports "$REDIRECT_PORT"
+  echo "Added iptables rule for Unified profile"
+else
+  echo "iptables rule already present"
+fi
+
+echo "Done. Save ipset: ipset save > /etc/ipset.unified.conf"
+echo "Restore after reboot: ipset restore < /etc/ipset.unified.conf"
+echo "Use iptables-persistent or netfilter-persistent to save iptables rules."

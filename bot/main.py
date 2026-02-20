@@ -189,9 +189,12 @@ def main() -> None:
             )
             return
 
-        # Имя файла: для VPN+GPT — vpn_<id>_eu1_gpt.conf
-        if getattr(peer, "profile_type", None) == "vpn_gpt":
+        # Имя файла: для VPN+GPT — _gpt.conf, для Unified — _unified.conf
+        pt = getattr(peer, "profile_type", None)
+        if pt == "vpn_gpt":
             filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+        elif pt == "unified":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
         else:
             filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
@@ -199,12 +202,18 @@ def main() -> None:
         servers_info = get_available_servers()
         server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
         profile_note = ""
-        if getattr(peer, "profile_type", None) == "vpn_gpt":
+        if pt == "vpn_gpt":
             profile_note = (
                 "\n\n🟢 <b>Профиль: VPN+GPT</b>\n"
                 "HTTP/HTTPS трафик идёт через Shadowsocks для обхода блокировок.\n"
                 "Подходит для: ChatGPT, заблокированные сайты, все сервисы.\n"
                 "⚠️ Может быть немного медленнее из-за двойного туннелирования.\n"
+            )
+        elif pt == "unified":
+            profile_note = (
+                "\n\n🟣 <b>Профиль: Универсальный</b>\n"
+                "Один профиль для всего: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks.\n"
+                "Как у крупных VPN‑провайдеров.\n"
             )
         else:
             profile_note = (
@@ -276,13 +285,19 @@ def main() -> None:
             )
             return
         
-        # Отправляем новый конфиг
-        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+        # Отправляем новый конфиг (имя файла по типу профиля)
+        pt = getattr(peer, "profile_type", None)
+        if pt == "vpn_gpt":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+        elif pt == "unified":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+        else:
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
-        
+
         servers_info = get_available_servers()
         server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
-        
+
         safe_reply(
             message,
             f"✅ Конфиг регенерирован на сервере <b>{server_name}</b>.\n"
@@ -361,7 +376,7 @@ def main() -> None:
         server_name = servers_info[server_id]["name"]
         server_desc = servers_info[server_id]["description"]
 
-        # Для Европы (eu1) — второй шаг: выбор типа профиля (Обычный VPN / VPN+GPT)
+        # Для Европы (eu1) — второй шаг: выбор типа профиля (Обычный VPN / VPN+GPT / Универсальный)
         if server_id == "eu1":
             bot.answer_callback_query(call.id, "Выбери тип профиля", show_alert=False)
             keyboard = types.InlineKeyboardMarkup()
@@ -373,6 +388,10 @@ def main() -> None:
                 text="🟢 VPN+GPT (обход блокировок)",
                 callback_data="profile_eu1_gpt",
             ))
+            keyboard.add(types.InlineKeyboardButton(
+                text="🟣 Универсальный (всё в одном)",
+                callback_data="profile_eu1_unified",
+            ))
             bot.edit_message_text(
                 f"<b>{server_name}</b>\n{server_desc}\n\n"
                 "<b>Выбери тип профиля:</b>\n\n"
@@ -382,7 +401,10 @@ def main() -> None:
                 "🟢 <b>VPN+GPT</b>\n"
                 "Трафик идёт через VPN, а HTTP/HTTPS дополнительно через Shadowsocks.\n"
                 "Подходит для: ChatGPT, обход блокировок по IP, все сайты.\n"
-                "⚠️ Может быть медленнее из-за двойного туннелирования.",
+                "⚠️ Может быть медленнее из-за двойного туннелирования.\n\n"
+                "🟣 <b>Универсальный</b>\n"
+                "Один профиль для всего: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks.\n"
+                "Как у крупных VPN‑провайдеров.",
                 call.message.chat.id,
                 call.message.message_id,
                 parse_mode="HTML",
@@ -411,9 +433,9 @@ def main() -> None:
             parse_mode="HTML",
         )
     
-    @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt"))
+    @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt", "profile_eu1_unified"))
     def callback_profile_eu1(call: types.CallbackQuery) -> None:  # type: ignore[override]
-        """Обработчик выбора типа профиля для Европы: Обычный VPN или VPN+GPT."""
+        """Обработчик выбора типа профиля для Европы: Обычный VPN, VPN+GPT или Универсальный."""
         if not call.from_user:
             bot.answer_callback_query(call.id, "Ошибка: не удалось определить пользователя.")
             return
@@ -424,16 +446,25 @@ def main() -> None:
             return
         
         is_gpt = call.data == "profile_eu1_gpt"
+        is_unified = call.data == "profile_eu1_unified"
+        if is_unified:
+            user.preferred_profile_type = "unified"
+        elif is_gpt:
+            user.preferred_profile_type = "vpn_gpt"
+        else:
+            user.preferred_profile_type = "vpn"
         user.preferred_server_id = "eu1"
-        user.preferred_profile_type = "vpn_gpt" if is_gpt else "vpn"
         upsert_user(user)
         
-        profile_label = "VPN+GPT" if is_gpt else "Обычный VPN"
-        profile_desc = (
-            "Трафик через VPN + Shadowsocks (обход блокировок ChatGPT и др.)"
-            if is_gpt
-            else "Трафик через VPN напрямую (YouTube, Instagram, обычные сайты)"
-        )
+        if is_unified:
+            profile_label = "Универсальный"
+            profile_desc = "Один профиль: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks"
+        elif is_gpt:
+            profile_label = "VPN+GPT"
+            profile_desc = "Трафик через VPN + Shadowsocks (обход блокировок ChatGPT и др.)"
+        else:
+            profile_label = "Обычный VPN"
+            profile_desc = "Трафик через VPN напрямую (YouTube, Instagram, обычные сайты)"
         bot.answer_callback_query(call.id, f"Профиль: {profile_label}", show_alert=False)
         
         servers_info = get_available_servers()

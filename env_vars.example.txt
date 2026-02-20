@@ -41,4 +41,8 @@ WG_DNS=1.1.1.1
 #
 # Скрипт добавления редиректа для VPN+GPT на eu1 (бот вызывает по SSH). По умолчанию /opt/vpnservice/scripts/add-ss-redirect.sh
 # WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh
+#
+# Примечание: Unified профиль (profile_type="unified") не требует дополнительных переменных окружения.
+# Настройка на сервере eu1: ipset unified_ss_dst + правило iptables (см. docs/scripts/setup-unified-iptables.sh.example).
+# Скрипт обновления IP: docs/scripts/update-unified-ss-ips.sh.example (запускать по cron).
 
