@@ -628,8 +628,13 @@ def main() -> None:
                 result_text += f"<b>Вывод:</b>\n<pre>{stdout_preview}</pre>\n"
             
             if stderr:
-                stderr_preview = stderr[:1000] + "..." if len(stderr) > 1000 else stderr
-                result_text += f"<b>Ошибки:</b>\n<pre>{stderr_preview}</pre>\n"
+                # systemctl status выводит в stderr, но это не ошибка
+                stderr_preview = stderr[:3500] + "..." if len(stderr) > 3500 else stderr
+                # Если stderr содержит полезную информацию (не только предупреждения), показываем её
+                if "Active:" in stderr or "Loaded:" in stderr or len(stderr.strip()) > 50:
+                    result_text += f"<b>Вывод:</b>\n<pre>{stderr_preview}</pre>\n"
+                else:
+                    result_text += f"<b>Ошибки:</b>\n<pre>{stderr_preview}</pre>\n"
             
             if not stdout and not stderr:
                 result_text += "Команда выполнена, но вывода нет."
