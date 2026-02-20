@@ -610,6 +610,11 @@ def main() -> None:
         
         server_id = parts[1]
         command = parts[2]
+        # Убираем кавычки из начала и конца команды, если они есть
+        # Это нужно, потому что Telegram передает кавычки как часть текста
+        command = command.strip()
+        if (command.startswith("'") and command.endswith("'")) or (command.startswith('"') and command.endswith('"')):
+            command = command[1:-1]
         
         try:
             stdout, stderr = execute_server_command(server_id, command, timeout=30)
