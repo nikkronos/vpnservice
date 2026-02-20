@@ -584,24 +584,28 @@ def main() -> None:
     @bot.message_handler(commands=["server_exec"])
     def cmd_server_exec(message: types.Message) -> None:  # type: ignore[override]
         """Выполняет команду на сервере через SSH (только для владельца)."""
+        logger.info("Команда /server_exec от пользователя %s", message.from_user.id if message.from_user else "unknown")
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
         
         if not is_owner(message.from_user.id, admin_id):
+            logger.warning("Попытка использования /server_exec не владельцем: %s", message.from_user.id)
             safe_reply(message, "Эта команда доступна только владельцу VPN.")
             return
         
         # Парсим команду: /server_exec <server_id> <command>
         text = message.text or ""
         parts = text.split(None, 2)
+        logger.info("Парсинг команды /server_exec: parts=%s, len=%d", parts, len(parts))
         if len(parts) < 3:
-            safe_reply(
-                message,
+            help_text = (
                 "Использование: /server_exec <server_id> <command>\n"
                 "Пример: /server_exec eu1 wg show\n"
-                "Пример: /server_exec eu1 'iptables -L FORWARD -n -v'",
+                "Пример: /server_exec eu1 'iptables -L FORWARD -n -v'"
             )
+            logger.info("Отправка справки по /server_exec")
+            safe_reply(message, help_text)
             return
         
         server_id = parts[1]

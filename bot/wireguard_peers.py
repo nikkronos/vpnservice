@@ -399,8 +399,15 @@ def _build_client_config(
         interface_lines.append(f"MTU = {mtu.strip()}")
     
     # AllowedIPs: если exclude_server_ip=True, исключаем IP сервера из VPN (для SSH)
+    # WireGuard на Windows не поддерживает синтаксис !IP/32 для исключения IP.
+    # Альтернатива: используем 0.0.0.0/1 и 128.0.0.0/1 вместо 0.0.0.0/0.
+    # Это даёт почти тот же эффект (весь трафик через VPN), но БЕЗ kill-switch на Windows.
+    # Без kill-switch SSH к серверу может работать через прямое подключение (не через VPN).
+    # Примечание: это не идеальное исключение конкретного IP, но позволяет SSH работать.
     if exclude_server_ip:
-        allowed_ips = f"AllowedIPs = 0.0.0.0/0, !{endpoint_host}/32\n"
+        # Используем два диапазона вместо одного для избежания kill-switch на Windows
+        # SSH к серверу будет идти напрямую, так как WireGuard не блокирует трафик вне туннеля
+        allowed_ips = "AllowedIPs = 0.0.0.0/1, 128.0.0.0/1\n"
     else:
         allowed_ips = "AllowedIPs = 0.0.0.0/0\n"
     
