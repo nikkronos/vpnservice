@@ -108,6 +108,22 @@ systemctl start shadowsocks-libev-redir@ss-wg.service
 
 Аналогично main, но подсеть `10.1.0.1/24`.
 
+**Важно для eu1:** если на сервере запущен Docker, его правила FORWARD (DOCKER-USER, DOCKER-FORWARD) идут первыми и могут не пропускать трафик из WireGuard. Нужно вставить правила для wg0 **в начало** цепочки FORWARD (до Docker):
+
+```bash
+# Вставить в начало FORWARD, чтобы трафик wg0 обрабатывался до цепочек Docker
+iptables -I FORWARD 1 -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -I FORWARD 1 -i wg0 -o eth0 -j ACCEPT
+```
+
+Чтобы правила сохранялись после перезагрузки, добавьте их в PostUp в `/etc/wireguard/wg0.conf` (используйте `-I FORWARD 1` вместо `-A FORWARD`) или настройте `iptables-persistent` / скрипт при загрузке.
+
+**Ответы NAT (если пинг/сайты не работают):** после MASQUERADE ответы приходят на IP сервера и обрабатываются цепочкой **INPUT**. Нужно разрешить ESTABLISHED,RELATED в начале INPUT:
+```bash
+iptables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT
+```
+Если такого правила нет или оно не первое, ответные пакеты могут отбрасываться и трафик через VPN не будет работать.
+
 #### Скрипт add-ss-redirect.sh для VPN+GPT
 
 **Путь:** `/opt/vpnservice/scripts/add-ss-redirect.sh`
@@ -260,6 +276,29 @@ wg show
 systemctl status shadowsocks-libev-local@ss-wg.service
 netstat -tlnp | grep 1081
 ```
+
+### Проверка FORWARD для wg0 (eu1, если сайты не открываются)
+
+Правила **должны быть выполнены на сервере eu1** (185.21.8.91), а не на другом хосте. Проверка:
+
+```bash
+# На eu1: первые две строки FORWARD должны быть правила для wg0
+iptables -L FORWARD -n -v | head -8
+```
+
+Ожидаемо: в начале цепочки есть `ACCEPT ... wg0 eth0` и `ACCEPT ... * wg0 ... ESTABLISHED`. После попытки открыть сайт счётчики пакетов (pkts) у этих правил должны расти.
+
+Если правил нет или они не в начале — выполнить на **eu1** ещё раз:
+```bash
+iptables -I FORWARD 1 -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -I FORWARD 1 -i wg0 -o eth0 -j ACCEPT
+```
+
+Проверка MASQUERADE (трафик из VPN должен выходить в интернет):
+```bash
+iptables -t nat -L POSTROUTING -n -v
+```
+Должно быть правило с `MASQUERADE` и выходом в `eth0` (источник может быть `0.0.0.0/0` или `10.1.0.0/24`). После открытия сайта счётчик пакетов у этого правила должен расти.
 
 ### Проверка ipset (eu1, Unified)
 
