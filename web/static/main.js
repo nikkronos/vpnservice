@@ -37,20 +37,55 @@ async function updateServersStatus() {
     }
 }
 
+// Обновление статуса сервисов (WireGuard, AmneziaWG, Shadowsocks, MTProto)
+async function updateServicesStatus() {
+    const el = document.getElementById('services-list');
+    if (!el) return;
+    try {
+        const response = await fetch('/api/services');
+        const data = await response.json();
+        if (data.error) {
+            el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
+            return;
+        }
+        el.innerHTML = '';
+        for (const s of data.services || []) {
+            const card = document.createElement('div');
+            card.className = 'service-card ' + (s.status || 'unknown');
+            const statusBadge = s.status === 'online' ? '🟢 Доступен' :
+                s.status === 'offline' ? '🔴 Недоступен' : '⚠️ Не проверено';
+            card.innerHTML = `
+                <div class="service-info">
+                    <strong>${s.server_name}</strong> — ${s.service}
+                    ${s.note ? '<br><small>' + s.note + '</small>' : ''}
+                </div>
+                <span class="status-badge ${s.status || 'unknown'}">${statusBadge}</span>
+            `;
+            el.appendChild(card);
+        }
+    } catch (err) {
+        console.error('Ошибка загрузки сервисов:', err);
+        el.innerHTML = '<p style="color: red;">Ошибка загрузки сервисов</p>';
+    }
+}
+
 // Обновление времени последнего обновления
 function updateLastUpdate() {
     const now = new Date();
-    document.getElementById('last-update').textContent = now.toLocaleString('ru-RU');
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = now.toLocaleString('ru-RU');
 }
 
 // Автообновление каждые 30 секунд
 setInterval(() => {
     updateServersStatus();
+    updateServicesStatus();
     updateLastUpdate();
 }, 30000);
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
     updateServersStatus();
+    updateServicesStatus();
     updateLastUpdate();
 });

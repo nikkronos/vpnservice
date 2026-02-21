@@ -189,6 +189,72 @@ section h2 {
     color: #333;
 }
 
+.services-list {
+    display: grid;
+    gap: 12px;
+}
+
+.service-card {
+    background: #f8f9fa;
+    padding: 14px 18px;
+    border-radius: 8px;
+    border-left: 4px solid #6c757d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.service-card.online {
+    border-left-color: #28a745;
+}
+
+.service-card.offline {
+    border-left-color: #dc3545;
+}
+
+.service-card.error,
+.service-card.unknown {
+    border-left-color: #ffc107;
+}
+
+.service-info {
+    color: #333;
+    font-size: 0.95em;
+}
+
+.service-info small {
+    color: #666;
+}
+
+.users-table-wrap {
+    overflow-x: auto;
+}
+
+.users-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #f8f9fa;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.users-table th,
+.users-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.users-table th {
+    background: #667eea;
+    color: white;
+    font-weight: 600;
+}
+
+.users-table tbody tr:hover {
+    background: #f0f0f0;
+}
+
 footer {
     text-align: center;
     padding-top: 20px;
