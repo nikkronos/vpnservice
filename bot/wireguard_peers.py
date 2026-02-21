@@ -686,10 +686,31 @@ def is_amneziawg_eu1_configured(env: Optional[dict] = None) -> bool:
     return bool(env.get("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT", "").strip())
 
 
-def create_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, str]:
+def _remove_amneziawg_peer(public_key: str) -> None:
+    """
+    Удаляет peer AmneziaWG на eu1 по публичному ключу (для регенерации).
+    Вызывает скрипт AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT или команду awg set <interface> peer <key> remove.
+    """
+    env = _load_env()
+    remove_script = env.get("AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT", "").strip()
+    interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip() or "awg0"
+
+    if remove_script:
+        remote_cmd = shlex.quote(remove_script) + " " + shlex.quote(public_key)
+    else:
+        remote_cmd = f"awg set {shlex.quote(interface)} peer {shlex.quote(public_key)} remove 2>/dev/null || true"
+    execute_server_command("eu1", remote_cmd, timeout=15)
+    logger.info("Удалён AmneziaWG peer с eu1 (public_key: %s...)", public_key[:20] if len(public_key) > 20 else public_key)
+
+
+def create_amneziawg_peer_and_config_for_user(
+    telegram_id: int,
+    reuse_ip: Optional[str] = None,
+) -> Tuple[Peer, str]:
     """
     Создаёт peer AmneziaWG на eu1 через вызов скрипта на сервере по SSH.
     Скрипт вызывается с аргументом client_ip; выводит первую строку PUBKEY=<pubkey>, далее — клиентский .conf.
+    Если задан reuse_ip (например "10.1.0.5/32") — используется этот IP вместо выделения нового (для регенерации).
     Возвращает (Peer, client_config_text).
     """
     env = _load_env()
@@ -703,7 +724,10 @@ def create_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, s
     if not ssh_host:
         raise WireGuardError("SSH_HOST не настроен для eu1 (WG_EU1_SSH_HOST или WG_EU1_ENDPOINT_HOST).")
 
-    wg_ip = _allocate_ip(network_cidr, "eu1")
+    if reuse_ip:
+        wg_ip = reuse_ip if "/" in reuse_ip else f"{reuse_ip}/32"
+    else:
+        wg_ip = _allocate_ip(network_cidr, "eu1")
     client_ip = wg_ip.split("/")[0].strip()
 
     # Вызов скрипта на eu1: script_path client_ip
@@ -717,9 +741,9 @@ def create_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, s
         raise WireGuardError("Скрипт AmneziaWG на eu1 не вернул конфиг. Проверь логи и настройки на сервере.")
 
     first_line = lines[0].strip()
-    if not first_line.startswith("PUBKEY="):
-        logger.error("Скрипт AmneziaWG вернул неожиданный формат. Первая строка: %s", first_line)
-        raise WireGuardError("Скрипт AmneziaWG вернул неверный формат (ожидается PUBKEY=...).")
+    if first_line.startswith("PUBKEY=ERROR") or not first_line.startswith("PUBKEY="):
+        logger.error("Скрипт AmneziaWG вернул ошибку или неверный формат. Первая строка: %s", first_line)
+        raise WireGuardError("Скрипт AmneziaWG на eu1 вернул ошибку. Проверь скрипт и awg на сервере.")
 
     public_key = first_line.split("=", 1)[1].strip()
     client_config = "\n".join(lines[1:]).strip()
@@ -740,6 +764,27 @@ def create_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, s
         "Создан AmneziaWG peer для telegram_id=%s на eu1, wg_ip=%s",
         telegram_id, wg_ip,
     )
+    return peer, client_config
+
+
+def regenerate_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, str]:
+    """
+    Регенерирует AmneziaWG peer на eu1: удаляет старый peer, создаёт новый с тем же IP, возвращает новый конфиг.
+    """
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id="eu1")
+    if not existing_peer or not existing_peer.active:
+        raise WireGuardError("Не найден активный peer для Европы (eu1). Сначала используй /get_config.")
+
+    try:
+        _remove_amneziawg_peer(existing_peer.public_key)
+    except WireGuardError as exc:
+        logger.warning("Не удалось удалить старый AmneziaWG peer (продолжаем): %s", exc)
+
+    peer, client_config = create_amneziawg_peer_and_config_for_user(
+        telegram_id,
+        reuse_ip=existing_peer.wg_ip,
+    )
+    logger.info("Регенерирован AmneziaWG peer для telegram_id=%s на eu1", telegram_id)
     return peer, client_config
 
 

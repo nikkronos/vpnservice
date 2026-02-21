@@ -5,7 +5,8 @@
 - **Европа (eu1) в боте:** для сервера «Европа» бот больше не выдаёт WireGuard конфиги. Выдаётся инструкция по AmneziaWG (ПК + iOS через «Поделиться»). При настройке скрипта на eu1 (`AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT`) бот вызывает скрипт по SSH и выдаёт готовый AmneziaWG .conf.
 - **Спецификация и скрипты:** созданы `docs/specs/spec-05-bot-amneziawg-eu1.md`, `docs/scripts/amneziawg-add-client.sh.example`, `docs/amneziawg-eu1-discovery.md` (проверка на eu1). В `env_vars.example.txt` добавлены переменные для AmneziaWG.
 - **Тексты бота:** обновлены /start, /help, /instruction — Европа = AmneziaWG, импорт в AmneziaVPN/AmneziaWG. Добавлен короткий текст `docs/bot-instruction-texts/instruction_amneziawg_short.txt`. Регенерация (/regen) для Европы пока вручную — сообщение «напиши владельцу».
-- **Код:** в `bot/wireguard_peers.py` добавлены `is_amneziawg_eu1_configured()`, `create_amneziawg_peer_and_config_for_user()`; в `bot/main.py` — ветка для eu1 (AmneziaWG скрипт или инструкция), обновлены сообщения «уже есть доступ» для eu1.
+- **Код:** в `bot/wireguard_peers.py` добавлены `is_amneziawg_eu1_configured()`, `create_amneziawg_peer_and_config_for_user()`, `_remove_amneziawg_peer()`, `regenerate_amneziawg_peer_and_config_for_user()`; в `bot/main.py` — ветка для eu1 (AmneziaWG скрипт или инструкция), автоматическая регенерация (/regen) для Европы при настроенных скриптах.
+- **Автоматизация выдачи и регенерации:** доработаны скрипты add-client и remove-client (`docs/scripts/`); бот поддерживает reuse_ip при создании peer и автоматический /regen для Европы (удаление старого peer на eu1, создание нового с тем же IP). Добавлен пошаговый гайд `docs/amneziawg-bot-automation-setup.md`. Переменные env: AMNEZIAWG_EU1_INTERFACE, AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT.
 
 ## 2026-02-21 — AmneziaWG на eu1 работает, iOS через «Поделиться», следующие задачи
 

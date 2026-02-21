@@ -1,0 +1,23 @@
+#!/bin/bash
+# Скрипт для eu1: удаление клиента AmneziaWG по публичному ключу (для регенерации конфига ботом)
+# Развернуть на eu1: /opt/vpnservice/scripts/amneziawg-remove-client.sh
+# Вызов: amneziawg-remove-client.sh <public_key>
+#
+# Переменная AWG_INTERFACE — имя интерфейса (по умолчанию awg0). Задать на eu1 или в начале скрипта.
+
+set -e
+
+AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
+PUBLIC_KEY="${1:?Usage: $0 <public_key>}"
+
+if command -v awg &>/dev/null; then
+  WG_CMD=awg
+elif command -v wg &>/dev/null; then
+  WG_CMD=wg
+else
+  echo "Ошибка: не найден awg или wg." >&2
+  exit 1
+fi
+
+$WG_CMD set "$AWG_INTERFACE" peer "$PUBLIC_KEY" remove 2>/dev/null || true
+# Игнорируем ошибку «peer не найден» — при регенерации это нормально

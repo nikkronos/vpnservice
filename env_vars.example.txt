@@ -46,10 +46,14 @@ WG_DNS=1.1.1.1
 # Настройка на сервере eu1: ipset unified_ss_dst + правило iptables (см. docs/scripts/setup-unified-iptables.sh.example).
 # Скрипт обновления IP: docs/scripts/update-unified-ss-ips.sh.example (запускать по cron).
 #
-# AmneziaWG для eu1 (выдача конфигов ботом вместо WireGuard):
-# Если задан AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT, бот для Европы вызывает этот скрипт по SSH и выдаёт AmneziaWG .conf.
-# Скрипт: один аргумент client_ip; вывод: первая строка PUBKEY=<pubkey>, далее — клиентский .conf.
-# Пример скрипта: docs/scripts/amneziawg-add-client.sh.example. Проверка на eu1: docs/amneziawg-eu1-discovery.md.
+# AmneziaWG для eu1 (автоматическая выдача и регенерация конфигов ботом):
+# Если задан AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT, бот для Европы вызывает скрипт по SSH и выдаёт AmneziaWG .conf.
+# Скрипт add: один аргумент client_ip; вывод: первая строка PUBKEY=<pubkey>, далее — клиентский .conf.
+# Для регенерации (/regen): бот удаляет старый peer (awg set interface peer remove или скрипт remove) и вызывает add с тем же IP.
+# Примеры скриптов: docs/scripts/amneziawg-add-client.sh.example, amneziawg-remove-client.sh.example.
+# Пошаговая настройка: docs/amneziawg-bot-automation-setup.md
 # AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh
 # AMNEZIAWG_EU1_NETWORK_CIDR=10.1.0.0/24
+# AMNEZIAWG_EU1_INTERFACE=awg0
+# AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client.sh
 

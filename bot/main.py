@@ -22,6 +22,7 @@ from .wireguard_peers import (
     execute_server_command,
     get_available_servers,
     is_amneziawg_eu1_configured,
+    regenerate_amneziawg_peer_and_config_for_user,
     regenerate_peer_and_config_for_user,
     replace_peer_with_profile_type,
 )
@@ -379,13 +380,35 @@ def main() -> None:
             # Определяем, на каком сервере искать peer для регенерации
             preferred_server_id = user.preferred_server_id or "main"
 
-            # Европа (eu1): регенерация AmneziaWG пока не автоматизирована — инструкция
+            # Европа (eu1): регенерация AmneziaWG через удаление старого peer и создание нового (тот же IP)
             if preferred_server_id == "eu1":
-                safe_reply(
-                    message,
-                    "Для сервера <b>Европа</b> (AmneziaWG) регенерация конфига пока вручную.\n"
-                    "Напиши владельцу бота — он выдаст новый конфиг.",
-                )
+                if is_amneziawg_eu1_configured():
+                    try:
+                        peer, client_config = regenerate_amneziawg_peer_and_config_for_user(telegram_id)
+                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+                        _send_config_file(chat_id, client_config, filename)
+                        servers_info = get_available_servers()
+                        server_name = servers_info.get("eu1", {}).get("name", "Европа")
+                        safe_reply(
+                            message,
+                            f"✅ Конфиг AmneziaWG регенерирован на сервере <b>{server_name}</b>.\n"
+                            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
+                            "Новые ключи сгенерированы, старый peer удалён.\n\n"
+                            "⚠️ <b>Важно:</b> Обнови конфиг в AmneziaVPN/AmneziaWG на всех устройствах. Старый конфиг больше не будет работать.",
+                        )
+                    except WireGuardError as exc:
+                        logger.exception("Ошибка регенерации AmneziaWG для %s: %s", telegram_id, exc)
+                        safe_reply(
+                            message,
+                            f"Не удалось регенерировать конфиг AmneziaWG: {exc}\n"
+                            "Убедись, что у тебя уже создан доступ на Европе (/get_config). Или напиши владельцу.",
+                        )
+                else:
+                    safe_reply(
+                        message,
+                        "Для сервера <b>Европа</b> (AmneziaWG) регенерация конфига пока вручную.\n"
+                        "Напиши владельцу бота — он выдаст новый конфиг.",
+                    )
                 return
 
             preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None

@@ -29,8 +29,14 @@
 - `bot/main.py`: импорт AmneziaWG-функций; ветка eu1 в /get_config (скрипт или инструкция); обновлены /start, /help, /instruction; сообщения «уже есть доступ» и /regen для eu1; функции `_get_amneziawg_instruction_short`, `_send_eu1_amneziawg_instruction`.
 - `bot/wireguard_peers.py`: `is_amneziawg_eu1_configured()`, `create_amneziawg_peer_and_config_for_user()`; описание eu1 в `get_available_servers()` обновлено на AmneziaWG; eu1 показывается и при наличии только SSH (без WG_EU1_SERVER_PUBLIC_KEY).
 
+## Дополнительно: автоматизация выдачи и регенерации
+
+- **Скрипты:** доработан `docs/scripts/amneziawg-add-client.sh.example` (проверки, ошибки, переменные в начале); добавлен `docs/scripts/amneziawg-remove-client.sh.example` для удаления peer по публичному ключу.
+- **Бот:** добавлены `_remove_amneziawg_peer()`, `regenerate_amneziawg_peer_and_config_for_user()`; `create_amneziawg_peer_and_config_for_user(telegram_id, reuse_ip=None)` — при регенерации передаётся тот же IP. В /regen для Европы при настроенных скриптах бот удаляет старый peer на eu1 и создаёт новый, выдаёт новый .conf.
+- **Env:** в примере добавлены `AMNEZIAWG_EU1_INTERFACE`, `AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT`. Для удаления peer бот либо вызывает скрипт remove, либо выполняет `awg set <interface> peer <key> remove` на eu1.
+- **Документ:** создан `docs/amneziawg-bot-automation-setup.md` — пошаговая настройка: проверка на eu1 → развёртывание скриптов на eu1 → переменные на Timeweb → перезапуск бота → проверка /get_config и /regen.
+
 ## Важные замечания для следующего агента
 
-- **Европа (eu1):** конфиги только AmneziaWG. Чтобы бот выдавал .conf автоматически, на eu1 нужно развернуть скрипт по примеру `docs/scripts/amneziawg-add-client.sh.example` и задать `AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT` в env на сервере бота. Проверка на eu1 — `docs/amneziawg-eu1-discovery.md`.
-- **Регенерация для Европы:** /regen при выборе Европы пока выдаёт сообщение «регенерация вручную — напиши владельцу». При появлении скрипта удаления peer на eu1 можно добавить автоматический /regen для AmneziaWG.
-- **Миграция пользователей:** все друзья/знакомые должны получить новые конфиги (AmneziaWG). Старые WireGuard eu1 конфиги больше не выдаются; при /get_config для Европы пользователь получает инструкцию и при настроенном скрипте — готовый .conf.
+- **Европа (eu1):** конфиги только AmneziaWG. Чтобы бот выдавал и регенерировал .conf автоматически, выполни настройку по **`docs/amneziawg-bot-automation-setup.md`** (скрипты на eu1 + переменные на Timeweb).
+- **Миграция пользователей:** все друзья/знакомые должны получить новые конфиги (AmneziaWG). Старые WireGuard eu1 конфиги больше не выдаются; при /get_config для Европы пользователь получает инструкцию или готовый .conf при настроенной автоматизации.
