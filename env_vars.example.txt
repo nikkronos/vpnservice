@@ -37,7 +37,7 @@ WG_DNS=1.1.1.1
 # Если бот работает на другом сервере, а EU-нода на удалённом VPS:
 # WG_EU1_SSH_HOST=your_eu_server_ip
 # WG_EU1_SSH_USER=root
-# WG_EU1_SSH_KEY_PATH=/path/to/ssh/key  # опционально, если не используется стандартный ~/.ssh/id_rsa
+# WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1  # ключ должен существовать на сервере бота (Timeweb)
 #
 # Скрипт добавления редиректа для VPN+GPT на eu1 (бот вызывает по SSH). По умолчанию /opt/vpnservice/scripts/add-ss-redirect.sh
 # WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh
@@ -54,6 +54,6 @@ WG_DNS=1.1.1.1
 # Пошаговая настройка: docs/amneziawg-bot-automation-setup.md
 # AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh
 # AMNEZIAWG_EU1_NETWORK_CIDR=10.1.0.0/24
-# AMNEZIAWG_EU1_INTERFACE=awg0
+# AMNEZIAWG_EU1_INTERFACE=wg0
 # AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client.sh
 

@@ -736,6 +736,16 @@ def create_amneziawg_peer_and_config_for_user(
     remote_cmd = f"AWG_INTERFACE={shlex.quote(interface)} {script_path} {shlex.quote(client_ip)}"
     stdout, stderr = execute_server_command("eu1", remote_cmd, timeout=60)
 
+    # Ошибка SSH (ключ не найден или доступ запрещён) — подсказка по настройке на сервере бота (Timeweb)
+    stderr_lower = (stderr or "").lower()
+    if "identity file" in stderr_lower or "permission denied" in stderr_lower:
+        logger.error("SSH к eu1 не удался. stderr: %s", stderr)
+        raise WireGuardError(
+            "Не удалось подключиться к eu1 по SSH: ключ не найден или доступ запрещён. "
+            f"На сервере бота (Timeweb) проверь: 1) WG_EU1_SSH_KEY_PATH в env_vars.txt — путь к ключу; "
+            "2) файл ключа существует (ls -la /root/.ssh/). Если ключ называется id_ed25519_eu1 — укажи его в env."
+        )
+
     # Парсим вывод: первая строка PUBKEY=..., остальное — клиентский .conf
     lines = (stdout or "").strip().split("\n")
     if not lines:
