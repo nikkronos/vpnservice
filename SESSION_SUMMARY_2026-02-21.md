@@ -36,7 +36,15 @@
 - **Env:** в примере добавлены `AMNEZIAWG_EU1_INTERFACE`, `AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT`. Для удаления peer бот либо вызывает скрипт remove, либо выполняет `awg set <interface> peer <key> remove` на eu1.
 - **Документ:** создан `docs/amneziawg-bot-automation-setup.md` — пошаговая настройка: проверка на eu1 → развёртывание скриптов на eu1 → переменные на Timeweb → перезапуск бота → проверка /get_config и /regen.
 
+## Продолжение сессии: веб-панель мониторинга
+
+- **Деплой:** панель развёрнута на Timeweb на порту 5001 (vpn-web.service), URL http://81.200.146.32:5001. Порт 5001 выбран из-за конфликта с Damir на 5000. Раздел в docs/deployment.md, web/vpn-web.service.example.
+- **Этап 2:** API `/api/services` (WireGuard, AmneziaWG, Shadowsocks, MTProto по нодам), блок «Сервисы»; блок «Пользователи (сводка)». Блок «По типам профилей» убран по запросу владельца.
+- **Этап 3:** API `/api/traffic` — сбор rx/tx с main (локально `wg show dump`) и eu1 (по SSH); блок «Трафик по пользователям» (по пользователям и по устройствам), обновление раз в 30 сек.
+- **Подсказки:** под каждым блоком панели добавлены короткие пояснения (index.html, .section-hint в style.css).
+
 ## Важные замечания для следующего агента
 
 - **Европа (eu1):** конфиги только AmneziaWG. Чтобы бот выдавал и регенерировал .conf автоматически, выполни настройку по **`docs/amneziawg-bot-automation-setup.md`** (скрипты на eu1 + переменные на Timeweb).
 - **Миграция пользователей:** все друзья/знакомые должны получить новые конфиги (AmneziaWG). Старые WireGuard eu1 конфиги больше не выдаются; при /get_config для Европы пользователь получает инструкцию или готовый .conf при настроенной автоматизации.
+- **Веб-панель:** URL http://81.200.146.32:5001. Обновление: git pull в /opt/vpnservice, systemctl restart vpn-web.service.
