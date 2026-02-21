@@ -22,8 +22,8 @@ from flask import Flask, jsonify, render_template, request
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from bot.config import load_config
-from bot.storage import Peer, User, get_all_peers, get_all_users
+from bot.config import load_config, _parse_env_file
+from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -94,6 +94,67 @@ def check_server_status(server_id: str, endpoint_host: Optional[str] = None) -> 
             "last_check": datetime.now().isoformat(),
             "error": str(e)
         }
+
+
+def _parse_wg_dump_transfer(stdout: str) -> Dict[str, tuple]:
+    """
+    Парсит вывод `wg show <interface> dump`.
+    Возвращает dict: public_key -> (rx_bytes, tx_bytes).
+    Формат dump: первая строка — интерфейс, далее по строке на peer (табы):
+    public_key, preshared_key, endpoint, allowed_ips, latest_handshake, transfer_rx, transfer_tx, ...
+    """
+    result: Dict[str, tuple] = {}
+    lines = stdout.strip().split("\n")
+    for line in lines[1:]:  # пропускаем строку интерфейса
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            try:
+                pubkey = parts[0].strip()
+                rx = int(parts[5])
+                tx = int(parts[6])
+                result[pubkey] = (rx, tx)
+            except (ValueError, IndexError):
+                continue
+    return result
+
+
+def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
+    """
+    Получает трафик (rx, tx в байтах) по каждому pubkey для указанной ноды.
+    main — локальный вызов wg show; eu1 — по SSH.
+    """
+    base = pathlib.Path(__file__).parent.parent
+    env = _parse_env_file(base / "env_vars.txt")
+    if server_id == "main":
+        interface = env.get("WG_INTERFACE", "wg0")
+        try:
+            out = subprocess.run(
+                ["wg", "show", interface, "dump"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if out.returncode != 0:
+                return {}
+            return _parse_wg_dump_transfer(out.stdout)
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            logger.warning("Локальный wg show для %s: %s", server_id, e)
+            return {}
+    else:
+        try:
+            from bot.wireguard_peers import execute_server_command, _get_server_config, _load_env
+            env = _load_env()
+            cfg = _get_server_config(server_id, env)
+            interface = cfg.get("interface", "wg0")
+            stdout, stderr = execute_server_command(
+                server_id,
+                f"wg show {interface} dump 2>/dev/null || true",
+                timeout=15,
+            )
+            return _parse_wg_dump_transfer(stdout or "")
+        except Exception as e:
+            logger.warning("SSH wg show для %s: %s", server_id, e)
+            return {}
 
 
 def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -277,6 +338,51 @@ def api_users():
         return jsonify(users_data)
     except Exception as e:
         logger.exception(f"Ошибка API пользователей: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/traffic")
+def api_traffic():
+    """API: трафик по пользователям и пирам (rx/tx с нод WireGuard)."""
+    try:
+        from bot.wireguard_peers import get_available_servers
+        peers = get_all_peers()
+        servers = get_available_servers()
+        rows: List[Dict] = []
+        for server_id in servers:
+            transfer = _get_wg_transfer_for_server(server_id)
+            for peer in peers:
+                if peer.server_id != server_id or not peer.active:
+                    continue
+                rx_tx = transfer.get(peer.public_key)
+                if rx_tx is None:
+                    rx_tx = (0, 0)
+                rx_bytes, tx_bytes = rx_tx
+                user = find_user(peer.telegram_id)
+                username = user.username if user else None
+                rows.append({
+                    "telegram_id": peer.telegram_id,
+                    "username": username,
+                    "server_id": server_id,
+                    "wg_ip": peer.wg_ip,
+                    "rx_bytes": rx_bytes,
+                    "tx_bytes": tx_bytes,
+                })
+        # Суммы по пользователям
+        by_user: Dict[int, Dict] = {}
+        for r in rows:
+            uid = r["telegram_id"]
+            if uid not in by_user:
+                by_user[uid] = {"username": r["username"], "rx_bytes": 0, "tx_bytes": 0}
+            by_user[uid]["rx_bytes"] += r["rx_bytes"]
+            by_user[uid]["tx_bytes"] += r["tx_bytes"]
+        return jsonify({
+            "rows": rows,
+            "by_user": [{"telegram_id": k, "username": v["username"], "rx_bytes": v["rx_bytes"], "tx_bytes": v["tx_bytes"]} for k, v in by_user.items()],
+            "last_update": datetime.now().isoformat(),
+        })
+    except Exception as e:
+        logger.exception(f"Ошибка API трафика: {e}")
         return jsonify({"error": str(e)}), 500
 
 

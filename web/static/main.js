@@ -69,6 +69,56 @@ async function updateServicesStatus() {
     }
 }
 
+// Форматирование байтов в МБ/ГБ
+function formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' ГБ';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' МБ';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' КБ';
+    return bytes + ' Б';
+}
+
+// Обновление блока трафика
+async function updateTraffic() {
+    const el = document.getElementById('traffic-list');
+    if (!el) return;
+    try {
+        const response = await fetch('/api/traffic');
+        const data = await response.json();
+        if (data.error) {
+            el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
+            return;
+        }
+        const rows = data.rows || [];
+        const byUser = data.by_user || [];
+        if (rows.length === 0 && byUser.length === 0) {
+            el.innerHTML = '<p>Нет данных о трафике (подключите клиентов к нодам).</p>';
+            return;
+        }
+        let html = '';
+        if (byUser.length > 0) {
+            html += '<table class="users-table traffic-table"><thead><tr><th>Пользователь</th><th>Принято</th><th>Отправлено</th></tr></thead><tbody>';
+            for (const u of byUser) {
+                const name = (u.username || 'ID ' + u.telegram_id);
+                html += '<tr><td>' + name + '</td><td>' + formatBytes(u.rx_bytes) + '</td><td>' + formatBytes(u.tx_bytes) + '</td></tr>';
+            }
+            html += '</tbody></table>';
+        }
+        if (rows.length > 0) {
+            html += '<p class="traffic-detail-caption"><strong>По устройствам (сервер / IP):</strong></p>';
+            html += '<table class="users-table traffic-table"><thead><tr><th>Пользователь</th><th>Сервер</th><th>IP</th><th>Принято</th><th>Отправлено</th></tr></thead><tbody>';
+            for (const r of rows) {
+                const name = (r.username || 'ID ' + r.telegram_id);
+                html += '<tr><td>' + name + '</td><td>' + r.server_id + '</td><td>' + (r.wg_ip || '—') + '</td><td>' + formatBytes(r.rx_bytes) + '</td><td>' + formatBytes(r.tx_bytes) + '</td></tr>';
+            }
+            html += '</tbody></table>';
+        }
+        el.innerHTML = html;
+    } catch (err) {
+        console.error('Ошибка загрузки трафика:', err);
+        el.innerHTML = '<p style="color: red;">Ошибка загрузки трафика</p>';
+    }
+}
+
 // Обновление времени последнего обновления
 function updateLastUpdate() {
     const now = new Date();
@@ -80,6 +130,7 @@ function updateLastUpdate() {
 setInterval(() => {
     updateServersStatus();
     updateServicesStatus();
+    updateTraffic();
     updateLastUpdate();
 }, 30000);
 
@@ -87,5 +138,6 @@ setInterval(() => {
 document.addEventListener('DOMContentLoaded', () => {
     updateServersStatus();
     updateServicesStatus();
+    updateTraffic();
     updateLastUpdate();
 });
