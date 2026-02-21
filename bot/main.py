@@ -647,15 +647,16 @@ def main() -> None:
 
     @bot.message_handler(commands=["instruction"])
     def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет инструкцию по подключению: один конфиг на сервер, импорт в WireGuard или AmneziaVPN."""
+        """Отправляет инструкцию по подключению: один конфиг, импорт в AmneziaVPN/AmneziaWG."""
         instr = (
             "📱 <b>Как подключиться</b>\n\n"
-            "🇷🇺 <b>Россия</b> — приложение WireGuard (wireguard.com/install).\n"
-            "Получи конфиг через /get_config → импортируй .conf в WireGuard (ПК: «Импорт из файла», iPhone: + → из файла).\n\n"
-            "🇪🇺 <b>Европа</b> — один конфиг, тот же формат.\n"
-            "• ПК: WireGuard или AmneziaVPN — «Импорт» / «Импорт из файла», выбери .conf.\n"
-            "• iPhone/iPad: сохрани .conf → приложение «Файлы» → долгое нажатие на файл → <b>Поделиться</b> → WireGuard или AmneziaWG.\n\n"
-            "Конфиг выдаёт бот по команде /get_config после выбора сервера (/server)."
+            "1. Выбери сервер: /server (Россия или Европа).\n"
+            "2. Получи конфиг: /get_config — бот пришлёт файл .conf.\n"
+            "3. Импортируй в <b>AmneziaVPN</b> или <b>AmneziaWG</b>:\n"
+            "   • Скачай приложение: amnezia.org/en/downloads\n"
+            "   • ПК: AmneziaVPN → «Импорт» / «Импорт из файла» → выбери .conf.\n"
+            "   • iPhone/iPad: сохрани .conf → приложение «Файлы» → долгое нажатие на файл → <b>Поделиться</b> → AmneziaWG (или AmneziaVPN).\n\n"
+            "Один конфиг на сервер, один клиент — без WireGuard (обход блокировок)."
         )
         safe_reply(message, instr)
 
@@ -683,10 +684,11 @@ def main() -> None:
         """Отправляет справку: два сервера, один конфиг на сервер."""
         help_text = (
             "📖 <b>Справка по VPN боту</b>\n\n"
-            "🇷🇺 <b>Россия</b> — WireGuard, низкий пинг.\n"
-            "🇪🇺 <b>Европа</b> — один конфиг (импорт в WireGuard или AmneziaVPN/AmneziaWG).\n\n"
-            "📱 <b>Шаги:</b> /server → выбери сервер → /get_config → импортируй .conf по /instruction.\n\n"
-            "💬 Telegram заблокирован? — /proxy (MTProto-прокси).\n\n"
+            "🇷🇺 <b>Россия</b> — низкий пинг.\n"
+            "🇪🇺 <b>Европа</b> — доступ из РФ (обход блокировок).\n"
+            "Один конфиг на сервер, импорт в AmneziaVPN/AmneziaWG.\n\n"
+            "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
+            "💬 Telegram заблокирован? — /proxy.\n\n"
             "❓ Вопросы — владельцу или /instruction."
         )
         safe_reply(message, help_text)

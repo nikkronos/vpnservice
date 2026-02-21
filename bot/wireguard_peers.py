@@ -689,14 +689,15 @@ def is_amneziawg_eu1_configured(env: Optional[dict] = None) -> bool:
 def _remove_amneziawg_peer(public_key: str) -> None:
     """
     Удаляет peer AmneziaWG на eu1 по публичному ключу (для регенерации).
-    Вызывает скрипт AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT или команду awg set <interface> peer <key> remove.
+    Вызывает скрипт AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT или команду awg/wg set <interface> peer <key> remove.
+    Передаёт AWG_INTERFACE на eu1, чтобы скрипт использовал нужный интерфейс (например wg0).
     """
     env = _load_env()
     remove_script = env.get("AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT", "").strip()
     interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip() or "awg0"
 
     if remove_script:
-        remote_cmd = shlex.quote(remove_script) + " " + shlex.quote(public_key)
+        remote_cmd = f"AWG_INTERFACE={shlex.quote(interface)} {remove_script} {shlex.quote(public_key)}"
     else:
         remote_cmd = f"awg set {shlex.quote(interface)} peer {shlex.quote(public_key)} remove 2>/dev/null || true"
     execute_server_command("eu1", remote_cmd, timeout=15)
@@ -730,8 +731,9 @@ def create_amneziawg_peer_and_config_for_user(
         wg_ip = _allocate_ip(network_cidr, "eu1")
     client_ip = wg_ip.split("/")[0].strip()
 
-    # Вызов скрипта на eu1: script_path client_ip
-    remote_cmd = shlex.quote(script_path) + " " + shlex.quote(client_ip)
+    # Интерфейс на eu1 (wg0 или awg0) — передаём в скрипт, иначе скрипт по умолчанию использует awg0
+    interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip() or "awg0"
+    remote_cmd = f"AWG_INTERFACE={shlex.quote(interface)} {script_path} {shlex.quote(client_ip)}"
     stdout, stderr = execute_server_command("eu1", remote_cmd, timeout=60)
 
     # Парсим вывод: первая строка PUBKEY=..., остальное — клиентский .conf
@@ -742,8 +744,12 @@ def create_amneziawg_peer_and_config_for_user(
 
     first_line = lines[0].strip()
     if first_line.startswith("PUBKEY=ERROR") or not first_line.startswith("PUBKEY="):
-        logger.error("Скрипт AmneziaWG вернул ошибку или неверный формат. Первая строка: %s", first_line)
-        raise WireGuardError("Скрипт AmneziaWG на eu1 вернул ошибку. Проверь скрипт и awg на сервере.")
+        err_detail = (stderr or "").strip()[:400] if stderr else first_line or "(пустой вывод)"
+        logger.error("Скрипт AmneziaWG вернул ошибку. first_line=%s stderr=%s", first_line, stderr)
+        raise WireGuardError(
+            "Скрипт AmneziaWG на eu1 вернул ошибку. На eu1 должен быть интерфейс "
+            f"({interface}), в env — AMNEZIAWG_EU1_INTERFACE. Детали: {err_detail}"
+        )
 
     public_key = first_line.split("=", 1)[1].strip()
     client_config = "\n".join(lines[1:]).strip()
