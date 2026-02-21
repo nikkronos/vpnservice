@@ -46,9 +46,17 @@ section {
 section h2 {
     font-size: 1.8em;
     color: #333;
-    margin-bottom: 20px;
+    margin-bottom: 8px;
     padding-bottom: 10px;
     border-bottom: 2px solid #f0f0f0;
+}
+
+.section-hint {
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 16px;
+    font-style: italic;
+    line-height: 1.4;
 }
 
 .stats-grid {
