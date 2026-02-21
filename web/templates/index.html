@@ -55,6 +55,39 @@
             </div>
         </section>
 
+        <section class="services">
+            <h2>🔧 Сервисы</h2>
+            <div id="services-list" class="services-list">
+                <p>Загрузка...</p>
+            </div>
+        </section>
+
+        {% if stats.users_summary %}
+        <section class="users-summary">
+            <h2>👥 Пользователи (сводка)</h2>
+            <div class="users-table-wrap">
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>Пользователь</th>
+                            <th>Серверы</th>
+                            <th>Подключений</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in stats.users_summary %}
+                        <tr>
+                            <td>{{ u.display_name }}</td>
+                            <td>{{ u.servers | join(', ') }}</td>
+                            <td>{{ u.peer_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
         <footer>
             <p>Последнее обновление: <span id="last-update"></span></p>
             <p><a href="/api/stats" target="_blank">API статистики (JSON)</a></p>
