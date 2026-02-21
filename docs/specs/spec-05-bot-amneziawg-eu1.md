@@ -26,7 +26,7 @@
 - Бот захватывает stdout и отправляет пользователю файлом.
 
 **Плюсы:** Вся логика AmneziaWG на сервере; бот только вызывает скрипт и шлёт результат.  
-**Минусы:** Нужно знать путь к конфигу AmneziaWG на eu1 и интерфейс (awg0 и т.п.); возможна доработка скрипта под формат конфига Amnezia app.
+**Минусы:** Нужно знать путь к конфигу AmneziaWG на eu1 и интерфейс (awg0 или wg0 в зависимости от сервера); возможна доработка скрипта под формат конфига Amnezia app.
 
 ### Вариант B: Логика в боте (awg на eu1)
 
@@ -98,10 +98,10 @@ awg show awg0 2>/dev/null || true
 
 Для варианта B (и при необходимости для A):
 
-- `AMNEZIAWG_EU1_INTERFACE` — имя интерфейса (например, `awg0`).
+- `AMNEZIAWG_EU1_INTERFACE` — имя интерфейса на eu1 (`awg0` или `wg0`; бот передаёт его в скрипты как AWG_INTERFACE).
 - `AMNEZIAWG_EU1_CONFIG_PATH` — путь к серверному конфигу на eu1 (например, `/etc/amnezia/amneziawg/awg0.conf`), чтобы читать публичный ключ сервера, порт и параметры обфускации.
 
-Либо скрипт для варианта A вызывается через существующие `WG_EU1_SSH_*` и, например, `AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh`.
+Вариант A: скрипт вызывается через `WG_EU1_SSH_HOST`, `WG_EU1_SSH_USER`, `WG_EU1_SSH_KEY_PATH` (рекомендуемое имя ключа на Timeweb: `id_ed25519_eu1`) и `AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh`. Пошаговая настройка: `docs/amneziawg-bot-automation-setup.md`.
 
 ### 4.4. Хранилище (peers.json)
 
