@@ -52,18 +52,9 @@ python app.py
 
 ## Деплой
 
-Веб-панель может быть развёрнута на том же сервере Timeweb, где работает бот, или на отдельном сервере.
+Веб-панель разворачивается на том же сервере Timeweb, где работает бот (`/opt/vpnservice`). Пошаговая инструкция: **`../docs/deployment.md`** — раздел «Веб-панель мониторинга (Timeweb)».
 
-### На Timeweb:
-
-```bash
-# Создать systemd сервис
-sudo nano /etc/systemd/system/vpn-web.service
-
-# Запустить сервис
-sudo systemctl start vpn-web.service
-sudo systemctl enable vpn-web.service
-```
+Пример systemd unit: `vpn-web.service.example` в этой папке.
 
 ## Безопасность
 

@@ -262,6 +262,70 @@ systemctl status vpn-bot.service
 journalctl -u vpn-bot.service -f
 ```
 
+## Веб-панель мониторинга (Timeweb)
+
+Панель отображает статус серверов, пользователей и статистику. Разворачивается на том же сервере Timeweb, где работает бот (`/opt/vpnservice`).
+
+### Зависимости
+
+В том же venv, что и бот:
+
+```bash
+cd /opt/vpnservice
+source venv/bin/activate
+pip install -r web/requirements.txt
+```
+
+### Запуск вручную (проверка)
+
+```bash
+cd /opt/vpnservice
+FLASK_ENV=production /opt/vpnservice/venv/bin/python web/app.py
+```
+
+Панель слушает порт **5000**. Открыть в браузере: `http://81.200.146.32:5000` (или добавить в firewall: `ufw allow 5000/tcp` и перезагрузить UFW).
+
+### Systemd (постоянный запуск)
+
+1. Скопировать unit-файл:
+   ```bash
+   sudo cp /opt/vpnservice/web/vpn-web.service.example /etc/systemd/system/vpn-web.service
+   ```
+   Если путь к проекту не `/opt/vpnservice`, отредактировать `WorkingDirectory` и пути в `ExecStart` и `Environment`.
+
+2. Включить и запустить:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable vpn-web.service
+   sudo systemctl start vpn-web.service
+   sudo systemctl status vpn-web.service
+   ```
+
+3. Логи:
+   ```bash
+   journalctl -u vpn-web.service -f
+   ```
+
+### URL панели
+
+После деплоя зафиксировать ссылку в этом разделе, например:
+
+- **URL панели:** `http://81.200.146.32:5000` (или через nginx/HTTPS, если настроен)
+
+### Обновление панели
+
+```bash
+cd /opt/vpnservice
+git pull
+pip install -r web/requirements.txt --quiet
+sudo systemctl restart vpn-web.service
+```
+
+### Безопасность
+
+- Панель читает `env_vars.txt` и данные бота (`bot/data/`). Доступ к `/api/users` — по параметру `admin_key=<ADMIN_ID>` (в продакшене лучше вынести за nginx или добавить нормальную авторизацию).
+- Рекомендуется поставить nginx reverse proxy и HTTPS (Let's Encrypt), открывать порт 5000 только с localhost.
+
 ## Проверка работы
 
 ### Проверка WireGuard

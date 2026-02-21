@@ -1,0 +1,16 @@
+[Unit]
+Description=VPN Web Panel - monitoring dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vpnservice
+Environment="PATH=/opt/vpnservice/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="FLASK_ENV=production"
+ExecStart=/opt/vpnservice/venv/bin/python web/app.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
