@@ -1,0 +1,42 @@
+#!/bin/bash
+# Пример скрипта для eu1: добавление клиента AmneziaWG и вывод клиентского .conf
+# Развернуть на eu1 (например /opt/vpnservice/scripts/amneziawg-add-client.sh).
+# Бот вызывает по SSH: amneziawg-add-client.sh <client_ip>
+# Вывод: первая строка PUBKEY=<публичный_ключ_клиента>, далее — содержимое клиентского .conf
+#
+# Требования на eu1: установлен AmneziaWG (awg), интерфейс awg0 (или другой — задать ниже).
+# Путь к серверному конфигу и интерфейс задать в переменных или в начале скрипта.
+
+set -e
+
+CLIENT_IP="${1:?Usage: $0 <client_ip>}"
+AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
+AWG_SERVER_CONF="${AWG_SERVER_CONF:-/etc/wireguard/awg0.conf}"
+ENDPOINT_HOST="${ENDPOINT_HOST:-185.21.8.91}"
+ENDPOINT_PORT="${ENDPOINT_PORT:-51820}"
+DNS="${DNS:-1.1.1.1, 8.8.8.8}"
+
+# Генерация ключей (awg или wg — совместимы)
+PRIVATE_KEY=$(awg genkey 2>/dev/null || wg genkey)
+PUBLIC_KEY=$(echo "$PRIVATE_KEY" | awg pubkey 2>/dev/null || echo "$PRIVATE_KEY" | wg pubkey)
+
+# Добавление peer в AmneziaWG
+awg set "$AWG_INTERFACE" peer "$PUBLIC_KEY" allowed-ips "${CLIENT_IP}/32" 2>/dev/null || \
+  wg set "$AWG_INTERFACE" peer "$PUBLIC_KEY" allowed-ips "${CLIENT_IP}/32"
+
+# Публичный ключ сервера и порт из конфига или через awg show
+SERVER_PUBLIC_KEY=$(awg show "$AWG_INTERFACE" public-key 2>/dev/null || wg show "$AWG_INTERFACE" public-key)
+LISTEN_PORT=$(grep -E '^ListenPort\s*=' "$AWG_SERVER_CONF" 2>/dev/null | head -1 | sed 's/.*=\s*//' || echo "$ENDPOINT_PORT")
+
+# Вывод для бота: первая строка PUBKEY=, далее — клиентский .conf
+echo "PUBKEY=$PUBLIC_KEY"
+echo "[Interface]"
+echo "PrivateKey = $PRIVATE_KEY"
+echo "Address = ${CLIENT_IP}/32"
+echo "DNS = $DNS"
+echo ""
+echo "[Peer]"
+echo "PublicKey = $SERVER_PUBLIC_KEY"
+echo "Endpoint = ${ENDPOINT_HOST}:${LISTEN_PORT}"
+echo "AllowedIPs = 0.0.0.0/0"
+echo "PersistentKeepalive = 25"

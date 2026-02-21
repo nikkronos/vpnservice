@@ -673,6 +673,76 @@ def replace_peer_with_profile_type(
     return peer, client_config
 
 
+def is_amneziawg_eu1_configured(env: Optional[dict] = None) -> bool:
+    """
+    Проверяет, настроена ли выдача AmneziaWG конфигов для eu1 через скрипт на сервере.
+    Если задан AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT — бот будет вызывать этот скрипт по SSH для создания клиента.
+    """
+    if env is None:
+        try:
+            env = _load_env()
+        except Exception:
+            return False
+    return bool(env.get("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT", "").strip())
+
+
+def create_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, str]:
+    """
+    Создаёт peer AmneziaWG на eu1 через вызов скрипта на сервере по SSH.
+    Скрипт вызывается с аргументом client_ip; выводит первую строку PUBKEY=<pubkey>, далее — клиентский .conf.
+    Возвращает (Peer, client_config_text).
+    """
+    env = _load_env()
+    script_path = env.get("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT", "").strip()
+    if not script_path:
+        raise WireGuardError("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT не задан в env_vars.txt.")
+
+    network_cidr = env.get("AMNEZIAWG_EU1_NETWORK_CIDR", "").strip() or "10.1.0.0/24"
+    server_config = _get_server_config("eu1", env)
+    ssh_host = server_config.get("ssh_host")
+    if not ssh_host:
+        raise WireGuardError("SSH_HOST не настроен для eu1 (WG_EU1_SSH_HOST или WG_EU1_ENDPOINT_HOST).")
+
+    wg_ip = _allocate_ip(network_cidr, "eu1")
+    client_ip = wg_ip.split("/")[0].strip()
+
+    # Вызов скрипта на eu1: script_path client_ip
+    remote_cmd = shlex.quote(script_path) + " " + shlex.quote(client_ip)
+    stdout, stderr = execute_server_command("eu1", remote_cmd, timeout=60)
+
+    # Парсим вывод: первая строка PUBKEY=..., остальное — клиентский .conf
+    lines = (stdout or "").strip().split("\n")
+    if not lines:
+        logger.error("Скрипт AmneziaWG не вернул вывод. stderr: %s", stderr)
+        raise WireGuardError("Скрипт AmneziaWG на eu1 не вернул конфиг. Проверь логи и настройки на сервере.")
+
+    first_line = lines[0].strip()
+    if not first_line.startswith("PUBKEY="):
+        logger.error("Скрипт AmneziaWG вернул неожиданный формат. Первая строка: %s", first_line)
+        raise WireGuardError("Скрипт AmneziaWG вернул неверный формат (ожидается PUBKEY=...).")
+
+    public_key = first_line.split("=", 1)[1].strip()
+    client_config = "\n".join(lines[1:]).strip()
+
+    if not client_config:
+        raise WireGuardError("Скрипт AmneziaWG не вернул содержимое конфига.")
+
+    peer = Peer(
+        telegram_id=telegram_id,
+        wg_ip=wg_ip,
+        public_key=public_key,
+        server_id="eu1",
+        active=True,
+        profile_type=None,
+    )
+    upsert_peer(peer)
+    logger.info(
+        "Создан AmneziaWG peer для telegram_id=%s на eu1, wg_ip=%s",
+        telegram_id, wg_ip,
+    )
+    return peer, client_config
+
+
 def get_available_servers() -> Dict[str, Dict[str, str]]:
     """
     Возвращает словарь доступных серверов с их метаданными (название, описание).
@@ -693,15 +763,15 @@ def get_available_servers() -> Dict[str, Dict[str, str]]:
     except Exception:
         env = {}
 
-    # Нода "eu1" (Европа) считается доступной, только если явно задан её публичный ключ и endpoint.
+    # Нода "eu1" (Европа): доступна при наличии endpoint (или публичного ключа). Для выдачи конфигов используется AmneziaWG.
     has_eu1 = bool(
         env.get("WG_EU1_SERVER_PUBLIC_KEY")
         and (env.get("WG_EU1_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"))
-    )
+    ) or bool(env.get("WG_EU1_ENDPOINT_HOST") or env.get("WG_EU1_SSH_HOST"))
     if has_eu1:
         servers["eu1"] = {
             "name": "Европа",
-            "description": "Доступ к ChatGPT и другим сервисам, недоступным в РФ. Пинг выше (~50–120 мс).",
+            "description": "AmneziaWG: доступ из РФ, ChatGPT и другие сервисы. Импорт конфига в AmneziaVPN/AmneziaWG.",
         }
 
     return servers

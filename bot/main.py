@@ -17,9 +17,11 @@ from .storage import (
 )
 from .wireguard_peers import (
     WireGuardError,
+    create_amneziawg_peer_and_config_for_user,
     create_peer_and_config_for_user,
     execute_server_command,
     get_available_servers,
+    is_amneziawg_eu1_configured,
     regenerate_peer_and_config_for_user,
     replace_peer_with_profile_type,
 )
@@ -38,6 +40,42 @@ def _load_instruction_text(base_dir: Path, name: str) -> str:
         return path.read_text(encoding="utf-8").strip()
     except Exception:  # noqa: BLE001
         return f"(Не удалось прочитать инструкцию {path.name})"
+
+
+def _get_amneziawg_instruction_short(config: BotConfig) -> str:
+    """Краткая инструкция по AmneziaWG для Европы (ПК + iOS)."""
+    path = config.base_dir / "docs" / "bot-instruction-texts" / "instruction_amneziawg_short.txt"
+    if path.exists():
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except Exception:  # noqa: BLE001
+            pass
+    return (
+        "🌍 <b>Европа (AmneziaWG)</b>\n\n"
+        "1. Скачай приложение AmneziaVPN или AmneziaWG: amnezia.org/en/downloads\n"
+        "2. Конфиг для Европы выдаётся вручную — напиши владельцу бота.\n"
+        "3. На ПК: импортируй .conf в AmneziaVPN.\n"
+        "4. На iPhone/iPad: сохрани .conf файл → Файлы → долгое нажатие на файл → Поделиться → AmneziaWG.\n\n"
+        "Подробнее: команда /instruction (если настроена инструкция для AmneziaWG)."
+    )
+
+
+def _send_eu1_amneziawg_instruction(
+    message: types.Message,
+    has_existing_peer: bool,
+) -> None:
+    """Отправляет инструкцию по AmneziaWG для Европы и текст «конфиг вручную»."""
+    config = load_config()
+    instr = _get_amneziawg_instruction_short(config)
+    extra = ""
+    if has_existing_peer:
+        extra = "\n\n⚠️ Старый WireGuard конфиг для Европы больше не поддерживается. Для Европы теперь используется AmneziaWG."
+    safe_reply(
+        message,
+        f"{instr}\n\n"
+        "Конфиг для Европы (AmneziaWG) выдаётся вручную. Напиши владельцу."
+        f"{extra}",
+    )
 
 
 def main() -> None:
@@ -62,21 +100,20 @@ def main() -> None:
             "Привет! Это VPN бот. 🔐",
             "",
             "Сейчас бот в режиме self-service: владелец добавляет пользователей,",
-            "а бот выдаёт персональные конфиги WireGuard (по одному на Telegram-аккаунт).",
+            "а бот выдаёт персональные конфиги (Россия — WireGuard, Европа — AmneziaWG).",
             "",
             "📋 <b>Доступные команды:</b>",
             "/get_config — получить или переслать свой конфиг",
-            "/server — выбрать сервер (РФ/EU) и тип профиля",
+            "/server — выбрать сервер (РФ/EU). Европа = AmneziaWG (импорт в AmneziaVPN).",
             "/regen — запросить обновление конфига (перегенерировать ключи)",
-            "/instruction — как подключиться (ПК / iPhone–iPad)",
+            "/instruction — как подключиться (ПК / iPhone–iPad, в т.ч. AmneziaWG)",
             "/proxy — ссылка для Telegram (прокси при блокировках)",
             "/status — показать базовую информацию о доступе",
             "/help — подробная справка о режимах VPN",
             "/my_config — синоним /get_config",
             "",
-            "💡 <b>Типы профилей:</b>",
-            "🔵 Обычный VPN — для YouTube, Instagram, обычные сайты",
-            "🟢 VPN+GPT — для ChatGPT и обхода блокировок (только Европа)",
+            "💡 <b>Серверы:</b>",
+            "🇷🇺 Россия — WireGuard. 🇪🇺 Европа — AmneziaWG (работает из РФ, импорт в AmneziaVPN/AmneziaWG).",
         ]
         safe_reply(message, "\n".join(text_lines))
 
@@ -183,13 +220,24 @@ def main() -> None:
                 # Peer уже существует, тип профиля совпадает — просто сообщаем
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                safe_reply(
-                    message,
-                    f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}).\n"
-                    "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
-                    "ничего делать не нужно.\n"
-                    "Если ты потерял конфиг или нужно его обновить, используй /regen для регенерации.",
-                )
+                # Для Европы (eu1) — AmneziaWG: другой текст
+                if preferred_server_id == "eu1":
+                    if is_amneziawg_eu1_configured():
+                        safe_reply(
+                            message,
+                            f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> (AmneziaWG).\n"
+                            "Если нужен новый конфиг — используй /regen для регенерации.",
+                        )
+                    else:
+                        _send_eu1_amneziawg_instruction(message, has_existing_peer=True)
+                else:
+                    safe_reply(
+                        message,
+                        f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}).\n"
+                        "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
+                        "ничего делать не нужно.\n"
+                        "Если ты потерял конфиг или нужно его обновить, используй /regen для регенерации.",
+                    )
                 return
             
             # Если есть peer на другом сервере, но пользователь выбрал новый — создаём peer на новом сервере
@@ -205,12 +253,40 @@ def main() -> None:
                     preferred_server_id,
                 )
 
-            # Тип профиля для eu1: Обычный VPN или VPN+GPT
+            # Европа (eu1): выдаём AmneziaWG — через скрипт на сервере или инструкцию вручную
+            if preferred_server_id == "eu1":
+                if is_amneziawg_eu1_configured():
+                    try:
+                        peer, client_config = create_amneziawg_peer_and_config_for_user(telegram_id)
+                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+                        _send_config_file(chat_id, client_config, filename)
+                        servers_info = get_available_servers()
+                        server_name = servers_info.get("eu1", {}).get("name", "Европа")
+                        safe_reply(
+                            message,
+                            f"✅ Создан VPN‑доступ на сервере <b>{server_name}</b> (AmneziaWG)\n"
+                            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n\n"
+                            "📥 Импортируй файл в приложение <b>AmneziaVPN</b> или <b>AmneziaWG</b>.\n"
+                            "На iPhone/iPad: Файлы → долгое нажатие на .conf → Поделиться → AmneziaWG.\n"
+                            f"\n💡 Инструкция по подключению — /instruction.",
+                        )
+                    except WireGuardError as exc:
+                        logger.exception("Ошибка AmneziaWG для %s: %s", telegram_id, exc)
+                        safe_reply(
+                            message,
+                            "Не удалось создать конфиг AmneziaWG. Попробуй позже или напиши владельцу.\n"
+                            "Инструкция по ручной настройке — /instruction.",
+                        )
+                else:
+                    _send_eu1_amneziawg_instruction(message, peer_on_preferred is not None)
+                return
+
+            # Тип профиля для eu1: Обычный VPN или VPN+GPT (только для main и других WireGuard-нод)
             profile_type = None
             if preferred_server_id == "eu1":
                 profile_type = getattr(user, "preferred_profile_type", None)
 
-            # Создаём новый peer на выбранном сервере
+            # Создаём новый peer на выбранном сервере (main и др., не eu1 — eu1 обработан выше)
             peer, client_config = create_peer_and_config_for_user(
                 telegram_id,
                 server_id=preferred_server_id,
@@ -302,8 +378,17 @@ def main() -> None:
         try:
             # Определяем, на каком сервере искать peer для регенерации
             preferred_server_id = user.preferred_server_id or "main"
-            preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None
 
+            # Европа (eu1): регенерация AmneziaWG пока не автоматизирована — инструкция
+            if preferred_server_id == "eu1":
+                safe_reply(
+                    message,
+                    "Для сервера <b>Европа</b> (AmneziaWG) регенерация конфига пока вручную.\n"
+                    "Напиши владельцу бота — он выдаст новый конфиг.",
+                )
+                return
+
+            preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None
             existing_peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
             # Если на eu1 пользователь выбрал другой тип профиля — пересоздаём peer с новым типом и IP из нужного пула
             if (
@@ -579,12 +664,13 @@ def main() -> None:
 
     @bot.message_handler(commands=["instruction"])
     def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет пошаговую инструкцию по подключению (ПК и iPhone/iPad)."""
+        """Отправляет пошаговую инструкцию по подключению (ПК и iPhone/iPad). Россия — WireGuard, Европа — AmneziaWG."""
         instr_pc = _load_instruction_text(config.base_dir, "pc")
         instr_ios = _load_instruction_text(config.base_dir, "ios")
+        instr_amnezia = _get_amneziawg_instruction_short(config)
         safe_reply(
             message,
-            f"{instr_pc}\n\n——\n\n{instr_ios}",
+            f"{instr_pc}\n\n——\n\n{instr_ios}\n\n——\n\n<b>Для сервера Европа (AmneziaWG):</b>\n\n{instr_amnezia}",
         )
 
     @bot.message_handler(commands=["proxy"])
@@ -611,24 +697,18 @@ def main() -> None:
         """Отправляет подробную справку о режимах VPN и типах профилей."""
         help_text = (
             "📖 <b>Справка по VPN боту</b>\n\n"
-            "🔵 <b>Обычный VPN</b>\n"
-            "Весь трафик идёт через VPN-сервер напрямую.\n"
-            "✅ Подходит для: YouTube, Instagram, обычные сайты, мессенджеры\n"
-            "❌ Не подходит для: ChatGPT (если заблокирован по IP)\n\n"
-            "🟢 <b>VPN+GPT</b> (только сервер «Европа»)\n"
-            "Трафик идёт через VPN, а HTTP/HTTPS дополнительно через Shadowsocks.\n"
-            "✅ Подходит для: ChatGPT, обход блокировок по IP, все сайты\n"
-            "⚠️ Может быть медленнее из-за двойного туннелирования\n\n"
+            "🇷🇺 <b>Россия (Timeweb)</b> — WireGuard\n"
+            "Импорт конфига в приложение WireGuard. Низкий пинг, высокая скорость.\n\n"
+            "🇪🇺 <b>Европа</b> — AmneziaWG\n"
+            "Работает из РФ (обфускация). Импорт конфига в AmneziaVPN или AmneziaWG.\n"
+            "На iPhone/iPad: Файлы → долгое нажатие на .conf → Поделиться → AmneziaWG.\n\n"
             "📱 <b>Как использовать:</b>\n"
             "1. Выбери сервер: /server\n"
-            "2. Если выбрал «Европа» — выбери тип профиля\n"
-            "3. Получи конфиг: /get_config\n"
-            "4. Импортируй в WireGuard по инструкции: /instruction\n\n"
+            "2. Получи конфиг: /get_config\n"
+            "3. Импортируй по инструкции: /instruction\n\n"
             "💬 <b>Telegram через прокси:</b>\n"
-            "Если Telegram заблокирован, используй /proxy для получения ссылки MTProto-прокси.\n"
-            "Прокси работает независимо от VPN (можно использовать только прокси для Telegram).\n\n"
-            "❓ <b>Вопросы?</b>\n"
-            "Обратись к владельцу бота или используй /instruction для помощи с подключением."
+            "Если Telegram заблокирован — /proxy для MTProto-прокси.\n\n"
+            "❓ <b>Вопросы?</b> Обратись к владельцу или используй /instruction."
         )
         safe_reply(message, help_text)
 
