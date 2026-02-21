@@ -280,10 +280,10 @@ pip install -r web/requirements.txt
 
 ```bash
 cd /opt/vpnservice
-FLASK_ENV=production /opt/vpnservice/venv/bin/python web/app.py
+FLASK_ENV=production PORT=5001 /opt/vpnservice/venv/bin/python web/app.py
 ```
 
-Панель слушает порт **5000**. Открыть в браузере: `http://81.200.146.32:5000` (или добавить в firewall: `ufw allow 5000/tcp` и перезагрузить UFW).
+Панель слушает порт **5001** (чтобы не конфликтовать с другими сервисами на 5000). Открыть в браузере: `http://81.200.146.32:5001` (при необходимости: `ufw allow 5001/tcp` и `ufw reload`).
 
 ### Systemd (постоянный запуск)
 
@@ -310,7 +310,7 @@ FLASK_ENV=production /opt/vpnservice/venv/bin/python web/app.py
 
 После деплоя зафиксировать ссылку в этом разделе, например:
 
-- **URL панели:** `http://81.200.146.32:5000` (или через nginx/HTTPS, если настроен)
+- **URL панели:** `http://81.200.146.32:5001` (порт 5001, чтобы не пересекаться с другими приложениями на 5000; при необходимости — nginx/HTTPS)
 
 ### Обновление панели
 
@@ -324,7 +324,7 @@ sudo systemctl restart vpn-web.service
 ### Безопасность
 
 - Панель читает `env_vars.txt` и данные бота (`bot/data/`). Доступ к `/api/users` — по параметру `admin_key=<ADMIN_ID>` (в продакшене лучше вынести за nginx или добавить нормальную авторизацию).
-- Рекомендуется поставить nginx reverse proxy и HTTPS (Let's Encrypt), открывать порт 5000 только с localhost.
+- Рекомендуется поставить nginx reverse proxy и HTTPS (Let's Encrypt), открывать порт 5001 только с localhost при необходимости.
 
 ## Проверка работы
 
