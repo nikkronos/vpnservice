@@ -1,0 +1,14 @@
+#!/bin/bash
+# Скрипт для eu1: удаление клиента AmneziaWG по публичному ключу, когда AmneziaWG в Docker (amnezia-awg2).
+# Развернуть на eu1: /opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
+# Вызов: amneziawg-remove-client-docker.sh <public_key>
+#
+# Переменные: AWG_DOCKER_CONTAINER (по умолчанию amnezia-awg2), AWG_INTERFACE (по умолчанию awg0).
+
+set -e
+
+CONTAINER_NAME="${AWG_DOCKER_CONTAINER:-amnezia-awg2}"
+AWG_INTERFACE="${AWG_INTERFACE:-awg0}"
+PUBLIC_KEY="${1:?Usage: $0 <public_key>}"
+
+docker exec "$CONTAINER_NAME" awg set "$AWG_INTERFACE" peer "$PUBLIC_KEY" remove 2>/dev/null || true

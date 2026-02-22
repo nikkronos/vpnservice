@@ -51,9 +51,12 @@ WG_DNS=1.1.1.1
 # Скрипт add: один аргумент client_ip; вывод: первая строка PUBKEY=<pubkey>, далее — клиентский .conf.
 # Для регенерации (/regen): бот удаляет старый peer (awg set interface peer remove или скрипт remove) и вызывает add с тем же IP.
 # Примеры скриптов: docs/scripts/amneziawg-add-client.sh.example, amneziawg-remove-client.sh.example.
+# Если AmneziaWG в Docker (контейнер amnezia-awg2, порт 48100): amneziawg-add-client-docker.sh.example, amneziawg-remove-client-docker.sh.example.
 # Пошаговая настройка: docs/amneziawg-bot-automation-setup.md
 # AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh
+# AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client-docker.sh
 # AMNEZIAWG_EU1_NETWORK_CIDR=10.1.0.0/24
-# AMNEZIAWG_EU1_INTERFACE=wg0
+# AMNEZIAWG_EU1_INTERFACE=awg0
 # AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client.sh
+# AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
 

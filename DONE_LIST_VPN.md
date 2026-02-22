@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-02-22 — Чистый сброс eu1 (Fornex): AmneziaWG, проверка на ПК и iOS
+
+- **Проблема:** на телефоне и у друзей — подключение к eu1 было, интернета не было; на ПК VPN работал через AmneziaWG.
+- **План:** сброс только на eu1 (оставить MTProto и Shadowsocks), остановить и убрать конфиги AmneziaWG и wg0, проверить работу с нуля.
+- **Документы:** созданы `docs/eu1-clean-slate-plan.md`, `docs/eu1-clean-slate-commands.md`; в README_FOR_NEXT_AGENT.md добавлен блок про план чистого сброса.
+- **На eu1:** бэкап в `/root/eu1-backup-20260222`; остановлены и отключены awg-quick@awg0 и wg-quick@wg0; awg0.conf и копия /etc/amnezia перенесены в бэкап. Контейнеры Docker (amnezia-awg2, mtproto-proxy) не трогали.
+- **Проверка:** сервер уже был в AmneziaVPN; экспорт для iOS через «Поделиться VPN»; на телефоне и на ПК подключение и интернет работают. Чистый сброс завершён успешно.
+
+- **Бот — выдача конфигов AmneziaWG (Docker):** на eu1 развёрнуты скрипты amneziawg-add-client-docker.sh и amneziawg-remove-client-docker.sh; конфиг сервера в контейнере — /opt/amnezia/awg/awg0.conf; в скрипт добавлено извлечение обфускации (Jc, Jmin, Jmax, S1–S4, H1–H4) и подстановка в клиентский .conf. На Timeweb в env указаны пути к *-docker.sh; бот по /get_config и /regen выдаёт конфиги. На телефоне с конфигом от бота: handshake есть, трафик не грузится (открытый вопрос — см. SESSION_SUMMARY и docs/eu1-phone-config-open-question.md).
+
 ## 2026-02-21 — Веб-панель: деплой, этапы 2–3, подсказки
 
 - **Деплой:** панель развёрнута на Timeweb на порту 5001 (чтобы не конфликтовать с Damir на 5000). Добавлены `web/vpn-web.service.example`, раздел в `docs/deployment.md`, переменная PORT=5001.

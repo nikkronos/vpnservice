@@ -4,9 +4,60 @@
 
 **Требования:** AmneziaWG уже развёрнут на eu1 (185.21.8.91) по `docs/amneziawg-deploy-instruction.md`. Бот работает на Timeweb и имеет SSH-доступ к eu1: в `env_vars.txt` на Timeweb заданы WG_EU1_SSH_HOST, WG_EU1_SSH_USER, WG_EU1_SSH_KEY_PATH. Рекомендуемое имя ключа на Timeweb: **`id_ed25519_eu1`** (файл должен существовать, например `/root/.ssh/id_ed25519_eu1`).
 
+**Два варианта развёртывания AmneziaWG на eu1:**
+- **На хосте** (интерфейс awg0, порт 51820) — скрипты `amneziawg-add-client.sh` и `amneziawg-remove-client.sh` (шаги ниже).
+- **В Docker** (контейнер `amnezia-awg2`, порт **48100**) — если ставили через приложение AmneziaVPN и в `docker ps` виден контейнер amnezia-awg2, используй **раздел «Вариант: AmneziaWG в Docker»** ниже.
+
 ---
 
-## Шаг 1. Проверка на eu1
+## Вариант: AmneziaWG в Docker (контейнер amnezia-awg2)
+
+Если на eu1 AmneziaWG запущен в Docker (образ/контейнер `amnezia-awg2`, порт 48100), на хосте нет интерфейса awg0 — пиры добавляются внутрь контейнера. Используй скрипты **-docker**.
+
+### Проверка на eu1
+
+```bash
+docker ps   # должен быть контейнер amnezia-awg2, порт 48100
+docker exec amnezia-awg2 awg show awg0   # или имя интерфейса из контейнера
+which wg    # на хосте нужны wireguard-tools для генерации ключей (wg genkey)
+```
+
+### Развернуть скрипты на eu1
+
+Создай каталог и скопируй содержимое примеров в скрипты на eu1:
+
+```bash
+sudo mkdir -p /opt/vpnservice/scripts
+# Скопировать docs/scripts/amneziawg-add-client-docker.sh.example → /opt/vpnservice/scripts/amneziawg-add-client-docker.sh
+# Скопировать docs/scripts/amneziawg-remove-client-docker.sh.example → /opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
+sudo chmod +x /opt/vpnservice/scripts/amneziawg-add-client-docker.sh
+sudo chmod +x /opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
+```
+
+В начале add-client-docker задай при необходимости: `ENDPOINT_HOST`, `ENDPOINT_PORT=48100`, `CONTAINER_NAME=amnezia-awg2`. Проверка:
+
+```bash
+/opt/vpnservice/scripts/amneziawg-add-client-docker.sh 10.1.0.99
+```
+
+Ожидаемо: строка `PUBKEY=...`, далее блок `[Interface]` и `[Peer]` с `Endpoint = 185.21.8.91:48100`. Тестовый peer удалить: `/opt/vpnservice/scripts/amneziawg-remove-client-docker.sh <PUBKEY>`.
+
+### Переменные на Timeweb (бот)
+
+В `env_vars.txt` на Timeweb укажи **пути к Docker-скриптам на eu1**:
+
+```bash
+AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client-docker.sh
+AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
+AMNEZIAWG_EU1_NETWORK_CIDR=10.1.0.0/24
+AMNEZIAWG_EU1_INTERFACE=awg0
+```
+
+Остальное (WG_EU1_SSH_HOST, WG_EU1_SSH_USER, WG_EU1_SSH_KEY_PATH) — как обычно. Перезапуск бота: `systemctl restart vpn-bot.service`. После этого /get_config и /regen для «Европа» будут выдавать конфиги с Endpoint 185.21.8.91:48100.
+
+---
+
+## Шаг 1. Проверка на eu1 (вариант «на хосте»)
 
 Подключись по SSH к eu1 и выполни команды из **`docs/amneziawg-eu1-discovery.md`** (раздел «Команды для проверки»).
 
@@ -81,13 +132,13 @@ WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1
 # AmneziaWG: автоматическая выдача и регенерация конфигов
 AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-add-client.sh
 AMNEZIAWG_EU1_NETWORK_CIDR=10.1.0.0/24
-AMNEZIAWG_EU1_INTERFACE=wg0
+AMNEZIAWG_EU1_INTERFACE=awg0
 AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client.sh
 ```
 
 - **WG_EU1_SSH_KEY_PATH** — путь к приватному ключу **на сервере бота (Timeweb)**. Рекомендуемое имя файла: `id_ed25519_eu1`. Проверка: `ls -la /root/.ssh/`; если ключ называется иначе — укажи его путь.
 - **AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT** — путь к скрипту на **eu1** (бот выполняет его по SSH на eu1).
-- **AMNEZIAWG_EU1_INTERFACE** — имя интерфейса на eu1 (`wg0` или `awg0`). Бот передаёт его в скрипты как AWG_INTERFACE.
+- **AMNEZIAWG_EU1_INTERFACE** — имя интерфейса на eu1: **awg0** (AmneziaWG, обход блокировки РКН) или `wg0` (обычный WireGuard, из РФ может быть заблокирован). Бот передаёт его в скрипты как AWG_INTERFACE. Чтобы вернуть awg0 после перехода на wg0 — см. [return-to-awg0.md](return-to-awg0.md).
 - **AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT** — путь к скрипту удаления на **eu1** (опционально; если не задан, бот выполнит `awg set <interface> peer <key> remove`).
 
 Сохрани файл и перезапусти бота:
