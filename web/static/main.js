@@ -80,13 +80,24 @@ function formatBytes(bytes) {
 // Обновление блока трафика
 async function updateTraffic() {
     const el = document.getElementById('traffic-list');
+    const lastUpdateEl = document.getElementById('traffic-last-update');
     if (!el) return;
     try {
         const response = await fetch('/api/traffic');
         const data = await response.json();
         if (data.error) {
             el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
+            if (lastUpdateEl) lastUpdateEl.textContent = '';
             return;
+        }
+        // Показываем время последнего обновления данных с бэкенда
+        if (lastUpdateEl && data.last_update) {
+            try {
+                const d = new Date(data.last_update);
+                lastUpdateEl.textContent = 'Данные на: ' + d.toLocaleString('ru-RU');
+            } catch (_) {
+                lastUpdateEl.textContent = 'Данные на: ' + data.last_update;
+            }
         }
         const rows = data.rows || [];
         const byUser = data.by_user || [];
@@ -126,13 +137,14 @@ function updateLastUpdate() {
     if (el) el.textContent = now.toLocaleString('ru-RU');
 }
 
-// Автообновление каждые 30 секунд
+// Автообновление каждые 5 минут (снижение нагрузки на сервер)
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 минут
 setInterval(() => {
     updateServersStatus();
     updateServicesStatus();
     updateTraffic();
     updateLastUpdate();
-}, 30000);
+}, REFRESH_INTERVAL_MS);
 
 // Инициализация при загрузке страницы
 document.addEventListener('DOMContentLoaded', () => {
