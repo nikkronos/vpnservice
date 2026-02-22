@@ -1,7 +1,7 @@
 // Обновление статуса серверов
 async function updateServersStatus() {
     try {
-        const response = await fetch('/api/servers');
+        const response = await fetch('/api/servers', { cache: 'no-store' });
         const servers = await response.json();
         
         const serversList = document.getElementById('servers-list');
@@ -42,7 +42,7 @@ async function updateServicesStatus() {
     const el = document.getElementById('services-list');
     if (!el) return;
     try {
-        const response = await fetch('/api/services');
+        const response = await fetch('/api/services', { cache: 'no-store' });
         const data = await response.json();
         if (data.error) {
             el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
@@ -83,7 +83,7 @@ async function updateTraffic() {
     const lastUpdateEl = document.getElementById('traffic-last-update');
     if (!el) return;
     try {
-        const response = await fetch('/api/traffic');
+        const response = await fetch('/api/traffic', { cache: 'no-store' });
         const data = await response.json();
         if (data.error) {
             el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';

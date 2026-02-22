@@ -385,11 +385,13 @@ def api_traffic():
                 by_user[uid] = {"username": r["username"], "rx_bytes": 0, "tx_bytes": 0}
             by_user[uid]["rx_bytes"] += r["rx_bytes"]
             by_user[uid]["tx_bytes"] += r["tx_bytes"]
-        return jsonify({
+        resp = jsonify({
             "rows": rows,
             "by_user": [{"telegram_id": k, "username": v["username"], "rx_bytes": v["rx_bytes"], "tx_bytes": v["tx_bytes"]} for k, v in by_user.items()],
             "last_update": datetime.now().isoformat(),
         })
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return resp
     except Exception as e:
         logger.exception(f"Ошибка API трафика: {e}")
         return jsonify({"error": str(e)}), 500
