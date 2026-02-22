@@ -112,6 +112,44 @@ sudo systemctl status vpn-bot.service
 
 ---
 
+## Ошибка «не удалось добавить peer в awg0» (get_config / regen для Европы)
+
+Сообщение приходит, когда скрипт на eu1 не может выполнить `awg set <interface> peer ... allowed-ips ...`. Что проверить:
+
+### 1. Имя интерфейса на eu1
+
+На **eu1** выполни:
+```bash
+ip link show | grep -E 'awg|wg'
+awg show 2>/dev/null || wg show 2>/dev/null
+```
+Узнай реальное имя интерфейса: `awg0`, `wg0` или другое.
+
+### 2. Одна строка AMNEZIAWG_EU1_INTERFACE на Timeweb
+
+На **сервере бота (Timeweb)** в `env_vars.txt` должна быть **только одна** строка `AMNEZIAWG_EU1_INTERFACE=...` с тем именем, что на eu1. Если добавляли вторую строку (например сначала было wg0, потом дописали awg0) — удали дубликат и оставь одно значение, совпадающее с интерфейсом на eu1:
+```bash
+# На Timeweb: посмотреть все вхождения
+grep AMNEZIAWG_EU1_INTERFACE /opt/vpnservice/env_vars.txt
+# Отредактировать файл и оставить одну строку, например:
+# AMNEZIAWG_EU1_INTERFACE=awg0   # если на eu1 интерфейс awg0
+# или
+# AMNEZIAWG_EU1_INTERFACE=wg0    # если на eu1 интерфейс wg0
+```
+После правки: `sudo systemctl restart vpn-bot.service`.
+
+### 3. Запуск скрипта на eu1 от root
+
+Подключись по SSH к **eu1** и запусти скрипт вручную (подставь свой свободный IP из пула, например 10.1.0.99):
+```bash
+sudo AWG_INTERFACE=awg0 /opt/vpnservice/scripts/amneziawg-add-client.sh 10.1.0.99
+```
+Если здесь та же ошибка — проблема на eu1 (интерфейс не awg0, или нужен `sudo`, или путь к `awg` не в PATH при вызове по SSH). Проверь: `which awg`, `sudo awg show awg0`.
+
+Бот по SSH выполняет команду от пользователя WG_EU1_SSH_USER (обычно root). Если на eu1 скрипт должен идти с sudo — либо залогинься на eu1 как root, либо настрой sudo без пароля для этого скрипта.
+
+---
+
 ## Шаг 5. Друзья и знакомые
 
 Напиши пользователям: для Европы теперь AmneziaWG. Пусть выберут в боте «Европа» (/server), нажмут /get_config и импортируют полученный .conf в AmneziaVPN/AmneziaWG по инструкции (/instruction). Регенерация — через /regen.
