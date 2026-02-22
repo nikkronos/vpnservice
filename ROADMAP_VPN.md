@@ -50,8 +50,14 @@
   - [x] **Деплой веб-панели на сервере:** развёрнута на Timeweb (порт 5001, vpn-web.service), URL: http://81.200.146.32:5001. Зафиксировано в docs/deployment.md.
   - [x] **Доработать панель:** блоки «Сервисы» (WireGuard, AmneziaWG, Shadowsocks, MTProto), «Пользователи (сводка)», «Трафик по пользователям» (rx/tx с main и eu1), подсказки ко всем блокам.
   - [x] **Интервал обновления и диагностика** — 2026-02-22: автообновление с 30 сек изменено на 5 мин (снижение нагрузки); в блоке «Трафик» выводится время последнего обновления данных с бэкенда. В web/README.md добавлена диагностика «если трафик не меняется».
+  - [x] **Трафик на панели (eu1):** для eu1 с AmneziaWG используется `awg show <interface> dump` (интерфейс из AMNEZIAWG_EU1_INTERFACE, по умолчанию awg0); нормализация public_key при сопоставлении с peers.json. Если трафик не менялся — проверить на сервере панели переменную AMNEZIAWG_EU1_INTERFACE и доступ по SSH к eu1.
 
-- [ ] **Анализ конкурентов**
+- [x] **Поддержка Android** — 2026-02-22
+  - [x] Инструкция для пользователей: docs/client-instructions-android.md (WireGuard для России, AmneziaVPN/AmneziaWG для Европы).
+  - [x] Короткий текст для бота: docs/bot-instruction-texts/instruction_android_short.txt.
+  - [x] Бот: /instruction и /start охватывают ПК, iPhone/iPad и Android; после выдачи конфига (в т.ч. AmneziaWG) упоминается Android; fallback-инструкция AmneziaWG дополнена шагом для Android.
+
+- [ ] **Анализ конкурентов** (оценка — позже)
   - [ ] Протестировать ботов: @Vpn_Save_Bot, @space_connect_bot, @barinvpn_bot, @servers_space_bot, @hitvpnbot, @flexiblevpn_bot.
   - [ ] Заполнить чеклист и раздел «Что взять» в docs/competitors-analysis.md.
   - [ ] Внедрить приоритетные улучшения в бот и панель (по результатам анализа).

@@ -121,7 +121,7 @@ def _parse_wg_dump_transfer(stdout: str) -> Dict[str, tuple]:
 def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
     """
     Получает трафик (rx, tx в байтах) по каждому pubkey для указанной ноды.
-    main — локальный вызов wg show; eu1 — по SSH.
+    main — локальный вызов wg show; eu1 — по SSH (wg или awg для AmneziaWG).
     """
     base = pathlib.Path(__file__).parent.parent
     env = _parse_env_file(base / "env_vars.txt")
@@ -145,15 +145,20 @@ def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
             from bot.wireguard_peers import execute_server_command, _get_server_config, _load_env
             env = _load_env()
             cfg = _get_server_config(server_id, env)
-            interface = cfg.get("interface", "wg0")
-            stdout, stderr = execute_server_command(
-                server_id,
-                f"wg show {interface} dump 2>/dev/null || true",
-                timeout=15,
-            )
-            return _parse_wg_dump_transfer(stdout or "")
+            # eu1 может использовать AmneziaWG (интерфейс awg0) — тогда нужна команда awg
+            awg_interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip()
+            interface = awg_interface or cfg.get("interface", "wg0")
+            use_awg = interface.startswith("awg") or bool(awg_interface)
+            cmd = f"awg show {interface} dump 2>/dev/null" if use_awg else f"wg show {interface} dump 2>/dev/null"
+            fallback_cmd = f"wg show {interface} dump 2>/dev/null" if use_awg else None
+            stdout, stderr = execute_server_command(server_id, f"{cmd} || true", timeout=15)
+            result = _parse_wg_dump_transfer(stdout or "")
+            if not result and fallback_cmd:
+                stdout2, _ = execute_server_command(server_id, f"{fallback_cmd} || true", timeout=15)
+                result = _parse_wg_dump_transfer(stdout2 or "")
+            return result
         except Exception as e:
-            logger.warning("SSH wg show для %s: %s", server_id, e)
+            logger.warning("SSH wg/awg show для %s: %s", server_id, e)
             return {}
 
 
@@ -354,7 +359,11 @@ def api_traffic():
             for peer in peers:
                 if peer.server_id != server_id or not peer.active:
                     continue
-                rx_tx = transfer.get(peer.public_key)
+                # Сопоставление по public_key (нормализуем пробелы/переносы из JSON)
+                pk = (peer.public_key or "").strip()
+                rx_tx = transfer.get(pk)
+                if rx_tx is None and pk:
+                    rx_tx = transfer.get(peer.public_key)  # без strip на случай другого формата
                 if rx_tx is None:
                     rx_tx = (0, 0)
                 rx_bytes, tx_bytes = rx_tx

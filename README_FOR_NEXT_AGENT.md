@@ -158,7 +158,7 @@ VPN/
 
 ## Ближайшие задачи (по желанию владельца)
 
-- **Бот:** обновить инструкции в Telegram-боте — выдавать инструкцию по AmneziaWG (ПК + iOS через «Поделиться»); при возможности — выдавать конфиг/ссылку Amnezia.
+- **Бот:** инструкции в боте охватывают ПК, iPhone/iPad и Android; AmneziaWG (Европа) — ПК, iOS (импорт через «Поделиться»), Android (импорт из файла/буфера).
 - **Веб-панель:** развернуть на сервере (Timeweb или eu1), получить ссылку (сейчас ссылки нет), доработать под полный мониторинг (ноды, сервисы, подключения). URL зафиксировать в документации после деплоя.
 - **Второй VPS:** отложено — без монетизации по бюджету не планируется.
 
@@ -168,8 +168,9 @@ VPN/
 
 - **Обход блокировок РКН:** `docs/blocking-bypass-strategy.md` — стратегия, выбран AmneziaWG.
 - **Пошаговый план:** `docs/step-by-step-plan-bypass.md` — выбран A (AmneziaWG).
-- **Развёртывание AmneziaWG:** `docs/amneziawg-deploy-instruction.md` — пошагово для eu1 (ПК + iOS).
-- **Инструкция для пользователей (AmneziaWG):** `docs/client-instructions-amneziawg.md` — ПК и iOS (импорт через «Поделиться»).
+- **Развёртывание AmneziaWG:** `docs/amneziawg-deploy-instruction.md` — пошагово для eu1 (ПК, iOS, Android).
+- **Инструкция для пользователей (AmneziaWG):** `docs/client-instructions-amneziawg.md` — ПК, iOS (импорт через «Поделиться»), Android.
+- **Инструкция для Android:** `docs/client-instructions-android.md` — WireGuard (Россия) и AmneziaVPN/AmneziaWG (Европа).
 - **Спецификация Unified:** `docs/specs/spec-04-implementation-unified-profile.md`
 - **Roadmap:** `ROADMAP_VPN.md`
 - **Выполненные задачи:** `DONE_LIST_VPN.md`
