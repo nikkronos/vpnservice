@@ -14,9 +14,9 @@
 
 ## Текущее состояние
 
-- Веб-панель уже есть в `web/`: Flask, API `/api/servers`, `/api/users`, `/api/stats`, шаблон `index.html`.
-- Панель читает `users.json` и `peers.json` (бот), проверяет доступность серверов через ping.
-- **Трафика по пользователям нет** — в `Peer` и API нет полей rx/tx; данные нужно брать с VPN-серверов (`wg show`).
+- Веб-панель уже есть в `web/`: Flask, API `/api/servers`, `/api/users`, `/api/stats`, `/api/traffic`, `/api/services`, шаблон `index.html`.
+- Панель читает `users.json` и `peers.json` (бот), проверяет доступность серверов через ping; трафик — с нод через `wg show` (локально и по SSH).
+- **Деплой:** автоматического деплоя (CI/CD) нет; обновления применяются вручную на сервере (`git pull`, перезапуск `vpn-web.service`). См. `docs/deployment.md`.
 
 ---
 

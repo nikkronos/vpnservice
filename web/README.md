@@ -52,6 +52,8 @@ python app.py
 
 ## Деплой
 
+**Автоматического деплоя нет.** Обновления на сервере применяются вручную: `git pull` в `/opt/vpnservice` и перезапуск сервиса `vpn-web.service` (см. `../docs/deployment.md`).
+
 Веб-панель разворачивается на том же сервере Timeweb, где работает бот (`/opt/vpnservice`). Пошаговая инструкция: **`../docs/deployment.md`** — раздел «Веб-панель мониторинга (Timeweb)».
 
 Пример systemd unit: `vpn-web.service.example` в этой папке.
