@@ -1,5 +1,6 @@
 import io
 import logging
+import time
 from pathlib import Path
 
 import telebot
@@ -112,6 +113,7 @@ def main() -> None:
             "/status — статус доступа",
             "/help — справка",
             "/my_config — синоним /get_config",
+            "/broadcast — рассылка уведомления всем (только владелец)",
         ]
         safe_reply(message, "\n".join(text_lines))
 
@@ -870,6 +872,53 @@ def main() -> None:
             )
 
         safe_reply(message, "\n".join(lines))
+
+    # Текст уведомления о проблеме VPN и решении через /regen (рассылается по /broadcast)
+    BROADCAST_VPN_ISSUE_TEXT = (
+        "⚠️ <b>В данный момент наблюдается проблема с VPN.</b>\n\n"
+        "Если она затронула вас и у вас появилась ошибка «Не удалось установить соединение», "
+        "то необходимо ввести команду /regen, чтобы бот выдал новый конфиг.\n\n"
+        "Старый конфиг удалите и замените новым."
+    )
+
+    @bot.message_handler(commands=["broadcast"])
+    def cmd_broadcast(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Для владельца: отправить всем пользователям уведомление о проблеме VPN и решении через /regen.
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        if not is_owner(message.from_user.id, admin_id):
+            safe_reply(message, "Эта команда доступна только владельцу VPN.")
+            return
+
+        try:
+            users = get_all_users()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Ошибка при чтении списка пользователей для рассылки: %s", e)
+            safe_reply(message, "Произошла ошибка при чтении списка. Попробуй позже.")
+            return
+
+        if not users:
+            safe_reply(message, "Нет зарегистрированных пользователей для рассылки.")
+            return
+
+        sent = 0
+        failed = 0
+        for u in users:
+            try:
+                bot.send_message(u.telegram_id, BROADCAST_VPN_ISSUE_TEXT)
+                sent += 1
+                time.sleep(0.05)  # снижение риска rate limit от Telegram
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Не удалось отправить broadcast пользователю %s: %s", u.telegram_id, e)
+                failed += 1
+
+        safe_reply(
+            message,
+            f"Рассылка завершена: отправлено {sent}, не доставлено {failed} (возможно, пользователь заблокировал бота).",
+        )
 
     @bot.message_handler(commands=["stats"])
     def cmd_stats(message: types.Message) -> None:  # type: ignore[override]
