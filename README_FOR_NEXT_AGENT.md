@@ -213,12 +213,14 @@ docker exec amnezia-awg2 cat /opt/amnezia/awg/awg0.conf
 
 ## Документация
 
-- **SESSION_SUMMARY_2026-02-26.md** — последняя сессия (автоматизация выдачи конфигов + удаление /proxy)
+- **SESSION_SUMMARY_2026-03-07.md** — последняя сессия (Telegram-прокси Fake TLS, алгоритм разблокировки, оценка провайдера)
+- **SESSION_SUMMARY_2026-02-26.md** — автоматизация выдачи конфигов + удаление /proxy
 - **SESSION_SUMMARY_2026-02-23.md** — попытки Remnawave, Xray, MTProto (неудачны)
 - **ROADMAP_VPN.md** — план развития
 - **DONE_LIST_VPN.md** — выполненные задачи
 - **docs/provider-choice-evaluation.md** — оценка выбора провайдера (Fornex vs FirstVDS и др.)
 - **docs/telegram-unblock-algorithm.md** — алгоритм сохранения доступа к Telegram при блокировках/троттлинге (без правок в боте)
+- **docs/mtproxy-faketls-deploy.md** — пошаговое развёртывание MTProxy с Fake TLS (готовые команды под копипаст)
 
 ## Важные правила
 

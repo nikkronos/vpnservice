@@ -143,6 +143,8 @@
 - `ROADMAP_VPN.md` — задачи по обходу блокировок и пилоту.
 - **`step-by-step-plan-bypass.md`** — пошаговый план (выбрано A, от него отталкиваемся).
 - **`amneziawg-deploy-instruction.md`** — пошаговая инструкция развёртывания AmneziaWG на eu1 (ПК + iOS).
+- **`provider-choice-evaluation.md`** — оценка выбора провайдера (Fornex vs FirstVDS).
+- **`telegram-unblock-algorithm.md`** — алгоритм разблокировки/сохранения доступа к Telegram (прокси с Fake TLS, резерв VPN).
 
 ---
 
