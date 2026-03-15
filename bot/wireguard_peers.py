@@ -444,12 +444,25 @@ def _make_amneziawg_config_android_safe(
     На Android AmneziaVPN чувствителен к запятой в DNS и к домену в Endpoint.
     - Один DNS в [Interface]. Если передан endpoint_ip — подменяем Endpoint на IP (на случай домена в скрипте).
     """
+    # Нормализуем переводы строк (SSH/скрипт может отдать \r\n)
+    config_text = config_text.replace("\r\n", "\n").replace("\r", "\n")
     # В секции [Interface] заменяем DNS = a, b на DNS = a (первый адрес)
     def replace_dns(match: re.Match) -> str:
         value = match.group(1).strip()
         first = value.split(",")[0].strip() if value else "1.1.1.1"
         return f"DNS = {first}"
     result = re.sub(r"^DNS\s*=\s*(.+)$", replace_dns, config_text, flags=re.MULTILINE)
+    # Запасной проход: если в какой-то строке DNS всё ещё с запятой — оставляем первый адрес
+    lines_out = []
+    for line in result.split("\n"):
+        if line.strip().startswith("DNS") and "=" in line and "," in line:
+            eq = line.find("=")
+            value = line[eq + 1 :].strip()
+            first = value.split(",")[0].strip() or "1.1.1.1"
+            lines_out.append(line[: eq + 1] + " " + first)
+        else:
+            lines_out.append(line)
+    result = "\n".join(lines_out)
     # Endpoint: если скрипт отдал hostname — подменяем на IP (Android требует IP)
     if endpoint_ip:
         def replace_endpoint(match: re.Match) -> str:
