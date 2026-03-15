@@ -436,18 +436,32 @@ def _build_client_config(
     )
 
 
-def _make_amneziawg_config_android_safe(config_text: str) -> str:
+def _make_amneziawg_config_android_safe(
+    config_text: str, endpoint_ip: Optional[str] = None
+) -> str:
     """
     Делает конфиг AmneziaWG совместимым с Android (избегает ErrorCode 1000).
     На Android AmneziaVPN чувствителен к запятой в DNS и к домену в Endpoint.
-    Оставляем один DNS-сервер в [Interface]; Endpoint уже должен быть IP на нашей стороне.
+    - Один DNS в [Interface]. Если передан endpoint_ip — подменяем Endpoint на IP (на случай домена в скрипте).
     """
     # В секции [Interface] заменяем DNS = a, b на DNS = a (первый адрес)
     def replace_dns(match: re.Match) -> str:
         value = match.group(1).strip()
         first = value.split(",")[0].strip() if value else "1.1.1.1"
         return f"DNS = {first}"
-    return re.sub(r"^DNS\s*=\s*(.+)$", replace_dns, config_text, flags=re.MULTILINE)
+    result = re.sub(r"^DNS\s*=\s*(.+)$", replace_dns, config_text, flags=re.MULTILINE)
+    # Endpoint: если скрипт отдал hostname — подменяем на IP (Android требует IP)
+    if endpoint_ip:
+        def replace_endpoint(match: re.Match) -> str:
+            port = match.group(2)
+            return f"Endpoint = {endpoint_ip}:{port}"
+        result = re.sub(
+            r"^Endpoint\s*=\s*(.+):(\d+)\s*$",
+            replace_endpoint,
+            result,
+            flags=re.MULTILINE,
+        )
+    return result
 
 
 def create_peer_and_config_for_user(
@@ -800,7 +814,8 @@ def create_amneziawg_peer_and_config_for_user(
         raise WireGuardError("Скрипт AmneziaWG не вернул содержимое конфига.")
 
     if android_safe:
-        client_config = _make_amneziawg_config_android_safe(client_config)
+        endpoint_ip = server_config.get("endpoint_host") if server_config else None
+        client_config = _make_amneziawg_config_android_safe(client_config, endpoint_ip=endpoint_ip)
 
     peer = Peer(
         telegram_id=telegram_id,
