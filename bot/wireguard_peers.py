@@ -1,6 +1,7 @@
 import ipaddress
 import logging
 import pathlib
+import re
 import shlex
 import subprocess
 from typing import Dict, Optional, Tuple
@@ -389,17 +390,23 @@ def _build_client_config(
     dns: str,
     mtu: Optional[str] = None,
     exclude_server_ip: bool = True,
+    android_safe: bool = False,
 ) -> str:
     """
     Формирует текст клиентского WireGuard-конфига для нового пользователя.
     Если задан mtu (например WG_EU1_MTU=1280), в [Interface] добавляется строка MTU.
     Если exclude_server_ip=True, SSH-трафик к серверу не будет идти через VPN (Split Tunneling).
+    android_safe=True: один DNS-сервер (без запятой), чтобы избежать ErrorCode 1000 на AmneziaVPN для Android.
     """
+    if android_safe and dns:
+        dns_effective = dns.split(",")[0].strip() or "1.1.1.1"
+    else:
+        dns_effective = dns
     interface_lines = [
         "[Interface]",
         f"PrivateKey = {private_key}",
         f"Address = {wg_ip}",
-        f"DNS = {dns}",
+        f"DNS = {dns_effective}",
     ]
     if mtu and mtu.strip():
         interface_lines.append(f"MTU = {mtu.strip()}")
@@ -429,14 +436,30 @@ def _build_client_config(
     )
 
 
+def _make_amneziawg_config_android_safe(config_text: str) -> str:
+    """
+    Делает конфиг AmneziaWG совместимым с Android (избегает ErrorCode 1000).
+    На Android AmneziaVPN чувствителен к запятой в DNS и к домену в Endpoint.
+    Оставляем один DNS-сервер в [Interface]; Endpoint уже должен быть IP на нашей стороне.
+    """
+    # В секции [Interface] заменяем DNS = a, b на DNS = a (первый адрес)
+    def replace_dns(match: re.Match) -> str:
+        value = match.group(1).strip()
+        first = value.split(",")[0].strip() if value else "1.1.1.1"
+        return f"DNS = {first}"
+    return re.sub(r"^DNS\s*=\s*(.+)$", replace_dns, config_text, flags=re.MULTILINE)
+
+
 def create_peer_and_config_for_user(
     telegram_id: int,
     server_id: str = "main",
     profile_type: Optional[str] = None,
+    android_safe: bool = False,
 ) -> Tuple[Peer, str]:
     """
     Создаёт нового peer для заданного Telegram ID на указанной ноде и возвращает (Peer, client_config_text).
 
+    - android_safe: один DNS в конфиге, совместимость с AmneziaVPN на Android (ErrorCode 1000).
     - Выбирает свободный IP: обычный пул; для eu1 VPN+GPT — 8–254 (исключая 20–50); для eu1 Unified — 20–50.
     - Генерирует ключи для peer.
     - Добавляет peer в WireGuard через `wg set` (локально или через SSH для удалённых нод).
@@ -523,12 +546,15 @@ def create_peer_and_config_for_user(
         dns=server_config["dns"],
         mtu=server_config.get("mtu"),
         exclude_server_ip=True,  # SSH не будет идти через VPN
+        android_safe=android_safe,
     )
 
     return peer, client_config
 
 
-def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[str] = None) -> Tuple[Peer, str]:
+def regenerate_peer_and_config_for_user(
+    telegram_id: int, server_id: Optional[str] = None, android_safe: bool = False
+) -> Tuple[Peer, str]:
     """
     Регенерирует ключи и конфиг для существующего peer.
     
@@ -616,6 +642,7 @@ def regenerate_peer_and_config_for_user(telegram_id: int, server_id: Optional[st
         dns=server_config["dns"],
         mtu=server_config.get("mtu"),
         exclude_server_ip=True,  # SSH не будет идти через VPN
+        android_safe=android_safe,
     )
     
     logger.info(
@@ -632,11 +659,13 @@ def replace_peer_with_profile_type(
     telegram_id: int,
     server_id: str,
     new_profile_type: str,
+    android_safe: bool = False,
 ) -> Tuple[Peer, str]:
     """
     Удаляет существующий peer на сервере и создаёт новый с указанным типом профиля
     (и IP из соответствующего пула). Используется при смене типа профиля (например,
     с VPN+GPT на Универсальный) по выбору пользователя в /server.
+    android_safe: один DNS в конфиге для совместимости с Android.
     """
     existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
     if not existing_peer or not existing_peer.active:
@@ -662,6 +691,7 @@ def replace_peer_with_profile_type(
         telegram_id,
         server_id=server_id,
         profile_type=new_profile_type,
+        android_safe=android_safe,
     )
     logger.info(
         "Сменён тип профиля для пользователя %s на сервере %s: новый profile_type=%s, wg_ip=%s",
@@ -707,11 +737,13 @@ def _remove_amneziawg_peer(public_key: str) -> None:
 def create_amneziawg_peer_and_config_for_user(
     telegram_id: int,
     reuse_ip: Optional[str] = None,
+    android_safe: bool = False,
 ) -> Tuple[Peer, str]:
     """
     Создаёт peer AmneziaWG на eu1 через вызов скрипта на сервере по SSH.
     Скрипт вызывается с аргументом client_ip; выводит первую строку PUBKEY=<pubkey>, далее — клиентский .conf.
     Если задан reuse_ip (например "10.1.0.5/32") — используется этот IP вместо выделения нового (для регенерации).
+    android_safe: постобработка конфига для Android (один DNS), избегает ErrorCode 1000.
     Возвращает (Peer, client_config_text).
     """
     env = _load_env()
@@ -767,6 +799,9 @@ def create_amneziawg_peer_and_config_for_user(
     if not client_config:
         raise WireGuardError("Скрипт AmneziaWG не вернул содержимое конфига.")
 
+    if android_safe:
+        client_config = _make_amneziawg_config_android_safe(client_config)
+
     peer = Peer(
         telegram_id=telegram_id,
         wg_ip=wg_ip,
@@ -783,7 +818,9 @@ def create_amneziawg_peer_and_config_for_user(
     return peer, client_config
 
 
-def regenerate_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Peer, str]:
+def regenerate_amneziawg_peer_and_config_for_user(
+    telegram_id: int, android_safe: bool = False
+) -> Tuple[Peer, str]:
     """
     Регенерирует AmneziaWG peer на eu1: удаляет старый peer, создаёт новый с тем же IP, возвращает новый конфиг.
     """
@@ -799,6 +836,7 @@ def regenerate_amneziawg_peer_and_config_for_user(telegram_id: int) -> Tuple[Pee
     peer, client_config = create_amneziawg_peer_and_config_for_user(
         telegram_id,
         reuse_ip=existing_peer.wg_ip,
+        android_safe=android_safe,
     )
     logger.info("Регенерирован AmneziaWG peer для telegram_id=%s на eu1", telegram_id)
     return peer, client_config

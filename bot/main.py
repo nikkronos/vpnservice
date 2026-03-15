@@ -107,7 +107,9 @@ def main() -> None:
             "📋 <b>Команды:</b>",
             "/server — выбрать сервер (Россия или Европа)",
             "/get_config — получить конфиг",
+            "/get_config_android — конфиг для Android (обход ErrorCode 1000)",
             "/regen — обновить конфиг (новые ключи)",
+            "/regen_android — обновить конфиг для Android",
             "/instruction — как подключиться (ПК, iPhone/iPad и Android)",
             "/proxy — ссылка прокси для Telegram",
             "/status — статус доступа",
@@ -136,14 +138,9 @@ def main() -> None:
         file_obj.name = filename
         bot.send_document(chat_id, file_obj, visible_file_name=filename)
 
-    @bot.message_handler(commands=["get_config"])
-    def cmd_get_config(message: types.Message) -> None:  # type: ignore[override]
+    def _do_get_config(message: types.Message, android_safe: bool) -> None:
         """
-        Self-service логика:
-        - проверяем, зарегистрирован ли пользователь;
-        - если peer уже есть — формируем конфиг на основе существующих данных;
-        - если peer нет — создаём его в WireGuard и сохраняем в peers.json;
-        - отправляем пользователю .conf файл.
+        Self-service: выдача конфига. android_safe=True — один DNS для Android (обход ErrorCode 1000).
         """
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
@@ -188,7 +185,7 @@ def main() -> None:
                 if preferred_server_id == "eu1" and preferred_pt and current_pt != preferred_pt:
                     # Пользователь выбрал другой тип профиля — пересоздаём peer с новым типом
                     peer, client_config = replace_peer_with_profile_type(
-                        telegram_id, preferred_server_id, preferred_pt
+                        telegram_id, preferred_server_id, preferred_pt, android_safe=android_safe
                     )
                     pt = getattr(peer, "profile_type", None)
                     if pt == "vpn_gpt":
@@ -257,7 +254,9 @@ def main() -> None:
             if preferred_server_id == "eu1":
                 if is_amneziawg_eu1_configured():
                     try:
-                        peer, client_config = create_amneziawg_peer_and_config_for_user(telegram_id)
+                        peer, client_config = create_amneziawg_peer_and_config_for_user(
+                            telegram_id, android_safe=android_safe
+                        )
                         filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
@@ -269,7 +268,8 @@ def main() -> None:
                             "📥 Импортируй файл в <b>AmneziaVPN</b> или <b>AmneziaWG</b>.\n"
                             "iPhone/iPad: Файлы → долгое нажатие на .conf → Поделиться → AmneziaWG.\n"
                             "Android: AmneziaVPN → Импорт из файла или буфера обмена.\n"
-                            f"\n💡 Подробно: /instruction.",
+                            + ("\n📱 Конфиг в формате для Android (один DNS)." if android_safe else "")
+                            + f"\n\n💡 Подробно: /instruction.",
                         )
                     except WireGuardError as exc:
                         logger.exception("Ошибка AmneziaWG для %s: %s", telegram_id, exc)
@@ -292,6 +292,7 @@ def main() -> None:
                 telegram_id,
                 server_id=preferred_server_id,
                 profile_type=profile_type,
+                android_safe=android_safe,
             )
 
         except WireGuardError as exc:
@@ -345,12 +346,16 @@ def main() -> None:
             f"\n💡 Другой сервер/профиль — /server. Инструкция по подключению — /instruction.",
         )
 
-    @bot.message_handler(commands=["regen"])
-    def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
-        """
-        Команда для регенерации ключей и конфига существующего peer.
-        Удаляет старый peer из WireGuard, создаёт новый с новыми ключами и отправляет обновлённый конфиг.
-        """
+    @bot.message_handler(commands=["get_config"])
+    def cmd_get_config(message: types.Message) -> None:  # type: ignore[override]
+        _do_get_config(message, False)
+
+    @bot.message_handler(commands=["get_config_android"])
+    def cmd_get_config_android(message: types.Message) -> None:  # type: ignore[override]
+        _do_get_config(message, True)
+
+    def _do_regen(message: types.Message, android_safe: bool) -> None:
+        """Регенерация конфига. android_safe=True — формат для Android (один DNS)."""
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
@@ -384,7 +389,9 @@ def main() -> None:
             if preferred_server_id == "eu1":
                 if is_amneziawg_eu1_configured():
                     try:
-                        peer, client_config = regenerate_amneziawg_peer_and_config_for_user(telegram_id)
+                        peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
+                            telegram_id, android_safe=android_safe
+                        )
                         filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
@@ -421,12 +428,12 @@ def main() -> None:
                 and getattr(existing_peer, "profile_type", None) != preferred_pt
             ):
                 peer, client_config = replace_peer_with_profile_type(
-                    telegram_id, preferred_server_id, preferred_pt
+                    telegram_id, preferred_server_id, preferred_pt, android_safe=android_safe
                 )
             else:
                 # Регенерируем peer (те же ключи/тот же тип профиля)
                 peer, client_config = regenerate_peer_and_config_for_user(
-                    telegram_id, server_id=preferred_server_id
+                    telegram_id, server_id=preferred_server_id, android_safe=android_safe
                 )
             
         except WireGuardError as exc:
@@ -459,6 +466,14 @@ def main() -> None:
             f"⚠️ <b>Важно:</b> Обнови конфиг в приложении WireGuard на всех своих устройствах!\n"
             f"Старый конфиг больше не будет работать.",
         )
+
+    @bot.message_handler(commands=["regen"])
+    def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
+        _do_regen(message, False)
+
+    @bot.message_handler(commands=["regen_android"])
+    def cmd_regen_android(message: types.Message) -> None:  # type: ignore[override]
+        _do_regen(message, True)
 
     @bot.message_handler(commands=["server"])
     def cmd_server(message: types.Message) -> None:  # type: ignore[override]
@@ -659,7 +674,7 @@ def main() -> None:
             "3. Импортируй .conf на устройство:\n"
             "   • <b>ПК:</b> WireGuard (Россия) или AmneziaVPN (Европа) → «Импорт из файла» → выбери .conf.\n"
             "   • <b>iPhone/iPad:</b> сохрани .conf → «Файлы» → долгое нажатие на файл → <b>Поделиться</b> → WireGuard или AmneziaWG.\n"
-            "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) из Google Play → «+» → «Импорт из файла» или из буфера обмена.\n\n"
+            "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) из Google Play → «+» → «Импорт из файла» или из буфера обмена. Если ошибка 1000 — /get_config_android.\n\n"
             "Сервер Россия — WireGuard. Сервер Европа — AmneziaVPN/AmneziaWG (обход блокировок). Скачать: amnezia.org/en/downloads"
         )
         safe_reply(message, instr)
@@ -692,6 +707,7 @@ def main() -> None:
             "🇪🇺 <b>Европа</b> — доступ из РФ (обход блокировок).\n"
             "Один конфиг на сервер, импорт в AmneziaVPN/AmneziaWG.\n\n"
             "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
+            "📱 <b>Android:</b> если ошибка 1000 при подключении — используй /get_config_android и /regen_android.\n\n"
             "💬 Telegram заблокирован? — /proxy.\n\n"
             "❓ Вопросы — владельцу или /instruction."
         )
