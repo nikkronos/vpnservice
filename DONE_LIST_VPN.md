@@ -1,5 +1,18 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-03-23 — Мобильный резерв: VLESS+REALITY и команда /mobile_vpn
+
+- **Контекст:** AmneziaWG и прокси работают по Wi‑Fi, по LTE/5G на разных операторах и устройствах — тайм-ауты; нужен TCP-транспорт с маскировкой под TLS, без отключения AmneziaWG.
+- **Спека:** `docs/specs/spec-07-mobile-fallback-vless-reality.md`.
+- **Развёртывание на eu1 (оператор):** `docs/xray-vless-reality-eu1-deploy.md` — бэкап AmneziaWG → установка Xray → `VLESS_REALITY_SHARE_URL` в `env_vars.txt` на Timeweb.
+- **Код бота:** `bot/config.py` — чтение `VLESS_REALITY_SHARE_URL`; `bot/main.py` — команда `/mobile_vpn` (инструкция + вторая сообщение со ссылкой без HTML); обновлены `/start`, `/help`, `/instruction`.
+- **Тексты:** `docs/bot-instruction-texts/instruction_vless_reality_short.txt`; `env_vars.example.txt`; `docs/backup-restore.md` (бэкап Xray); `docs/deployment.md`; `docs/blocking-bypass-strategy.md`; `README_FOR_NEXT_AGENT.md`.
+
+## 2026-03-15 — Фиксация сторонних альтернатив для Telegram
+
+- **Документация:** создан файл `docs/telegram-proxy-alternatives.md` — отдельный список альтернативных решений для Telegram (локальный SOCKS5 `tg-ws-proxy`, платные SOCKS5-прокси вроде `ru.shopproxy.net/buy-proxy/telegram/`), с пометкой, что это НЕ официальный стек проекта и без гарантий работоспособности.
+- **Цель:** сохранить найденные в интернете и чатах варианты, чтобы не держать их в голове, но при этом явно указать, что основной и рекомендованный путь для Telegram — работа через VPN/AmneziaWG по текущей стратегии обхода блокировок РКН.
+
 ## 2026-03-07 — Telegram-прокси с Fake TLS, алгоритм разблокировки, оценка провайдера
 
 - **Уточнения:** в README зафиксировано отсутствие relay-сервера в проекте; сторонний прокси 79.132.138.66:9443 (не работает) зафиксирован в алгоритме.
@@ -382,7 +395,7 @@
   - на Timeweb создан отдельный SSH-ключ для доступа к eu1;
   - публичный ключ добавлен в `authorized_keys` на Fornex (eu1);
   - в `env_vars.txt` на Timeweb добавлены переменные WG_EU1_* (SERVER_PUBLIC_KEY, INTERFACE, NETWORK_CIDR, ENDPOINT_HOST/PORT, DNS, SSH_HOST/USER/KEY_PATH).
-- Логика бота обновлена ранее: `get_available_servers()` возвращает eu1 только при наличии WG_EU1_SERVER_PUBLIC_KEY и WG_EU1_ENDPOINT_HOST; переменные для нод используют формат WG_<SERVERID>_* (см. env_vars.example.txt).
+- Логика бота обновлена ранее: `get_available_servers()` возвращает eu1 только при наличии WG_EU1_SERVER_PUBLIC_KEY и WG_EU1_ENDPOINT_HOST; переменные для нод используют формат `WG_<SERVERID>_*` (см. env_vars.example.txt).
 - Успешная проверка в боте:
   - в `/server` отображаются две опции: «Россия (Timeweb)» и «Европа»;
   - пользователь выбрал «Европа», вызвал `/get_config` — бот создал peer на eu1 по SSH и отправил конфиг;

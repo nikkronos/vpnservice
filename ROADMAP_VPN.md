@@ -107,6 +107,7 @@
   - [x] **Европа — автоматизация выдачи конфигов (2026-02-26)** — ✅ ВЫПОЛНЕНО
     - ⚠️ **Remnawave — неудачная попытка** (ошибка `SECRET_KEY`). Не продолжать.
     - ⚠️ **Xray VLESS/TCP без TLS — не работает** (DPI распознаёт). Не продолжать без TLS/Reality.
+    - [x] **VLESS + XTLS-Vision + REALITY (TCP)** — документация и бот `/mobile_vpn` (2026-03-23); развёртывание Xray на eu1 — вручную по `docs/xray-vless-reality-eu1-deploy.md`.
     - ⚠️ **MTProto — заблокирован оператором** по сигнатуре. Не продолжать.
     - [x] **Реализовано:** Скрипты `/opt/amnezia-add-client.sh` и `/opt/amnezia-remove-client.sh` на eu1, бот автоматически выдаёт рабочие конфиги AmneziaWG.
     - [x] **Docker:** AmneziaWG работает в контейнере `amnezia-awg2`, порт 39580, подсеть 10.8.1.0/24.

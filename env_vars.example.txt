@@ -5,6 +5,10 @@ ADMIN_ID=your_telegram_id
 # Ссылка MTProto-прокси для Telegram (команда /proxy в боте). Опционально.
 # MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=...
 
+# Резерв для мобильного интернета (LTE/5G): полная share-ссылка VLESS+XTLS-Vision+REALITY (команда /mobile_vpn).
+# Генерируется на eu1 после развёртывания Xray (см. docs/xray-vless-reality-eu1-deploy.md). Одна строка, без кавычек.
+# VLESS_REALITY_SHARE_URL=vless://uuid@host:8443?encryption=none&flow=xtls-rprx-vision&security=reality&...
+
 # Server / VPN node (для автоматизации)
 # ВАЖНО: реальные значения прописываются только в env_vars.txt на сервере/локально, этот файл — пример.
 VPN_SERVER_HOST=81.200.146.32

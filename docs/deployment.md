@@ -124,6 +124,8 @@ iptables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT
 ```
 Если такого правила нет или оно не первое, ответные пакеты могут отбрасываться и трафик через VPN не будет работать.
 
+Пошаговый чеклист восстановления интернета на eu1 (allowed-ips, INPUT, POSTROUTING, FORWARD, rp_filter) — см. [eu1-vpn-internet-recovery.md](eu1-vpn-internet-recovery.md).
+
 #### Скрипт add-ss-redirect.sh для VPN+GPT
 
 **Путь:** `/opt/vpnservice/scripts/add-ss-redirect.sh`
@@ -257,6 +259,29 @@ systemctl status vpn-bot.service
 ```
 
 **Важно:** Если добавлены новые переменные в `env_vars.example.txt`, их нужно **вручную** добавить в `env_vars.txt` на сервере (файл не в Git).
+
+### Обновление ссылки MTProto-прокси
+
+Если на eu1 переустановили MTProto-прокси (Docker), у контейнера новый `secret`. Нужно обновить ссылку в боте:
+
+1. На eu1 получить секрет: `sudo docker logs mtproto-proxy 2>&1 | grep -o 'secret=[a-f0-9]*' | head -1`
+2. На **Timeweb** (сервер бота) в `/opt/vpnservice/env_vars.txt` задать или заменить строку:
+   ```bash
+   MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=НОВЫЙ_СЕКРЕТ
+   ```
+3. Перезапустить бота: `systemctl restart vpn-bot.service`
+
+После этого команда `/proxy` в боте будет отправлять новую ссылку.
+
+### Резерв для мобильного интернета (`/mobile_vpn`)
+
+После развёртывания Xray VLESS+REALITY на eu1 (см. **`docs/xray-vless-reality-eu1-deploy.md`**) в `/opt/vpnservice/env_vars.txt` добавить **одну строку** без кавычек:
+
+```bash
+VLESS_REALITY_SHARE_URL=vless://uuid@host:порт?encryption=none&flow=xtls-rprx-vision&security=reality&...
+```
+
+Затем `systemctl restart vpn-bot.service`. Команда `/mobile_vpn` доступна **зарегистрированным** пользователям (как `/get_config`).
 
 ### Логи
 

@@ -94,6 +94,19 @@ sudo iptables-save | grep -E "PREROUTING|1081|wg0" > /root/vpn-backups/$(date +%
 3. **Периодически** проверять наличие и читаемость бэкапов (`ls -la /root/vpn-backups/`).
 4. При **миграции на другой сервер** — скопировать всю нужную дата‑директорию и восстановить конфиги по шагам выше; ключи и пароли переносить отдельно, безопасно.
 
+## Xray (VLESS + REALITY) на eu1
+
+Перед изменением `/usr/local/etc/xray/config.json` или бинарника:
+
+```bash
+BACKUP_DIR=/root/vpn-backups/$(date +%Y-%m-%d)
+mkdir -p "$BACKUP_DIR"
+cp /usr/local/etc/xray/config.json "$BACKUP_DIR/xray-config.json" 2>/dev/null || true
+systemctl cat xray > "$BACKUP_DIR/xray.service.txt" 2>/dev/null || true
+```
+
+Восстановление: `cp` обратно и `systemctl restart xray`. Полный сценарий развёртывания и бэкап AmneziaWG перед установкой — `docs/xray-vless-reality-eu1-deploy.md`.
+
 ## Связанные документы
 
 - `docs/specs/spec-01-architecture-wg-ss.md` — архитектура

@@ -112,6 +112,7 @@ def main() -> None:
             "/regen_android — обновить конфиг для Android",
             "/instruction — как подключиться (ПК, iPhone/iPad и Android)",
             "/proxy — ссылка прокси для Telegram",
+            "/mobile_vpn — резерв для LTE/5G (VLESS+REALITY), если AmneziaWG не коннектится",
             "/status — статус доступа",
             "/help — справка",
             "/my_config — синоним /get_config",
@@ -675,7 +676,8 @@ def main() -> None:
             "   • <b>ПК:</b> WireGuard (Россия) или AmneziaVPN (Европа) → «Импорт из файла» → выбери .conf.\n"
             "   • <b>iPhone/iPad:</b> сохрани .conf → «Файлы» → долгое нажатие на файл → <b>Поделиться</b> → WireGuard или AmneziaWG.\n"
             "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) из Google Play → «+» → «Импорт из файла» или из буфера обмена. Если ошибка 1000 — /get_config_android.\n\n"
-            "Сервер Россия — WireGuard. Сервер Европа — AmneziaVPN/AmneziaWG (обход блокировок). Скачать: amnezia.org/en/downloads"
+            "Сервер Россия — WireGuard. Сервер Европа — AmneziaVPN/AmneziaWG (обход блокировок). Скачать: amnezia.org/en/downloads\n\n"
+            "📶 По мобильному интернету AmneziaWG иногда не подключается — тогда команда /mobile_vpn (резерв TCP)."
         )
         safe_reply(message, instr)
 
@@ -694,6 +696,45 @@ def main() -> None:
                 "Ссылка на прокси для Telegram не настроена. Обратись к владельцу бота.",
             )
 
+    @bot.message_handler(commands=["mobile_vpn"])
+    def cmd_mobile_vpn(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Резервный доступ через VLESS+REALITY (TCP) для мобильных сетей.
+        Ссылка отправляется вторым сообщением без HTML, чтобы сохранить символы & в query string.
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+
+        user = find_user(message.from_user.id)
+        if not user or not user.active:
+            safe_reply(
+                message,
+                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
+                "Попроси владельца добавить тебя командой /add_user.",
+            )
+            return
+
+        url = config.vless_reality_share_url
+        if not url:
+            safe_reply(
+                message,
+                "Резервный мобильный профиль (VLESS+REALITY) пока не настроен на сервере бота.\n"
+                "Напиши владельцу или используй AmneziaWG по Wi‑Fi: /get_config после выбора Европы в /server.",
+            )
+            return
+
+        instr = _load_instruction_text(config.base_dir, "vless_reality")
+        safe_reply(message, instr)
+        try:
+            bot.send_message(message.chat.id, url, parse_mode=None)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Не удалось отправить VLESS ссылку: %s", e)
+            safe_reply(
+                message,
+                "Не удалось отправить ссылку. Напиши владельцу.",
+            )
+
     @bot.message_handler(commands=["my_config"])
     def cmd_my_config(message: types.Message) -> None:  # type: ignore[override]
         cmd_get_config(message)
@@ -709,6 +750,7 @@ def main() -> None:
             "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
             "📱 <b>Android:</b> если ошибка 1000 при подключении — используй /get_config_android и /regen_android.\n\n"
             "💬 Telegram заблокирован? — /proxy.\n\n"
+            "📶 На LTE/5G не коннектится VPN? — /mobile_vpn (если настроено владельцем).\n\n"
             "❓ Вопросы — владельцу или /instruction."
         )
         safe_reply(message, help_text)
