@@ -474,6 +474,13 @@ def _make_amneziawg_config_android_safe(
             result,
             flags=re.MULTILINE,
         )
+    # AllowedIPs: на Android бывает Error 1000 при наличии ::/0 (IPv6); оставляем только 0.0.0.0/0
+    result = re.sub(
+        r"^AllowedIPs\s*=\s*0\.0\.0\.0/0\s*,\s*::/0\s*$",
+        "AllowedIPs = 0.0.0.0/0",
+        result,
+        flags=re.MULTILINE,
+    )
     return result
 
 
