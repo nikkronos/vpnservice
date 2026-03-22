@@ -1,5 +1,10 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-03-23 (продолжение) — Документация попытки LTE + eu1
+
+- **Файл:** `docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md` — зафиксированы: внедрение Xray REALITY на eu1, Streisand, порты 443/4443, Fragment, tcpdump, Fornex firewall off, вывод о недоступности IP `185.21.8.91` с LTE; план дальше: REALITY на Timeweb (`81.200.146.32`) или другой ASN.
+- **README_FOR_NEXT_AGENT.md** — добавлена ссылка на этот документ в разделе «Документация».
+
 ## 2026-03-23 — Мобильный резерв: VLESS+REALITY и команда /mobile_vpn
 
 - **Контекст:** AmneziaWG и прокси работают по Wi‑Fi, по LTE/5G на разных операторах и устройствах — тайм-ауты; нужен TCP-транспорт с маскировкой под TLS, без отключения AmneziaWG.

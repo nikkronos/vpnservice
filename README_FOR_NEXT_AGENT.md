@@ -215,6 +215,7 @@ docker exec amnezia-awg2 cat /opt/amnezia/awg/awg0.conf
 
 ## Документация
 
+- **`docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md`** — попытка обхода LTE через Xray REALITY на eu1: что сделано, диагностика (tcpdump, Safari), вывод «блок до IP Fornex», **что делать дальше** (REALITY на Timeweb, другой VPS)
 - **SESSION_SUMMARY_2026-03-07.md** — последняя сессия (Telegram-прокси Fake TLS, алгоритм разблокировки, оценка провайдера)
 - **SESSION_SUMMARY_2026-02-26.md** — автоматизация выдачи конфигов + удаление /proxy
 - **SESSION_SUMMARY_2026-02-23.md** — попытки Remnawave, Xray, MTProto (неудачны)
