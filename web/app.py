@@ -317,6 +317,12 @@ def index():
         return f"Ошибка: {e}", 500
 
 
+@app.route("/recovery")
+def recovery_page():
+    """Отдельная страница для восстановления (Telegram proxy / VPN конфиг)."""
+    return render_template("recovery.html", stats={})
+
+
 @app.route("/api/servers")
 def api_servers():
     """API: статус серверов."""
