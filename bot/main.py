@@ -955,6 +955,11 @@ def main() -> None:
             safe_reply(message, "Эта команда доступна только владельцу VPN.")
             return
 
+        # Временно отключаем рассылку, чтобы команда ничего не отправляла.
+        # Увключить обратно можно будет отдельным коммитом.
+        safe_reply(message, "Команда /broadcast временно отключена (рассылки приостановлены).")
+        return
+
         try:
             users = get_all_users()
         except Exception as e:  # noqa: BLE001
