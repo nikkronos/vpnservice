@@ -1,5 +1,19 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-03-25 — Веб recovery: Telegram/VPN + ссылка в боте
+
+- **Веб-панель:** добавлен отдельный маршрут `/recovery`, а recovery-блоки вынесены с главной страницы `/`, чтобы пользователи не путались с мониторингом.
+- **UI recovery:**
+  - добавлены кнопки “Восстановить Telegram” и “Восстановить VPN (конфиг)”;
+  - вход по `Telegram ID`;
+  - опция `Android-safe` для корректного DNS в VPN-конфиге.
+- **Backend recovery (`web/app.py`):**
+  - `POST /api/recovery/telegram-proxy` — перезапуск docker-контейнера Telegram proxy-кандидата (через SSH, по server_id `main`/`eu1`), проверка пользователя через `bot/data/users.json`.
+  - `POST /api/recovery/vpn` — генерация/регенерация peer и выдача клиентского VPN-конфига.
+- **Фронтенд:** вынесена логика recovery в отдельный JS-файл `web/static/recovery.js`.
+- **Telegram-бот:** обновлены тексты `/start` и `/help` — добавлена строка со ссылкой `http://81.200.146.32:5001/recovery`, чтобы пользователи могли восстановить доступ при неработающем Telegram.
+- **UX:** с recovery страницы удалена навигационная ссылка “Назад к мониторингу”, чтобы пользователи не переходили туда.
+
 ## 2026-03-23 (продолжение) — Документация попытки LTE + eu1
 
 - **Файл:** `docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md` — зафиксированы: внедрение Xray REALITY на eu1, Streisand, порты 443/4443, Fragment, tcpdump, Fornex firewall off, вывод о недоступности IP `185.21.8.91` с LTE; план дальше: REALITY на Timeweb (`81.200.146.32`) или другой ASN.

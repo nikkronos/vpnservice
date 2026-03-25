@@ -72,6 +72,15 @@ python app.py
 - `GET /api/traffic` — трафик по пользователям/пирам (rx/tx с нод)
 - `GET /api/users` — список пользователей (JSON)
 - `GET /api/stats` — статистика использования (JSON)
+- `POST /api/recovery/telegram-proxy` — перезапуск Telegram proxy-кандидата через SSH (владелец-проверка по `telegram_id`).
+- `POST /api/recovery/vpn` — генерация/регенерация VPN-конфига для пользователя по `telegram_id`.
+
+## Recovery Page
+
+- Страница восстановления: `GET /recovery`
+- На странице пользователь вводит свой `Telegram ID` и нажимает:
+  - “Восстановить Telegram” (backend перезапускает docker-контейнер прокси)
+  - “Восстановить VPN (конфиг)” (backend генерирует клиентский `.conf` для WireGuard/AmneziaWG и отдаёт на скачивание)
 
 ## Обновление данных
 
