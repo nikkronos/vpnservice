@@ -99,10 +99,13 @@ def main() -> None:
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
         text_lines = [
             "Привет! Это VPN бот. 🔐",
             "",
             "Владелец добавляет пользователей, бот выдаёт персональные конфиги.",
+            "",
+            f"Ссылка на сайт, если телеграм не работает: {recovery_url}",
             "",
             "📋 <b>Команды:</b>",
             "/server — выбрать сервер (Россия или Европа)",
@@ -742,6 +745,7 @@ def main() -> None:
     @bot.message_handler(commands=["help"])
     def cmd_help(message: types.Message) -> None:  # type: ignore[override]
         """Отправляет справку: два сервера, один конфиг на сервер."""
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
         help_text = (
             "📖 <b>Справка по VPN боту</b>\n\n"
             "🇷🇺 <b>Россия</b> — низкий пинг.\n"
@@ -749,7 +753,7 @@ def main() -> None:
             "Один конфиг на сервер, импорт в AmneziaVPN/AmneziaWG.\n\n"
             "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
             "📱 <b>Android:</b> если ошибка 1000 при подключении — используй /get_config_android и /regen_android.\n\n"
-            "💬 Telegram заблокирован? — /proxy.\n\n"
+            f"💬 Telegram заблокирован? — /proxy или сайт: {recovery_url}.\n\n"
             "📶 На LTE/5G не коннектится VPN? — /mobile_vpn (если настроено владельцем).\n\n"
             "❓ Вопросы — владельцу или /instruction."
         )

@@ -9,6 +9,8 @@ class BotConfig:
     admin_id: int
     base_dir: pathlib.Path
     mtproto_proxy_link: str | None = None
+    # URL страницы восстановления на web-панели
+    vpn_recovery_url: str = "http://81.200.146.32:5001/recovery"
     # Share-ссылка vless:// для мобильного интернета (Xray REALITY), из VLESS_REALITY_SHARE_URL
     vless_reality_share_url: str | None = None
 
@@ -57,6 +59,10 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
     if mtproto_proxy_link:
         mtproto_proxy_link = mtproto_proxy_link.strip()
 
+    vpn_recovery_url = (data.get("VPN_RECOVERY_URL") or "").strip()
+    if not vpn_recovery_url:
+        vpn_recovery_url = "http://81.200.146.32:5001/recovery"
+
     vless_reality_share_url = data.get("VLESS_REALITY_SHARE_URL") or None
     if vless_reality_share_url:
         vless_reality_share_url = vless_reality_share_url.strip()
@@ -68,6 +74,7 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         admin_id=admin_id,
         base_dir=base_dir,
         mtproto_proxy_link=mtproto_proxy_link,
+        vpn_recovery_url=vpn_recovery_url,
         vless_reality_share_url=vless_reality_share_url,
     )
 
