@@ -13,6 +13,8 @@ import logging
 import pathlib
 import socket
 import subprocess
+import threading
+import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -24,6 +26,15 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from bot.config import load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
+from bot.wireguard_peers import (
+    create_amneziawg_peer_and_config_for_user,
+    create_peer_and_config_for_user,
+    execute_server_command,
+    regenerate_amneziawg_peer_and_config_for_user,
+    regenerate_peer_and_config_for_user,
+    find_peer_by_telegram_id,
+    is_amneziawg_eu1_configured,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +48,96 @@ try:
 except Exception as e:
     logger.error(f"Ошибка загрузки конфига: {e}")
     ADMIN_ID = None
+
+_recovery_lock = threading.Lock()
+
+
+def _parse_tg_proxy_link(link: Optional[str]) -> Dict[str, str]:
+    """
+    Parse tg://proxy?server=...&port=...&secret=... into dict.
+    Returns empty dict if link is missing/invalid.
+    """
+    if not link:
+        return {}
+    try:
+        # Example: tg://proxy?server=185.21.8.91&port=443&secret=...
+        parsed = urllib.parse.urlparse(link)
+        if not parsed.query:
+            return {}
+        qs = urllib.parse.parse_qs(parsed.query)
+        out: Dict[str, str] = {}
+        for k, v in qs.items():
+            if v:
+                out[k] = str(v[0])
+        return out
+    except Exception:
+        return {}
+
+
+def _restart_proxy_container_on_server(server_id: str, candidates: List[str]) -> Dict[str, str]:
+    """
+    Restarts first docker container that matches any candidate name substring.
+    Uses SSH via existing VPN utilities.
+    """
+    # List running containers
+    stdout, stderr = execute_server_command(
+        server_id,
+        "docker ps --format '{{.Names}}'",
+        timeout=25,
+    )
+    names = []
+    for line in (stdout or "").splitlines():
+        name = line.strip()
+        if name:
+            names.append(name)
+
+    matched = None
+    for c in candidates:
+        for n in names:
+            if c in n:
+                matched = n
+                break
+        if matched:
+            break
+
+    if not matched:
+        return {
+            "ok": "false",
+            "error": f"No docker container matched candidates on {server_id}. Candidates={candidates}, running={names}",
+        }
+
+    # Restart matched container
+    stdout2, stderr2 = execute_server_command(
+        server_id,
+        f"docker restart {matched}",
+        timeout=25,
+    )
+    _ = stdout2  # restart output not always useful
+    return {
+        "ok": "true",
+        "server_id": server_id,
+        "container": matched,
+        "stderr": (stderr2 or "").strip(),
+    }
+
+
+def _determine_target_server_id_from_env(proxy_server_ip: str) -> Optional[str]:
+    """
+    Map proxy server IP to our internal server_id ("main" or "eu1") using env_vars.txt.
+    """
+    base = pathlib.Path(__file__).parent.parent
+    env = _parse_env_file(base / "env_vars.txt")
+    if not proxy_server_ip:
+        return None
+
+    main_host = env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST")
+    eu1_host = env.get("WG_EU1_ENDPOINT_HOST") or env.get("WG_EU1_SSH_HOST")
+
+    if eu1_host and proxy_server_ip == eu1_host:
+        return "eu1"
+    if main_host and proxy_server_ip == main_host:
+        return "main"
+    return None
 
 
 def check_server_status(server_id: str, endpoint_host: Optional[str] = None) -> Dict[str, any]:
@@ -429,6 +530,140 @@ def api_stats():
         })
     except Exception as e:
         logger.exception(f"Ошибка API статистики: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/telegram-proxy", methods=["POST"])
+def api_recovery_telegram_proxy():
+    """
+    Recovery endpoint:
+    - Auth by telegram_id existence in bot storage (users.json)
+    - Restarts telegram proxy container on the corresponding server (eu1/main)
+    """
+    try:
+        body = request.get_json() or {}
+        telegram_id = body.get("telegram_id")
+        if telegram_id is None:
+            return jsonify({"error": "telegram_id is required"}), 400
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "telegram_id must be integer"}), 400
+
+        user = find_user(telegram_id)
+        if not user or not user.active:
+            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+
+        # Avoid concurrent restarts
+        if not _recovery_lock.acquire(blocking=False):
+            return jsonify({"error": "Recovery already running"}), 409
+
+        try:
+            proxy_parts = _parse_tg_proxy_link(
+                globals().get("config").mtproto_proxy_link  # type: ignore[union-attr]
+                if globals().get("config") is not None
+                else None
+            )
+            proxy_server_ip = proxy_parts.get("server", "")
+            if not proxy_server_ip:
+                return jsonify({"error": "MTPROTO_PROXY_LINK is not configured (tg://proxy... missing server)"}), 500
+
+            candidates = ["mtproto-proxy", "mtproxy-faketls"]
+
+            preferred = _determine_target_server_id_from_env(proxy_server_ip)
+            servers_to_try: List[str] = []
+            if preferred:
+                servers_to_try.append(preferred)
+            # Always try both, because proxy server IP mapping may be incomplete.
+            for sid in ["main", "eu1"]:
+                if sid not in servers_to_try:
+                    servers_to_try.append(sid)
+
+            last_r: Dict[str, str] = {}
+            for sid in servers_to_try:
+                try:
+                    r = _restart_proxy_container_on_server(sid, candidates)
+                    last_r = r
+                    if r.get("ok") == "true":
+                        return jsonify(r), 200
+                except Exception as e:
+                    last_r = {"ok": "false", "server_id": sid, "error": str(e)}
+                    # Continue fallback to other server.
+
+            # Nothing worked
+            return jsonify(last_r), 502
+        finally:
+            _recovery_lock.release()
+    except Exception as e:
+        logger.exception("Ошибка recovery/telegram-proxy: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/vpn", methods=["POST"])
+def api_recovery_vpn():
+    """
+    VPN recovery endpoint:
+    - Auth by telegram_id existence in bot storage (users.json)
+    - Regenerate (or create) VPN config for user's preferred server
+    - Returns config text so user can import in client apps without Telegram
+    """
+    try:
+        body = request.get_json() or {}
+        telegram_id = body.get("telegram_id")
+        android_safe = bool(body.get("android_safe", False))
+
+        if telegram_id is None:
+            return jsonify({"error": "telegram_id is required"}), 400
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "telegram_id must be integer"}), 400
+
+        user = find_user(telegram_id)
+        if not user or not user.active:
+            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+
+        preferred_server_id = user.preferred_server_id or "main"
+
+        # If AmneziaWG on eu1 isn't configured, don't attempt to generate configs.
+        if preferred_server_id == "eu1" and not is_amneziawg_eu1_configured():
+            return jsonify({"error": "eu1 AmneziaWG is not configured on server. Try later or ask owner."}), 503
+
+        peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
+        if preferred_server_id == "eu1":
+            if peer and peer.active:
+                peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
+                    telegram_id, android_safe=android_safe
+                )
+            else:
+                peer, cfg = create_amneziawg_peer_and_config_for_user(
+                    telegram_id, android_safe=android_safe
+                )
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+            return jsonify({"ok": True, "filename": filename, "config": cfg})
+
+        # main/other WireGuard nodes
+        if peer and peer.active:
+            peer, cfg = regenerate_peer_and_config_for_user(
+                telegram_id, server_id=preferred_server_id, android_safe=android_safe
+            )
+        else:
+            # profile_type is mostly relevant for eu1 in this codebase; for main keep it None.
+            peer, cfg = create_peer_and_config_for_user(
+                telegram_id, server_id=preferred_server_id, profile_type=None, android_safe=android_safe
+            )
+
+        pt = getattr(peer, "profile_type", None)
+        if pt == "vpn_gpt":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+        elif pt == "unified":
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+        else:
+            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+
+        return jsonify({"ok": True, "filename": filename, "config": cfg})
+    except Exception as e:
+        logger.exception("Ошибка recovery/vpn: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

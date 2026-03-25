@@ -152,4 +152,119 @@ document.addEventListener('DOMContentLoaded', () => {
     updateServicesStatus();
     updateTraffic();
     updateLastUpdate();
+
+    const tgInput = document.getElementById('recoveryTelegramId');
+    const tgResult = document.getElementById('recovery-result');
+    const tgBtn = document.getElementById('btnRecoverTelegram');
+
+    const vpnInput = document.getElementById('vpnRecoveryTelegramId');
+    const vpnResult = document.getElementById('vpn-recovery-result');
+    const vpnBtn = document.getElementById('btnRecoverVpn');
+    const vpnAndroidSafe = document.getElementById('vpnRecoveryAndroidSafe');
+
+    if (!tgInput || !tgResult || !tgBtn) return;
+
+    // Telegram recovery
+    const savedId = localStorage.getItem('vpn_recovery_telegram_id');
+    if (savedId) {
+        tgInput.value = savedId;
+        if (vpnInput) vpnInput.value = savedId;
+    }
+
+    function setResult(text, isError) {
+        tgResult.textContent = text || '';
+        tgResult.style.color = isError ? '#b00020' : '#1b5e20';
+    }
+
+    tgBtn.addEventListener('click', async () => {
+        const telegramId = (tgInput.value || '').trim();
+        if (!telegramId) {
+            setResult('Введите Telegram ID.', true);
+            return;
+        }
+
+        tgBtn.disabled = true;
+        setResult('Восстановление запущено...', false);
+
+        try {
+            localStorage.setItem('vpn_recovery_telegram_id', telegramId);
+            const resp = await fetch('/api/recovery/telegram-proxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: telegramId }),
+            });
+
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                setResult('Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+                return;
+            }
+
+            setResult('Готово. ' + JSON.stringify(data), false);
+        } catch (err) {
+            setResult('Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
+        } finally {
+            tgBtn.disabled = false;
+        }
+    });
+
+    // VPN recovery
+    if (!vpnInput || !vpnResult || !vpnBtn || !vpnAndroidSafe) return;
+
+    function setVpnResult(text, isError) {
+        vpnResult.textContent = text || '';
+        vpnResult.style.color = isError ? '#b00020' : '#1b5e20';
+    }
+
+    vpnBtn.addEventListener('click', async () => {
+        const telegramId = (vpnInput.value || '').trim();
+        const androidSafe = !!vpnAndroidSafe.checked;
+
+        if (!telegramId) {
+            setVpnResult('Введите Telegram ID.', true);
+            return;
+        }
+
+        vpnBtn.disabled = true;
+        setVpnResult('Генерация VPN-конфига...', false);
+
+        try {
+            localStorage.setItem('vpn_recovery_telegram_id', telegramId);
+
+            const resp = await fetch('/api/recovery/vpn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: telegramId, android_safe: androidSafe }),
+            });
+
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                setVpnResult('Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+                return;
+            }
+
+            const filename = data.filename || 'vpn.conf';
+            const cfg = data.config || '';
+            if (!cfg) {
+                setVpnResult('Сервер не вернул конфиг.', true);
+                return;
+            }
+
+            setVpnResult('Готово. Скачивайте файл: ' + filename, false);
+
+            const blob = new Blob([cfg], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            setVpnResult('Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
+        } finally {
+            vpnBtn.disabled = false;
+        }
+    });
 });

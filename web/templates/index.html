@@ -102,6 +102,58 @@
         </section>
         {% endif %}
 
+        <section class="recovery">
+            <h2>🛠️ Восстановление Telegram</h2>
+            <p class="section-hint">
+                Если Telegram не подключается, войдите по <b>Telegram ID</b> (как в боте) и нажмите кнопку.
+            </p>
+
+            <div class="recovery-form">
+                <label for="recoveryTelegramId">Ваш Telegram ID</label>
+                <input
+                    type="number"
+                    id="recoveryTelegramId"
+                    inputmode="numeric"
+                    placeholder="Например, 123456789"
+                    autocomplete="off"
+                />
+                <button type="button" id="btnRecoverTelegram" class="btn-recovery">
+                    Восстановить Telegram
+                </button>
+            </div>
+
+            <div id="recovery-result" class="recovery-result" aria-live="polite"></div>
+        </section>
+
+        <section class="recovery">
+            <h2>🛠️ Восстановление VPN</h2>
+            <p class="section-hint">
+                Генерирует новый VPN-конфиг и даёт его скачать — чтобы вы могли подключиться даже при проблемах с Telegram.
+            </p>
+
+            <div class="recovery-form">
+                <label for="vpnRecoveryTelegramId">Ваш Telegram ID</label>
+                <input
+                    type="number"
+                    id="vpnRecoveryTelegramId"
+                    inputmode="numeric"
+                    placeholder="Например, 123456789"
+                    autocomplete="off"
+                />
+
+                <label class="checkbox-row">
+                    <input type="checkbox" id="vpnRecoveryAndroidSafe" />
+                    Android-safe (один DNS, обход ErrorCode 1000)
+                </label>
+
+                <button type="button" id="btnRecoverVpn" class="btn-recovery">
+                    Восстановить VPN (конфиг)
+                </button>
+            </div>
+
+            <div id="vpn-recovery-result" class="recovery-result" aria-live="polite"></div>
+        </section>
+
         <footer>
             <p>Последнее обновление: <span id="last-update"></span></p>
             <p><a href="/api/stats" target="_blank">API статистики (JSON)</a></p>
