@@ -935,7 +935,7 @@ def main() -> None:
 
         safe_reply(message, "\n".join(lines))
 
-    # Текст уведомления о проблеме VPN и решении через /regen (рассылается по /broadcast)
+    # Базовый текст уведомления о проблеме VPN и решении через /regen (рассылается по /broadcast)
     BROADCAST_VPN_ISSUE_TEXT = (
         "⚠️ <b>В данный момент наблюдается проблема с VPN.</b>\n\n"
         "Если она затронула вас и у вас появилась ошибка «Не удалось установить соединение», "
@@ -966,11 +966,20 @@ def main() -> None:
             safe_reply(message, "Нет зарегистрированных пользователей для рассылки.")
             return
 
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
+        broadcast_text = (
+            BROADCAST_VPN_ISSUE_TEXT
+            + "\n\n"
+            + "Если Telegram снова не отвечает — восстановление доступно на сайте.\n"
+            + f"Ссылка: {recovery_url}\n"
+            + "На странице введите свой Telegram ID и нажмите «Восстановить VPN (конфиг)»."
+        )
+
         sent = 0
         failed = 0
         for u in users:
             try:
-                bot.send_message(u.telegram_id, BROADCAST_VPN_ISSUE_TEXT)
+                bot.send_message(u.telegram_id, broadcast_text, parse_mode="HTML")
                 sent += 1
                 time.sleep(0.05)  # снижение риска rate limit от Telegram
             except Exception as e:  # noqa: BLE001
