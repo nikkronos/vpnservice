@@ -3,8 +3,8 @@
 ## 2026-03-30 — Ротация MTProxy: /proxy_rotate, override-файл, документация
 
 - **Цель:** «обновляемая» ссылка на MTProxy Fake TLS без ручного копирования в `env` при каждой смене секрета; пользователи по-прежнему получают актуальный `tg://` через `/proxy`.
-- **Код бота:** `get_effective_mtproto_proxy_link()` в `bot/config.py` — приоритет `data/mtproto_proxy_link.txt` над `MTPROTO_PROXY_LINK`; команда `/proxy_rotate` (только владелец) запускает `MTPROXY_ROTATE_SCRIPT`, парсит `MTPROTO_LINK=...`, пишет override; `/proxy` обновлён.
-- **Web:** `web/app.py` — recovery `telegram-proxy` использует эффективную ссылку для определения IP хоста.
+- **Код бота:** `get_effective_mtproto_proxy_link()` в `bot/config.py` — приоритет `data/mtproto_proxy_link.txt` над `MTPROTO_PROXY_LINK`; fallback читает `env_vars.txt` с диска при каждом вызове; команда `/proxy_rotate` (только владелец) запускает `MTPROXY_ROTATE_SCRIPT`, парсит `MTPROTO_LINK=...`, пишет override; `/proxy` вызывает `load_config()` + эффективная ссылка.
+- **Web:** `web/app.py` — recovery `telegram-proxy` использует эффективную ссылку для определения IP хоста; в JSON-ответ добавлены `mtproto_proxy_link` и `hint` (та же ссылка, что `/proxy`; при ошибке перезапуска контейнера ссылка всё равно отдаётся). `recovery.js` / `recovery.html` — понятный вывод ссылки пользователю.
 - **Репозиторий:** `.gitignore` — `data/mtproto_proxy_link.txt`; `data/.gitkeep`; `env_vars.example.txt` — `MTPROXY_ROTATE_SCRIPT`.
 - **Документация:** `docs/mtproxy-proxy-rotation.md`; `docs/scripts/mtproxy-faketls-rotate.sh.example`; ссылка из `docs/mtproxy-faketls-deploy.md`.
 

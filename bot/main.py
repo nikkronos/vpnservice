@@ -704,9 +704,10 @@ def main() -> None:
     @bot.message_handler(commands=["proxy"])
     def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
         """Отправляет ссылку MTProto-прокси для Telegram и краткую инструкцию."""
-        link = get_effective_mtproto_proxy_link(config)
+        fresh = load_config()
+        link = get_effective_mtproto_proxy_link(fresh)
         if link:
-            instr = _load_instruction_text(config.base_dir, "mtproto")
+            instr = _load_instruction_text(fresh.base_dir, "mtproto")
             safe_reply(
                 message,
                 f"{link}\n\n{instr}",

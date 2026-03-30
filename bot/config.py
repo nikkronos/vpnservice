@@ -90,6 +90,8 @@ def get_effective_mtproto_proxy_link(bot_config: BotConfig) -> str | None:
 
     Если после ротации записан файл data/mtproto_proxy_link.txt (команда /proxy_rotate),
     он имеет приоритет над MTPROTO_PROXY_LINK в env_vars.txt — без перезапуска бота.
+    Значение из env_vars.txt читается с диска при каждом вызове (fallback), чтобы веб-панель
+    и бот не отдавали устаревшую ссылку после ручного правления env без перезапуска процесса.
     """
     override = bot_config.base_dir / "data" / "mtproto_proxy_link.txt"
     if override.exists():
@@ -99,6 +101,8 @@ def get_effective_mtproto_proxy_link(bot_config: BotConfig) -> str | None:
                 return text
         except OSError:
             pass
-    return bot_config.mtproto_proxy_link
+    env = _parse_env_file(bot_config.base_dir / "env_vars.txt")
+    link = (env.get("MTPROTO_PROXY_LINK") or "").strip()
+    return link or None
 
 

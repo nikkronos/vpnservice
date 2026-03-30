@@ -565,12 +565,8 @@ def api_recovery_telegram_proxy():
             return jsonify({"error": "Recovery already running"}), 409
 
         try:
-            cfg = globals().get("config")
-            effective_link = (
-                get_effective_mtproto_proxy_link(cfg)  # type: ignore[arg-type]
-                if cfg is not None
-                else None
-            )
+            fresh_cfg = load_config()
+            effective_link = get_effective_mtproto_proxy_link(fresh_cfg)
             proxy_parts = _parse_tg_proxy_link(effective_link)
             proxy_server_ip = proxy_parts.get("server", "")
             if not proxy_server_ip:
@@ -593,12 +589,22 @@ def api_recovery_telegram_proxy():
                     r = _restart_proxy_container_on_server(sid, candidates)
                     last_r = r
                     if r.get("ok") == "true":
+                        r["mtproto_proxy_link"] = effective_link or ""
+                        r["hint"] = (
+                            "Скопируйте ссылку и откройте в Telegram (или вставьте в Настройки → Прокси). "
+                            "Это та же ссылка, что по команде /proxy в боте."
+                        )
                         return jsonify(r), 200
                 except Exception as e:
                     last_r = {"ok": "false", "server_id": sid, "error": str(e)}
                     # Continue fallback to other server.
 
-            # Nothing worked
+            # Nothing worked — всё равно отдаём актуальную ссылку (как /proxy), чтобы пользователь мог сменить прокси вручную
+            last_r["mtproto_proxy_link"] = effective_link or ""
+            last_r["hint"] = (
+                "Перезапуск контейнера не удался; ниже актуальная ссылка на прокси (как в боте /proxy). "
+                "Попробуйте добавить её в Telegram вручную."
+            )
             return jsonify(last_r), 502
         finally:
             _recovery_lock.release()

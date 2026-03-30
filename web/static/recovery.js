@@ -45,12 +45,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const data = await resp.json().catch(() => ({}));
+        const link = data.mtproto_proxy_link || '';
+        const hint = data.hint || '';
+
         if (!resp.ok) {
-          setResult(tgResult, 'Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+          let msg = 'Ошибка: ' + (data.error || resp.statusText || 'unknown');
+          if (link) {
+            msg +=
+              '\n\nАктуальная ссылка на прокси (как в боте /proxy):\n' +
+              link +
+              (hint ? '\n\n' + hint : '');
+          }
+          setResult(tgResult, msg, !link);
           return;
         }
 
-        setResult(tgResult, 'Готово. ' + JSON.stringify(data), false);
+        let okText = 'Готово. Контейнер прокси перезапущен.';
+        if (link) {
+          okText +=
+            '\n\nСсылка на MTProxy (та же, что по команде /proxy в боте):\n' +
+            link +
+            (hint ? '\n\n' + hint : '');
+        }
+        setResult(tgResult, okText, false);
       } catch (err) {
         setResult(tgResult, 'Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
       } finally {
