@@ -24,7 +24,7 @@ from flask import Flask, jsonify, render_template, request
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from bot.config import load_config, _parse_env_file
+from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
 from bot.wireguard_peers import (
     create_amneziawg_peer_and_config_for_user,
@@ -565,11 +565,13 @@ def api_recovery_telegram_proxy():
             return jsonify({"error": "Recovery already running"}), 409
 
         try:
-            proxy_parts = _parse_tg_proxy_link(
-                globals().get("config").mtproto_proxy_link  # type: ignore[union-attr]
-                if globals().get("config") is not None
+            cfg = globals().get("config")
+            effective_link = (
+                get_effective_mtproto_proxy_link(cfg)  # type: ignore[arg-type]
+                if cfg is not None
                 else None
             )
+            proxy_parts = _parse_tg_proxy_link(effective_link)
             proxy_server_ip = proxy_parts.get("server", "")
             if not proxy_server_ip:
                 return jsonify({"error": "MTPROTO_PROXY_LINK is not configured (tg://proxy... missing server)"}), 500

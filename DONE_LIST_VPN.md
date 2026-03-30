@@ -1,5 +1,24 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-03-30 — Ротация MTProxy: /proxy_rotate, override-файл, документация
+
+- **Цель:** «обновляемая» ссылка на MTProxy Fake TLS без ручного копирования в `env` при каждой смене секрета; пользователи по-прежнему получают актуальный `tg://` через `/proxy`.
+- **Код бота:** `get_effective_mtproto_proxy_link()` в `bot/config.py` — приоритет `data/mtproto_proxy_link.txt` над `MTPROTO_PROXY_LINK`; команда `/proxy_rotate` (только владелец) запускает `MTPROXY_ROTATE_SCRIPT`, парсит `MTPROTO_LINK=...`, пишет override; `/proxy` обновлён.
+- **Web:** `web/app.py` — recovery `telegram-proxy` использует эффективную ссылку для определения IP хоста.
+- **Репозиторий:** `.gitignore` — `data/mtproto_proxy_link.txt`; `data/.gitkeep`; `env_vars.example.txt` — `MTPROXY_ROTATE_SCRIPT`.
+- **Документация:** `docs/mtproxy-proxy-rotation.md`; `docs/scripts/mtproxy-faketls-rotate.sh.example`; ссылка из `docs/mtproxy-faketls-deploy.md`.
+
+## 2026-03-30 — README: MTProxy Fake TLS vs «голый» MTProto; резюме сессии
+
+- **`README_FOR_NEXT_AGENT.md`:** уточнены таблицы «что не работает на eu1» / «что работает»: обычный MTProto на eu1 — не использовать (блок по сигнатуре); **MTProxy с Fake TLS** на main (Timeweb, `docs/mtproxy-faketls-deploy.md`) — рабочий путь для Telegram; правило №5 приведено в соответствие с `docs/telegram-unblock-algorithm.md` (команда `/proxy` снята, ссылка через `MTPROTO_PROXY_LINK`/вручную).
+- **`SESSION_SUMMARY_2026-03-30.md`:** зафиксированы итоги сессии (ревью плана, согласование документации по прокси).
+
+## 2026-03-26 — LTE blackhole, MVP/юнит-экономика (документация)
+
+- **`docs/blocking-bypass-strategy.md`:** дополнение 2026-03-26 — выводы по полевым тестам LTE (недоступность HTTP/HTTPS до main/eu1 IP при рабочем Wi‑Fi; мульти-вход для mobile).
+- **`docs/mvp-unit-economics-and-plan.md`:** новый документ — юнит-экономика (формулы, пример брейк-ивена), риски, фазы MVP, рамка «строить vs покупать сервис».
+- **`SESSION_SUMMARY_2026-03-26.md`:** резюме диагностики и рекомендаций следующим шагам.
+
 ## 2026-03-25 — Веб recovery: Telegram/VPN + ссылка в боте
 
 - **Веб-панель:** добавлен отдельный маршрут `/recovery`, а recovery-блоки вынесены с главной страницы `/`, чтобы пользователи не путались с мониторингом.

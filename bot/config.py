@@ -9,6 +9,8 @@ class BotConfig:
     admin_id: int
     base_dir: pathlib.Path
     mtproto_proxy_link: str | None = None
+    # Скрипт ротации MTProxy Fake TLS на том же хосте, что и бот (команда /proxy_rotate, только владелец). См. docs/mtproxy-proxy-rotation.md
+    mtproxy_rotate_script: str | None = None
     # URL страницы восстановления на web-панели
     vpn_recovery_url: str = "http://81.200.146.32:5001/recovery"
     # Share-ссылка vless:// для мобильного интернета (Xray REALITY), из VLESS_REALITY_SHARE_URL
@@ -59,6 +61,8 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
     if mtproto_proxy_link:
         mtproto_proxy_link = mtproto_proxy_link.strip()
 
+    mtproxy_rotate_script = (data.get("MTPROXY_ROTATE_SCRIPT") or "").strip() or None
+
     vpn_recovery_url = (data.get("VPN_RECOVERY_URL") or "").strip()
     if not vpn_recovery_url:
         vpn_recovery_url = "http://81.200.146.32:5001/recovery"
@@ -74,8 +78,27 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         admin_id=admin_id,
         base_dir=base_dir,
         mtproto_proxy_link=mtproto_proxy_link,
+        mtproxy_rotate_script=mtproxy_rotate_script,
         vpn_recovery_url=vpn_recovery_url,
         vless_reality_share_url=vless_reality_share_url,
     )
+
+
+def get_effective_mtproto_proxy_link(bot_config: BotConfig) -> str | None:
+    """
+    Актуальная ссылка tg://proxy для пользователей.
+
+    Если после ротации записан файл data/mtproto_proxy_link.txt (команда /proxy_rotate),
+    он имеет приоритет над MTPROTO_PROXY_LINK в env_vars.txt — без перезапуска бота.
+    """
+    override = bot_config.base_dir / "data" / "mtproto_proxy_link.txt"
+    if override.exists():
+        try:
+            text = override.read_text(encoding="utf-8").strip()
+            if text.startswith("tg://proxy"):
+                return text
+        except OSError:
+            pass
+    return bot_config.mtproto_proxy_link
 
 

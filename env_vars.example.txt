@@ -4,6 +4,10 @@ ADMIN_ID=your_telegram_id
 
 # Ссылка MTProto-прокси для Telegram (команда /proxy в боте). Опционально.
 # MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=...
+#
+# Ротация Fake TLS (новый секрет + контейнер): скрипт на том же сервере, что и бот (см. docs/mtproxy-proxy-rotation.md).
+# После успешного /proxy_rotate бот пишет актуальную ссылку в data/mtproto_proxy_link.txt (не в Git).
+# MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-faketls-rotate.sh
 
 # Ссылка на страницу восстановления (web-панель), чтобы пользователь мог перейти,
 # если Telegram не работает.

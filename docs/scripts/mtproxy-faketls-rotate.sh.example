@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Пример: ротация MTProxy Fake TLS (nineseconds/mtg:2) на том же хосте, где крутится VPN-бот.
+# Скопировать на сервер без .example, chmod +x, задать переменные окружения или правки ниже.
+# В env_vars.txt бота: MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-faketls-rotate.sh
+#
+# Выводит в stdout строку MTPROTO_LINK=tg://proxy?... — её парсит команда /proxy_rotate в боте.
+set -euo pipefail
+
+# --- Настрой под свой сервер ---
+CONTAINER_NAME="${MTPROXY_CONTAINER_NAME:-mtproxy-faketls}"
+HOST_PORT="${MTPROXY_PORT:-443}"
+PUBLIC_IP="${MTPROXY_PUBLIC_IP:-}"
+FAKE_DOMAIN="${MTPROXY_FAKE_TLS_DOMAIN:-1c.ru}"
+MTG_IMAGE="${MTPROXY_MTG_IMAGE:-nineseconds/mtg:2}"
+
+if [[ -z "${PUBLIC_IP}" ]]; then
+  PUBLIC_IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || true)"
+fi
+if [[ -z "${PUBLIC_IP}" ]]; then
+  echo "ERROR: задай MTPROXY_PUBLIC_IP или обеспечь curl к ifconfig.me" >&2
+  exit 1
+fi
+
+echo "Stopping old container (if any)..." >&2
+docker stop "${CONTAINER_NAME}" 2>/dev/null || true
+docker rm "${CONTAINER_NAME}" 2>/dev/null || true
+
+echo "Generating new Fake TLS secret for domain ${FAKE_DOMAIN}..." >&2
+SECRET="$(docker run --rm "${MTG_IMAGE}" generate-secret --hex "${FAKE_DOMAIN}")"
+SECRET="$(echo "${SECRET}" | tr -d '[:space:]')"
+
+if [[ -z "${SECRET}" ]]; then
+  echo "ERROR: empty secret from mtg generate-secret" >&2
+  exit 1
+fi
+
+echo "Starting ${CONTAINER_NAME} on 0.0.0.0:${HOST_PORT}..." >&2
+docker run -d \
+  --name "${CONTAINER_NAME}" \
+  --restart unless-stopped \
+  -p "${HOST_PORT}:443" \
+  "${MTG_IMAGE}" \
+  simple-run -n 1.1.1.1 -i prefer-ipv4 "0.0.0.0:443" "${SECRET}"
+
+sleep 1
+if ! docker ps --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
+  echo "ERROR: container not running. docker logs ${CONTAINER_NAME}:" >&2
+  docker logs "${CONTAINER_NAME}" 2>&1 || true
+  exit 1
+fi
+
+TG_LINK="tg://proxy?server=${PUBLIC_IP}&port=${HOST_PORT}&secret=${SECRET}"
+HTTPS_LINK="https://t.me/proxy?server=${PUBLIC_IP}&port=${HOST_PORT}&secret=${SECRET}"
+
+echo "OK. Update env MTPROTO_PROXY_LINK on next deploy if needed; bot uses data/mtproto_proxy_link.txt after /proxy_rotate." >&2
+echo "HTTPS_LINK=${HTTPS_LINK}" >&2
+echo "MTPROTO_LINK=${TG_LINK}"

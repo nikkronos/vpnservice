@@ -1,5 +1,7 @@
 # Секреты - НИКОГДА не коммитить!
 env_vars.txt
+# Актуальная ссылка MTProxy после ротации (/proxy_rotate); содержит secret в URL
+data/mtproto_proxy_link.txt
 *.key
 *.pem
 *.crt

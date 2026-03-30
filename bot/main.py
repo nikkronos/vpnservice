@@ -1,12 +1,13 @@
 import io
 import logging
+import subprocess
 import time
 from pathlib import Path
 
 import telebot
 from telebot import types
 
-from .config import BotConfig, load_config
+from .config import BotConfig, get_effective_mtproto_proxy_link, load_config
 from .storage import (
     User,
     find_peer_by_telegram_id,
@@ -31,6 +32,21 @@ from .wireguard_peers import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _parse_mtproto_link_from_rotate_stdout(stdout: str) -> str | None:
+    """Ищет строку tg://proxy или MTPROTO_LINK=tg://... в выводе скрипта ротации."""
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("MTPROTO_LINK="):
+            val = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if val.startswith("tg://proxy"):
+                return val
+        if line.startswith("tg://proxy"):
+            return line
+    return None
 
 
 def _load_instruction_text(base_dir: Path, name: str) -> str:
@@ -115,6 +131,7 @@ def main() -> None:
             "/regen_android — обновить конфиг для Android",
             "/instruction — как подключиться (ПК, iPhone/iPad и Android)",
             "/proxy — ссылка прокси для Telegram",
+            "/proxy_rotate — новая ссылка MTProxy после смены секрета (только владелец)",
             "/mobile_vpn — резерв для LTE/5G (VLESS+REALITY), если AmneziaWG не коннектится",
             "/status — статус доступа",
             "/help — справка",
@@ -687,17 +704,102 @@ def main() -> None:
     @bot.message_handler(commands=["proxy"])
     def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
         """Отправляет ссылку MTProto-прокси для Telegram и краткую инструкцию."""
-        if config.mtproto_proxy_link:
+        link = get_effective_mtproto_proxy_link(config)
+        if link:
             instr = _load_instruction_text(config.base_dir, "mtproto")
             safe_reply(
                 message,
-                f"{config.mtproto_proxy_link}\n\n{instr}",
+                f"{link}\n\n{instr}",
             )
         else:
             safe_reply(
                 message,
                 "Ссылка на прокси для Telegram не настроена. Обратись к владельцу бота.",
             )
+
+    @bot.message_handler(commands=["proxy_rotate"])
+    def cmd_proxy_rotate(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Владелец: запускает скрипт ротации MTProxy (новый секрет + контейнер), сохраняет ссылку в data/mtproto_proxy_link.txt.
+        Требует MTPROXY_ROTATE_SCRIPT в env и Linux/Docker на хосте бота.
+        """
+        if not message.from_user:
+            safe_reply(message, "Не удалось определить пользователя.")
+            return
+        if not is_owner(message.from_user.id, admin_id):
+            safe_reply(message, "Команда только для владельца бота.")
+            return
+
+        script = config.mtproxy_rotate_script
+        if not script:
+            safe_reply(
+                message,
+                "Ротация не настроена: добавь в env_vars.txt на сервере бота переменную "
+                "MTPROXY_ROTATE_SCRIPT (путь к скрипту). Пример: docs/scripts/mtproxy-faketls-rotate.sh.example\n\n"
+                "Полная инструкция: docs/mtproxy-proxy-rotation.md",
+            )
+            return
+
+        script_path = Path(script).expanduser()
+        if not script_path.is_file():
+            safe_reply(message, f"Файл скрипта не найден: <code>{script_path}</code>")
+            return
+
+        try:
+            argv = ["/bin/bash", str(script_path)] if script_path.suffix == ".sh" else [str(script_path)]
+            completed = subprocess.run(  # noqa: S603
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            safe_reply(message, "Ротация: тайм-аут 180 с. Проверь Docker и логи на сервере бота.")
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.exception("proxy_rotate subprocess: %s", e)
+            safe_reply(message, f"Не удалось запустить скрипт: {e}")
+            return
+
+        link = _parse_mtproto_link_from_rotate_stdout(completed.stdout or "")
+        combined = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
+
+        if completed.returncode != 0 or not link:
+            tail = combined[-3500:] if len(combined) > 3500 else combined
+            safe_reply(
+                message,
+                f"Скрипт завершился с кодом {completed.returncode}. Новую ссылку разобрать не удалось.\n\n{tail}",
+            )
+            return
+
+        data_dir = config.base_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        override_path = data_dir / "mtproto_proxy_link.txt"
+        try:
+            override_path.write_text(link.strip() + "\n", encoding="utf-8")
+        except OSError as e:
+            logger.exception("proxy_rotate write override: %s", e)
+            try:
+                bot.send_message(
+                    message.chat.id,
+                    f"Ссылка получена, но не записана в файл ({e}). Сохрани вручную:\n\n{link}",
+                    parse_mode=None,
+                )
+            except Exception:  # noqa: BLE001
+                safe_reply(message, f"Ссылка: {link}")
+            return
+
+        safe_reply(
+            message,
+            "✅ MTProxy пересобран. Новая ссылка — <b>следующим сообщением</b> (открой в Telegram).\n\n"
+            "Команда /proxy уже отдаёт эту ссылку всем. Старый прокси в клиенте с прежним секретом перестанет работать — "
+            "можно добавить новый рядом, не удаляя старый.",
+        )
+        try:
+            bot.send_message(message.chat.id, link, parse_mode=None)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("proxy_rotate send link: %s", e)
 
     @bot.message_handler(commands=["mobile_vpn"])
     def cmd_mobile_vpn(message: types.Message) -> None:  # type: ignore[override]
@@ -753,7 +855,8 @@ def main() -> None:
             "Один конфиг на сервер, импорт в AmneziaVPN/AmneziaWG.\n\n"
             "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
             "📱 <b>Android:</b> если ошибка 1000 при подключении — используй /get_config_android и /regen_android.\n\n"
-            f"💬 Telegram заблокирован? — /proxy или сайт: {recovery_url}.\n\n"
+            f"💬 Telegram заблокирован? — /proxy или сайт: {recovery_url}.\n"
+            "Владелец: новая ссылка MTProxy после смены секрета — /proxy_rotate (см. docs/mtproxy-proxy-rotation.md).\n\n"
             "📶 На LTE/5G не коннектится VPN? — /mobile_vpn (если настроено владельцем).\n\n"
             "❓ Вопросы — владельцу или /instruction."
         )

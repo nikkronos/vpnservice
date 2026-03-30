@@ -1,0 +1,42 @@
+# Ротация MTProxy (Fake TLS): «обновляемая» ссылка для Telegram
+
+Telegram **не подтягивает** новый прокси сам: после смены секрета пользователю нужно **добавить новую ссылку** (или заменить старую). Зато на **сервере** можно автоматизировать пересборку контейнера и **одним действием владельца** выдать всем актуальную ссылку через бота.
+
+## Что уже есть в проекте
+
+| Шаг | Описание |
+|-----|----------|
+| `/proxy` | Отдаёт актуальную `tg://proxy?...` всем пользователям. |
+| Приоритет ссылки | Сначала читается `data/mtproto_proxy_link.txt` (после ротации), иначе `MTPROTO_PROXY_LINK` в `env_vars.txt`. |
+| `/proxy_rotate` | **Только владелец.** Запускает скрипт на сервере бота, парсит из stdout строку `MTPROTO_LINK=...`, пишет override-файл. **Перезапуск бота не обязателен.** |
+| Web recovery | `POST /api/recovery/telegram-proxy` для определения хоста прокси использует ту же эффективную ссылку. |
+
+Если **веб-панель** крутится на **другом** хосте, чем бот, у неё не будет `data/mtproto_proxy_link.txt` — recovery будет брать только `MTPROTO_PROXY_LINK` из своего `env_vars.txt`. Тогда после ротации обнови `MTPROTO_PROXY_LINK` на машине панели **или** синхронизируй файл `data/mtproto_proxy_link.txt` с сервера бота.
+
+## План внедрения на сервере (Timeweb / где крутится бот)
+
+1. Убедиться, что Docker и контейнер Fake TLS развёрнуты по [mtproxy-faketls-deploy.md](mtproxy-faketls-deploy.md).
+2. Скопировать пример скрипта:
+   - `docs/scripts/mtproxy-faketls-rotate.sh.example` → например `/opt/vpnservice/scripts/mtproxy-faketls-rotate.sh`
+   - `chmod +x /opt/vpnservice/scripts/mtproxy-faketls-rotate.sh`
+3. При необходимости задать переменные окружения **перед вызовом** (или править дефолты в скрипте):
+   - `MTPROXY_PUBLIC_IP` — если `curl ifconfig.me` не подходит;
+   - `MTPROXY_PORT` — внешний порт (часто `443`);
+   - `MTPROXY_FAKE_TLS_DOMAIN` — домен маскировки (как в `generate-secret`);
+   - `MTPROXY_CONTAINER_NAME` — имя контейнера (по умолчанию `mtproxy-faketls`).
+4. В `env_vars.txt` на сервере бота добавить:
+   - `MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-faketls-rotate.sh`
+5. Перезапустить сервис бота один раз после правки env: `systemctl restart vpn-bot` (или как у тебя называется unit).
+6. Проверка: под владельцем в Telegram → `/proxy_rotate` → затем `/proxy` у тестового пользователя должна совпасть с новой ссылкой.
+7. Опционально: рассылка `/broadcast`, что ссылка на прокси обновилась — попросить открыть `/proxy` и добавить прокси в Telegram.
+
+## Ограничения и безопасность
+
+- Скрипт выполняется от пользователя процесса бота (часто `root` на VPS) — путь `MTPROXY_ROTATE_SCRIPT` должен быть **только доверенный** файл на диске.
+- Строка `MTPROTO_LINK` содержит **секрет** — не логировать в открытые каналы; файл `data/mtproto_proxy_link.txt` в `.gitignore`.
+- После ротации старые записи прокси в клиентах с **старым секретом** перестанут работать; новую ссылку можно **добавить второй строкой**, старую не обязательно удалять.
+
+## Связанные документы
+
+- [mtproxy-faketls-deploy.md](mtproxy-faketls-deploy.md) — первичное развёртывание.
+- [telegram-unblock-algorithm.md](telegram-unblock-algorithm.md) — общий алгоритм и уровни резерва.
