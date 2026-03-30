@@ -188,8 +188,9 @@ chmod +x /opt/vpnservice/scripts/add-ss-redirect.sh
 ```bash
 cd /opt/vpnservice
 python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Зависимости бота — только через pip из venv (на Ubuntu 24+ системный pip без venv выдаёт PEP 668 «externally-managed-environment»):
+/opt/vpnservice/venv/bin/pip install -r requirements.txt
+# Альтернатива: source venv/bin/activate && pip install -r requirements.txt
 ```
 
 ### Конфигурация
@@ -254,8 +255,10 @@ systemctl start vpn-bot.service
 ```bash
 cd /opt/vpnservice
 git pull
-systemctl restart vpn-bot.service
-systemctl status vpn-bot.service
+# Если в коммите менялся requirements.txt бота:
+/opt/vpnservice/venv/bin/pip install -r requirements.txt
+sudo systemctl restart vpn-bot.service
+systemctl status vpn-bot.service --no-pager
 ```
 
 **Важно:** Если добавлены новые переменные в `env_vars.example.txt`, их нужно **вручную** добавить в `env_vars.txt` на сервере (файл не в Git).
@@ -297,12 +300,11 @@ journalctl -u vpn-bot.service -f
 
 ### Зависимости
 
-В том же venv, что и бот:
+В том же venv, что и бот. **Не вызывать** голый `pip` от системного Python — на Ubuntu 24+ (PEP 668) установка вне venv будет отклонена. Используйте явный путь:
 
 ```bash
 cd /opt/vpnservice
-source venv/bin/activate
-pip install -r web/requirements.txt
+/opt/vpnservice/venv/bin/pip install -r web/requirements.txt
 ```
 
 ### Запуск вручную (проверка)
@@ -348,9 +350,11 @@ FLASK_ENV=production PORT=5001 /opt/vpnservice/venv/bin/python web/app.py
 ```bash
 cd /opt/vpnservice
 git pull
-pip install -r web/requirements.txt --quiet
+/opt/vpnservice/venv/bin/pip install -r web/requirements.txt --quiet
 sudo systemctl restart vpn-web.service
 ```
+
+При необходимости перезапустить и бота (если менялись общие модули `bot/`): `sudo systemctl restart vpn-bot.service`.
 
 ### Безопасность
 

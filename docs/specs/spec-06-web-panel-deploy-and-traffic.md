@@ -27,7 +27,7 @@
 | Шаг | Задача | Результат |
 |-----|--------|-----------|
 | 1.1 | Выбрать хост: Timeweb (рядом с ботом) или eu1 | Решение зафиксировать в ROADMAP/docs |
-| 1.2 | Установить зависимости на сервере (`pip install -r web/requirements.txt`), скопировать `web/`, настроить `env_vars.txt` (ADMIN_ID, пути к data) | Панель запускается вручную |
+| 1.2 | Установить зависимости на сервере (`/opt/vpnservice/venv/bin/pip install -r web/requirements.txt`), скопировать `web/`, настроить `env_vars.txt` (ADMIN_ID, пути к data) | Панель запускается вручную |
 | 1.3 | Создать systemd unit `vpn-web.service` (WorkingDirectory, ExecStart, User), включить и запустить | Панель работает 24/7 |
 | 1.4 | (Рекомендуется) Настроить nginx reverse proxy + HTTPS (Let's Encrypt) | Доступ по https://... |
 | 1.5 | Зафиксировать URL панели в `docs/deployment.md` и ROADMAP | Документация актуальна |
