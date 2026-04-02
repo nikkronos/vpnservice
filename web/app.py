@@ -540,6 +540,46 @@ def api_stats():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/recovery/proxy-link", methods=["GET"])
+def api_recovery_proxy_link():
+    """
+    Только актуальная ссылка tg://proxy (как /proxy в боте), без перезапуска контейнера.
+    Та же проверка пользователя, что и у POST /api/recovery/telegram-proxy.
+    """
+    try:
+        telegram_id = request.args.get("telegram_id")
+        if telegram_id is None or str(telegram_id).strip() == "":
+            return jsonify({"error": "telegram_id query parameter is required"}), 400
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "telegram_id must be integer"}), 400
+
+        user = find_user(telegram_id)
+        if not user or not user.active:
+            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+
+        fresh_cfg = load_config()
+        effective_link = get_effective_mtproto_proxy_link(fresh_cfg) or ""
+        effective_link = effective_link.strip()
+        if not effective_link.startswith("tg://proxy"):
+            return jsonify({"error": "MTPROTO proxy link is not configured"}), 503
+
+        return jsonify(
+            {
+                "ok": True,
+                "mtproto_proxy_link": effective_link,
+                "hint": (
+                    "Та же ссылка, что по команде /proxy в боте. "
+                    "Перезапуск контейнера прокси не выполнялся — используйте «Восстановить Telegram», если нужен рестарт."
+                ),
+            }
+        )
+    except Exception as e:
+        logger.exception("Ошибка recovery/proxy-link: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/recovery/telegram-proxy", methods=["POST"])
 def api_recovery_telegram_proxy():
     """

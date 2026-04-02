@@ -43,11 +43,9 @@
 ## 4. Страница восстановления (без работающего Telegram)
 
 - **URL:** `http://81.200.146.32:5001/recovery` (или значение `VPN_RECOVERY_URL` в `env_vars.txt`).
-- Пользователь вводит **Telegram ID**, нажимает «Восстановить Telegram».
-- API `POST /api/recovery/telegram-proxy`:
-  - проверяет пользователя в `users.json`;
-  - пытается перезапустить Docker-контейнер прокси на подходящей ноде (main/eu1);
-  - в ответе всегда отдаёт поля **`mtproto_proxy_link`** и **`hint`** — **та же ссылка, что и у `/proxy`** (в т.ч. при ошибке перезапуска контейнера, HTTP 502).
+- **Только ссылка, без рестарта Docker:** пользователь вводит **Telegram ID**, нажимает **«Показать актуальную ссылку»** (или при сохранённом ID в браузере ссылка подгрузится при открытии страницы). API **`GET /api/recovery/proxy-link?telegram_id=...`** — та же проверка пользователя в `users.json`, что и у POST; ответ: **`mtproto_proxy_link`** + **`hint`** (источник ссылки — как у `/proxy`: override-файл или env).
+- **Рестарт контейнера + ссылка (как раньше):** кнопка «Восстановить Telegram» → **`POST /api/recovery/telegram-proxy`**: перезапуск Docker-контейнера прокси на подходящей ноде (main/eu1); в ответе **`mtproto_proxy_link`** и **`hint`** (в т.ч. при ошибке рестарта, HTTP 502).
+- Отдельно на той же странице: восстановление VPN AmneziaWG для слотов **EU1** и **EU2** (`POST /api/recovery/vpn` с `server_id`).
 
 Реализация: `web/app.py`, `web/static/recovery.js`, `web/templates/recovery.html`.
 

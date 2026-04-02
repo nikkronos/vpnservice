@@ -16,10 +16,27 @@
     <section class="recovery">
       <h2>🛠️ Восстановление Telegram</h2>
       <p class="section-hint">
-        Если Telegram не подключается, введите <b>Telegram ID</b> (как в боте) и нажмите кнопку.
-        На странице покажется <b>актуальная ссылка</b> на MTProxy — та же, что по команде <code>/proxy</code> в боте
-        (после смены прокси владельцем ссылка обновится автоматически). Дополнительно выполняется перезапуск контейнера прокси на сервере.
+        Если Telegram не подключается, введите <b>Telegram ID</b> (как в боте).
+        <b>Актуальная ссылка</b> на MTProxy — та же, что по команде <code>/proxy</code> в боте (после ротации у владельца подтягивается из
+        <code>data/mtproto_proxy_link.txt</code> или <code>MTPROTO_PROXY_LINK</code> в env).
+        Можно только <b>посмотреть ссылку</b> (без рестарта Docker) или нажать «Восстановить Telegram» — тогда дополнительно перезапускается контейнер прокси.
       </p>
+
+      <div class="proxy-link-panel" id="proxyLinkPanel">
+        <p class="proxy-link-panel-title">Текущая ссылка MTProxy</p>
+        <p class="section-hint proxy-link-panel-hint">
+          Без перезапуска контейнера — удобно, если вы уже обновили прокси и нужно просто скопировать <code>tg://</code> ссылку.
+        </p>
+        <div class="proxy-link-actions">
+          <button type="button" id="btnShowProxyLink" class="btn-recovery btn-recovery-secondary">
+            Показать актуальную ссылку
+          </button>
+          <button type="button" id="btnCopyProxyLink" class="btn-recovery btn-recovery-secondary" hidden>
+            Копировать ссылку
+          </button>
+        </div>
+        <div id="proxy-link-display" class="recovery-result proxy-link-display" aria-live="polite" hidden></div>
+      </div>
 
       <div class="recovery-form">
         <label for="recoveryTelegramId">Ваш Telegram ID</label>

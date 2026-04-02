@@ -351,6 +351,49 @@ footer a:hover {
     filter: brightness(1.03);
 }
 
+.btn-recovery-secondary {
+    background: #5c6bc0;
+    font-weight: 600;
+}
+
+.btn-recovery-secondary:hover:not(:disabled) {
+    filter: brightness(1.05);
+}
+
+.proxy-link-panel {
+    max-width: 520px;
+    margin-bottom: 20px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    border: 1px solid #e3e6f0;
+    background: #fafbff;
+}
+
+.proxy-link-panel-title {
+    margin: 0 0 8px 0;
+    font-size: 1.05em;
+    font-weight: 700;
+    color: #333;
+}
+
+.proxy-link-panel-hint {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.proxy-link-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.proxy-link-display {
+    margin-top: 10px;
+}
+
 .recovery-result {
     margin-top: 14px;
     padding: 14px 16px;

@@ -2,6 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const tgInput = document.getElementById('recoveryTelegramId');
   const tgResult = document.getElementById('recovery-result');
   const tgBtn = document.getElementById('btnRecoverTelegram');
+  const btnShowProxyLink = document.getElementById('btnShowProxyLink');
+  const btnCopyProxyLink = document.getElementById('btnCopyProxyLink');
+  const proxyLinkDisplay = document.getElementById('proxy-link-display');
+  let lastProxyLink = '';
 
   const vpnEu1Input = document.getElementById('vpnRecoveryTelegramIdEu1');
   const vpnEu1Result = document.getElementById('vpn-recovery-result-eu1');
@@ -24,6 +28,90 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tgInput) tgInput.value = savedId;
     if (vpnEu1Input) vpnEu1Input.value = savedId;
     if (vpnEu2Input) vpnEu2Input.value = savedId;
+  }
+
+  async function fetchAndShowProxyLink(telegramId, opts) {
+    const silent = opts && opts.silent;
+    if (!proxyLinkDisplay || !btnCopyProxyLink) return;
+    if (!silent) {
+      proxyLinkDisplay.hidden = false;
+      setResult(proxyLinkDisplay, 'Загрузка ссылки...', false);
+    }
+    try {
+      const resp = await fetch(
+        '/api/recovery/proxy-link?telegram_id=' + encodeURIComponent(telegramId),
+        { method: 'GET' }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        if (!silent) {
+          proxyLinkDisplay.hidden = false;
+          setResult(proxyLinkDisplay, 'Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+        }
+        lastProxyLink = '';
+        btnCopyProxyLink.hidden = true;
+        return;
+      }
+      const link = data.mtproto_proxy_link || '';
+      const hint = data.hint || '';
+      lastProxyLink = link;
+      if (link) {
+        proxyLinkDisplay.hidden = false;
+        const text = (hint ? hint + '\n\n' : '') + link;
+        setResult(proxyLinkDisplay, text, false);
+        btnCopyProxyLink.hidden = false;
+      } else if (!silent) {
+        proxyLinkDisplay.hidden = false;
+        setResult(proxyLinkDisplay, 'Сервер не вернул ссылку.', true);
+        btnCopyProxyLink.hidden = true;
+      }
+    } catch (err) {
+      if (!silent) {
+        proxyLinkDisplay.hidden = false;
+        setResult(
+          proxyLinkDisplay,
+          'Ошибка сети: ' + (err && err.message ? err.message : String(err)),
+          true
+        );
+      }
+      lastProxyLink = '';
+      btnCopyProxyLink.hidden = true;
+    }
+  }
+
+  if (btnShowProxyLink && tgInput && proxyLinkDisplay) {
+    btnShowProxyLink.addEventListener('click', async () => {
+      const telegramId = (tgInput.value || '').trim();
+      if (!telegramId) {
+        proxyLinkDisplay.hidden = false;
+        setResult(proxyLinkDisplay, 'Сначала введите Telegram ID.', true);
+        return;
+      }
+      localStorage.setItem('vpn_recovery_telegram_id', telegramId);
+      btnShowProxyLink.disabled = true;
+      await fetchAndShowProxyLink(telegramId, { silent: false });
+      btnShowProxyLink.disabled = false;
+    });
+  }
+
+  if (btnCopyProxyLink) {
+    btnCopyProxyLink.addEventListener('click', async () => {
+      if (!lastProxyLink) return;
+      try {
+        await navigator.clipboard.writeText(lastProxyLink);
+        const prev = btnCopyProxyLink.textContent;
+        btnCopyProxyLink.textContent = 'Скопировано';
+        setTimeout(() => {
+          btnCopyProxyLink.textContent = prev;
+        }, 2000);
+      } catch {
+        setResult(proxyLinkDisplay, lastProxyLink + '\n\n(Копирование в буфер не удалось — выделите ссылку вручную.)', false);
+      }
+    });
+  }
+
+  if (savedId && tgInput && btnShowProxyLink) {
+    fetchAndShowProxyLink(savedId, { silent: true });
   }
 
   function mirrorVpnIds(from, to) {

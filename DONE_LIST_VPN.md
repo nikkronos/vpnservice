@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-04-02 — Логические слоты rus1 / rus2 / eu1 / eu2 + recovery EU1+EU2 + ссылка прокси без рестарта
+
+- **Цель:** четыре именованных слота профилей VPN; отдельные peers в `peers.json`; Европа — два AmneziaWG-слота на одном EU-хосте; на странице `/recovery` — два блока выдачи конфига (EU1 и EU2). Имена файлов конфигов включают `server_id` (например `..._eu1_amneziawg.conf`).
+- **`bot/storage.py`:** ключи пиров `"{telegram_id}:{server_id}"`; миграция со старого формата: единственный peer без суффикса → слот **`rus1`** (legacy `main` в логах/каноне — см. `canonical_env_server_id`).
+- **`bot/wireguard_peers.py`:** `canonical_env_server_id` — rus1/rus2 → физическая нода **main**, eu1/eu2 → **eu1** (env/SSH); общий пул IP для rus1+rus2 и отдельно для eu1+eu2 (Amnezia); `get_available_servers()` возвращает четыре слота; Amnezia create/regen с параметром `server_id` в `eu1`|`eu2`.
+- **`bot/main.py`:** `/get_config`, `/regen`, `/server`, `/status` работают с нормализованными `rus1`/`rus2`/`eu1`/`eu2`; WireGuard-классика для RU-слотов, Amnezia — для EU-слотов.
+- **`web/app.py`:** `POST /api/recovery/vpn` — только Amnezia (`server_id`: eu1|eu2), без перезаписи «чужого» слота через preferred_server. `api_servers` / `api_services` / `_get_wg_transfer_for_server` используют канонический id ноды для ping и SSH. **`GET /api/recovery/proxy-link?telegram_id=...`** — та же проверка пользователя, что у `telegram-proxy`, отдаёт актуальный `tg://` как `/proxy`, **без** перезапуска Docker.
+- **Веб recovery:** `recovery.html` / `recovery.js` — два блока VPN (EU1, EU2); блок «Текущая ссылка MTProxy» + кнопка «Показать актуальную ссылку» и «Копировать»; при наличии сохранённого Telegram ID в `localStorage` ссылка подгружается при открытии страницы.
+- **Деплой:** юнит бота на сервере — **`vpn-bot.service`** (не `vpnservice-bot.service`); после `git pull`: `sudo systemctl restart vpn-bot.service` и при необходимости `vpn-web.service`.
+
 ## 2026-04-02 (дополнение) — Spec-08: без нового VPS
 
 - Решение владельца: **второй VPS не оплачивается.** Спека **spec-08** переписана: основной сценарий **B** — только **main + eu1** (несколько способов: WG, AmneziaWG, `/mobile_vpn`, `/proxy`; опц. REALITY на **main**, домен для MTProxy). Сценарий **A** (RU2/EU2 на отдельном VPS) оставлен как опция при появлении бюджета. Обновлены `ROADMAP_VPN.md`, `blocking-bypass-strategy.md`, `README_FOR_NEXT_AGENT.md`, `third-party-vpn-boosters-vs-multi-entry.md`.
