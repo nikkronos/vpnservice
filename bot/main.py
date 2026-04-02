@@ -15,6 +15,7 @@ from .storage import (
     get_all_peers,
     get_all_users,
     is_owner,
+    normalize_preferred_server_id,
     upsert_user,
 )
 from .wireguard_peers import (
@@ -189,11 +190,11 @@ def main() -> None:
             )
             return
 
-        # Определяем, какой сервер использовать
-        preferred_server_id = user.preferred_server_id or "main"  # дефолт — main (РФ)
-        
+        # Логический слот: rus1/rus2/eu1/eu2 (legacy main → rus1)
+        preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
+
         try:
-            # Ищем peer на выбранном сервере
+            # Ищем peer на выбранном слоте
             peer_on_preferred = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
             
             # Также проверяем, есть ли peer на любом другом сервере
@@ -238,8 +239,8 @@ def main() -> None:
                 # Peer уже существует, тип профиля совпадает — просто сообщаем
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                # Для Европы (eu1) — AmneziaWG: другой текст
-                if preferred_server_id == "eu1":
+                # Европа (eu1/eu2) — AmneziaWG
+                if preferred_server_id in ("eu1", "eu2"):
                     if is_amneziawg_eu1_configured():
                         safe_reply(
                             message,
@@ -258,8 +259,7 @@ def main() -> None:
                     )
                 return
             
-            # Если есть peer на другом сервере, но пользователь выбрал новый — создаём peer на новом сервере
-            # (старый peer будет перезаписан в peers.json, так как ключ — telegram_id)
+            # Если есть peer на другом слоте, но выбран новый — создаём peer на новом слоте (старые записи не трогаем)
             if peer_any and peer_any.active and peer_any.server_id != preferred_server_id:
                 servers_info = get_available_servers()
                 old_server_name = servers_info.get(peer_any.server_id, {}).get("name", peer_any.server_id)
@@ -271,17 +271,19 @@ def main() -> None:
                     preferred_server_id,
                 )
 
-            # Европа (eu1): выдаём AmneziaWG — через скрипт на сервере или инструкцию вручную
-            if preferred_server_id == "eu1":
+            # Европа (eu1/eu2): AmneziaWG
+            if preferred_server_id in ("eu1", "eu2"):
                 if is_amneziawg_eu1_configured():
                     try:
                         peer, client_config = create_amneziawg_peer_and_config_for_user(
-                            telegram_id, android_safe=android_safe
+                            telegram_id,
+                            android_safe=android_safe,
+                            server_id=preferred_server_id,
                         )
                         filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
-                        server_name = servers_info.get("eu1", {}).get("name", "Европа")
+                        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                         safe_reply(
                             message,
                             f"✅ Создан VPN‑доступ на сервере <b>{server_name}</b> (AmneziaWG)\n"
@@ -303,12 +305,10 @@ def main() -> None:
                     _send_eu1_amneziawg_instruction(message, peer_on_preferred is not None)
                 return
 
-            # Тип профиля для eu1: Обычный VPN или VPN+GPT (только для main и других WireGuard-нод)
+            # WireGuard: rus1/rus2 (eu1/eu2 обработаны выше как AmneziaWG)
             profile_type = None
-            if preferred_server_id == "eu1":
-                profile_type = getattr(user, "preferred_profile_type", None)
 
-            # Создаём новый peer на выбранном сервере (main и др., не eu1 — eu1 обработан выше)
+            # Создаём новый peer на выбранном слоте (rus1/rus2)
             peer, client_config = create_peer_and_config_for_user(
                 telegram_id,
                 server_id=preferred_server_id,
@@ -403,20 +403,21 @@ def main() -> None:
             return
         
         try:
-            # Определяем, на каком сервере искать peer для регенерации
-            preferred_server_id = user.preferred_server_id or "main"
+            preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
 
-            # Европа (eu1): регенерация AmneziaWG через удаление старого peer и создание нового (тот же IP)
-            if preferred_server_id == "eu1":
+            # Европа (eu1/eu2): AmneziaWG
+            if preferred_server_id in ("eu1", "eu2"):
                 if is_amneziawg_eu1_configured():
                     try:
                         peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
-                            telegram_id, android_safe=android_safe
+                            telegram_id,
+                            android_safe=android_safe,
+                            server_id=preferred_server_id,
                         )
                         filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
-                        server_name = servers_info.get("eu1", {}).get("name", "Европа")
+                        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                         safe_reply(
                             message,
                             f"✅ Конфиг AmneziaWG регенерирован на сервере <b>{server_name}</b>.\n"
@@ -516,7 +517,7 @@ def main() -> None:
             return
         
         servers_info = get_available_servers()
-        current_server_id = user.preferred_server_id or "main"
+        current_server_id = normalize_preferred_server_id(user.preferred_server_id)
         
         # Создаём inline-кнопки для выбора сервера
         keyboard = types.InlineKeyboardMarkup()
@@ -649,11 +650,10 @@ def main() -> None:
             )
             return
         
-        preferred_server_id = user.preferred_server_id or "main"
+        preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
         servers_info = get_available_servers()
         preferred_server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-        
-        # Сначала ищем peer на выбранном сервере
+
         peer = find_peer_by_telegram_id(message.from_user.id, server_id=preferred_server_id)
         
         # Если не найден на выбранном, ищем на любом сервере (для обратной совместимости)

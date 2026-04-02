@@ -28,10 +28,8 @@ from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
 from bot.wireguard_peers import (
     create_amneziawg_peer_and_config_for_user,
-    create_peer_and_config_for_user,
     execute_server_command,
     regenerate_amneziawg_peer_and_config_for_user,
-    regenerate_peer_and_config_for_user,
     find_peer_by_telegram_id,
     is_amneziawg_eu1_configured,
 )
@@ -222,11 +220,14 @@ def _parse_wg_dump_transfer(stdout: str) -> Dict[str, tuple]:
 def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
     """
     Получает трафик (rx, tx в байтах) по каждому pubkey для указанной ноды.
-    main — локальный вызов wg show; eu1 — по SSH (wg или awg для AmneziaWG).
+    rus1/rus2 → main (локально); eu1/eu2 → EU по SSH (awg/wg).
     """
+    from bot.wireguard_peers import canonical_env_server_id
+
+    physical = canonical_env_server_id(server_id)
     base = pathlib.Path(__file__).parent.parent
     env = _parse_env_file(base / "env_vars.txt")
-    if server_id == "main":
+    if physical == "main":
         interface = env.get("WG_INTERFACE", "wg0")
         try:
             out = subprocess.run(
@@ -239,23 +240,23 @@ def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
                 return {}
             return _parse_wg_dump_transfer(out.stdout)
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-            logger.warning("Локальный wg show для %s: %s", server_id, e)
+            logger.warning("Локальный wg show для %s: %s", physical, e)
             return {}
     else:
         try:
             from bot.wireguard_peers import execute_server_command, _get_server_config, _load_env
             env = _load_env()
-            cfg = _get_server_config(server_id, env)
+            cfg = _get_server_config(physical, env)
             # eu1 может использовать AmneziaWG (интерфейс awg0) — тогда нужна команда awg
             awg_interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip()
             interface = awg_interface or cfg.get("interface", "wg0")
             use_awg = interface.startswith("awg") or bool(awg_interface)
             cmd = f"awg show {interface} dump 2>/dev/null" if use_awg else f"wg show {interface} dump 2>/dev/null"
             fallback_cmd = f"wg show {interface} dump 2>/dev/null" if use_awg else None
-            stdout, stderr = execute_server_command(server_id, f"{cmd} || true", timeout=15)
+            stdout, stderr = execute_server_command(physical, f"{cmd} || true", timeout=15)
             result = _parse_wg_dump_transfer(stdout or "")
             if not result and fallback_cmd:
-                stdout2, _ = execute_server_command(server_id, f"{fallback_cmd} || true", timeout=15)
+                stdout2, _ = execute_server_command(physical, f"{fallback_cmd} || true", timeout=15)
                 result = _parse_wg_dump_transfer(stdout2 or "")
             return result
         except Exception as e:
@@ -327,20 +328,20 @@ def recovery_page():
 def api_servers():
     """API: статус серверов."""
     try:
-        from bot.wireguard_peers import get_available_servers
+        from bot.wireguard_peers import get_available_servers, canonical_env_server_id
         from bot.config import _parse_env_file
-        
+
         servers_info = get_available_servers()
         env = _parse_env_file(pathlib.Path(__file__).parent.parent / "env_vars.txt")
-        
+
         servers_status = {}
         for server_id, info in servers_info.items():
-            # Получаем endpoint host из env
-            if server_id == "main":
+            physical = canonical_env_server_id(server_id)
+            if physical == "main":
                 endpoint_host = env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST")
             else:
-                endpoint_host = env.get(f"WG_{server_id.upper()}_ENDPOINT_HOST")
-            
+                endpoint_host = env.get(f"WG_{physical.upper()}_ENDPOINT_HOST")
+
             status = check_server_status(server_id, endpoint_host)
             servers_status[server_id] = {
                 "name": info["name"],
@@ -359,36 +360,36 @@ def api_servers():
 def api_services():
     """API: статус сервисов (WireGuard, AmneziaWG, Shadowsocks, MTProto) по нодам."""
     try:
-        from bot.wireguard_peers import get_available_servers
+        from bot.wireguard_peers import get_available_servers, canonical_env_server_id
         from bot.config import _parse_env_file
-        
+
         servers_info = get_available_servers()
         env = _parse_env_file(pathlib.Path(__file__).parent.parent / "env_vars.txt")
-        
+
         services_list: List[Dict] = []
-        
+
         for server_id, info in servers_info.items():
-            if server_id == "main":
+            physical = canonical_env_server_id(server_id)
+            if physical == "main":
                 host = env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST")
             else:
-                host = env.get(f"WG_{server_id.upper()}_ENDPOINT_HOST")
-            
+                host = env.get(f"WG_{physical.upper()}_ENDPOINT_HOST")
+
             if not host:
                 continue
-            
+
             server_name = info.get("name", server_id)
-            
-            # WireGuard: по пингу хоста (UDP 51820 не проверяем отдельно)
+
             wg_status = check_server_status(server_id, host)
             services_list.append({
                 "server_id": server_id,
                 "server_name": server_name,
                 "service": "WireGuard",
                 "status": wg_status["status"],
-                "note": "Низкий пинг, высокая скорость" if server_id == "main" else "Из РФ может не работать (используйте AmneziaWG)",
+                "note": "Низкий пинг (Timeweb)" if physical == "main" else "Из РФ может не работать (используйте AmneziaWG)",
             })
-            
-            # Для eu1: AmneziaWG (тот же хост), Shadowsocks (8388), MTProto (443)
+
+            # Доп. сервисы EU — один раз на eu1 (не дублируем для eu2)
             if server_id == "eu1":
                 services_list.append({
                     "server_id": server_id,
@@ -616,15 +617,17 @@ def api_recovery_telegram_proxy():
 @app.route("/api/recovery/vpn", methods=["POST"])
 def api_recovery_vpn():
     """
-    VPN recovery endpoint:
-    - Auth by telegram_id existence in bot storage (users.json)
-    - Regenerate (or create) VPN config for user's preferred server
-    - Returns config text so user can import in client apps without Telegram
+    VPN recovery: только AmneziaWG слот eu1 или eu2 (две кнопки на /recovery).
+    Тело: telegram_id, server_id (eu1 | eu2), android_safe (опционально).
     """
     try:
         body = request.get_json() or {}
         telegram_id = body.get("telegram_id")
         android_safe = bool(body.get("android_safe", False))
+        server_id = str(body.get("server_id") or "eu1").strip().lower()
+
+        if server_id not in ("eu1", "eu2"):
+            return jsonify({"error": "server_id must be eu1 or eu2"}), 400
 
         if telegram_id is None:
             return jsonify({"error": "telegram_id is required"}), 400
@@ -637,44 +640,19 @@ def api_recovery_vpn():
         if not user or not user.active:
             return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
 
-        preferred_server_id = user.preferred_server_id or "main"
+        if not is_amneziawg_eu1_configured():
+            return jsonify({"error": "AmneziaWG is not configured on server. Try later or ask owner."}), 503
 
-        # If AmneziaWG on eu1 isn't configured, don't attempt to generate configs.
-        if preferred_server_id == "eu1" and not is_amneziawg_eu1_configured():
-            return jsonify({"error": "eu1 AmneziaWG is not configured on server. Try later or ask owner."}), 503
-
-        peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
-        if preferred_server_id == "eu1":
-            if peer and peer.active:
-                peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
-                    telegram_id, android_safe=android_safe
-                )
-            else:
-                peer, cfg = create_amneziawg_peer_and_config_for_user(
-                    telegram_id, android_safe=android_safe
-                )
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
-            return jsonify({"ok": True, "filename": filename, "config": cfg})
-
-        # main/other WireGuard nodes
+        peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
         if peer and peer.active:
-            peer, cfg = regenerate_peer_and_config_for_user(
-                telegram_id, server_id=preferred_server_id, android_safe=android_safe
+            peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
+                telegram_id, android_safe=android_safe, server_id=server_id
             )
         else:
-            # profile_type is mostly relevant for eu1 in this codebase; for main keep it None.
-            peer, cfg = create_peer_and_config_for_user(
-                telegram_id, server_id=preferred_server_id, profile_type=None, android_safe=android_safe
+            peer, cfg = create_amneziawg_peer_and_config_for_user(
+                telegram_id, android_safe=android_safe, server_id=server_id
             )
-
-        pt = getattr(peer, "profile_type", None)
-        if pt == "vpn_gpt":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
-        elif pt == "unified":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
-        else:
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
-
+        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
         return jsonify({"ok": True, "filename": filename, "config": cfg})
     except Exception as e:
         logger.exception("Ошибка recovery/vpn: %s", e)

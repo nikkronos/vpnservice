@@ -362,3 +362,18 @@ footer a:hover {
     word-break: break-word;
     max-width: 900px;
 }
+
+.recovery-slot-title {
+    margin: 0 0 4px 0;
+    font-size: 1.1em;
+    font-weight: 700;
+    color: #444;
+}
+
+.recovery-vpn-slot {
+    margin-top: 16px;
+}
+
+.recovery-result + .recovery-vpn-slot {
+    margin-top: 28px;
+}

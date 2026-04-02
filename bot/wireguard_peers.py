@@ -10,6 +10,20 @@ from .config import _parse_env_file
 from .storage import Peer, get_all_peers, upsert_peer, find_peer_by_telegram_id
 
 
+def canonical_env_server_id(logical: str) -> str:
+    """
+    Для WG_* env и SSH: rus1/rus2 → нода main (Timeweb); eu1/eu2 → нода eu1 (Fornex).
+    legacy main → main.
+    """
+    if not logical or logical == "main":
+        logical = "rus1"
+    if logical in ("rus1", "rus2"):
+        return "main"
+    if logical in ("eu1", "eu2"):
+        return "eu1"
+    return logical
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,18 +43,19 @@ def _load_env() -> dict:
 def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
     """
     Извлекает конфигурацию для указанной ноды из env_vars.txt.
+    logical server_id: rus1/rus2 → тот же env что main; eu1/eu2 → тот же что eu1.
     
     Формат переменных в env_vars.txt:
-    - Для server_id="main":
+    - Для ноды main (rus1, rus2):
       WG_SERVER_PUBLIC_KEY, WG_INTERFACE, WG_NETWORK_CIDR, WG_ENDPOINT_HOST, WG_ENDPOINT_PORT, WG_DNS
-    - Для server_id="eu1":
-      WG_EU1_SERVER_PUBLIC_KEY, WG_EU1_INTERFACE, WG_EU1_NETWORK_CIDR, WG_EU1_ENDPOINT_HOST, WG_EU1_ENDPOINT_PORT, WG_EU1_DNS
-      (также опционально: WG_EU1_SSH_HOST, WG_EU1_SSH_USER, WG_EU1_SSH_KEY_PATH)
+    - Для ноды eu1 (eu1, eu2):
+      WG_EU1_SERVER_PUBLIC_KEY, ...
     
     Возвращает словарь с ключами:
     server_public_key, interface, network_cidr, endpoint_host, endpoint_port, dns, ssh_host, ssh_user, ssh_key_path, mtu (опционально).
     """
-    if server_id == "main":
+    canonical = canonical_env_server_id(server_id)
+    if canonical == "main":
         # Базовая нода использует "плоские" переменные без префикса.
         config = {
             "server_public_key": env.get("WG_SERVER_PUBLIC_KEY"),
@@ -56,7 +71,7 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
         }
     else:
         # Для дополнительных нод используем схему WG_<SERVERID>_* (как в env_vars.example.txt).
-        upper_id = server_id.upper()
+        upper_id = canonical.upper()
         prefix = f"WG_{upper_id}_"
 
         def _get(name: str, fallback_main: Optional[str] = None, default: Optional[str] = None) -> Optional[str]:
@@ -79,19 +94,19 @@ def _get_server_config(server_id: str, env: dict) -> Dict[str, str]:
             "mtu": _get("MTU"),
         }
         # Для удалённых нод: если SSH_HOST не задан — используем ENDPOINT_HOST (тот же хост)
-        if server_id != "main" and config.get("endpoint_host") and not config.get("ssh_host"):
+        if canonical != "main" and config.get("endpoint_host") and not config.get("ssh_host"):
             config["ssh_host"] = config["endpoint_host"]
             if not config.get("ssh_user"):
                 config["ssh_user"] = "root"
-            logger.info("Для ноды %s SSH_HOST не задан в env, используем endpoint_host=%s", server_id, config["ssh_host"])
+            logger.info("Для ноды %s SSH_HOST не задан в env, используем endpoint_host=%s", canonical, config["ssh_host"])
         # Скрипт добавления редиректа для VPN+GPT (только eu1)
         config["add_ss_redirect_script"] = _get("ADD_SS_REDIRECT_SCRIPT", None, "/opt/vpnservice/scripts/add-ss-redirect.sh")
     
-    prefix = "WG_" if server_id == "main" else f"WG_{server_id.upper()}_"
+    prefix = "WG_" if canonical == "main" else f"WG_{canonical.upper()}_"
     if not config["server_public_key"]:
-        raise WireGuardError(f"{prefix}SERVER_PUBLIC_KEY не задан в env_vars.txt для сервера {server_id}.")
+        raise WireGuardError(f"{prefix}SERVER_PUBLIC_KEY не задан в env_vars.txt для сервера {canonical}.")
     if not config["endpoint_host"]:
-        raise WireGuardError(f"{prefix}ENDPOINT_HOST или VPN_SERVER_HOST не задан в env_vars.txt для сервера {server_id}.")
+        raise WireGuardError(f"{prefix}ENDPOINT_HOST или VPN_SERVER_HOST не задан в env_vars.txt для сервера {canonical}.")
     
     return config
 
@@ -108,10 +123,11 @@ def _allocate_ip(network_cidr: str, server_id: str) -> str:
     """
     net = ipaddress.ip_network(network_cidr, strict=False)
 
-    # Занятые IP из peers.json только для этого server_id
+    # Занятые IP: все peers на той же физической WG-ноде (rus1+rus2 → main; eu1+eu2 для EU classic)
+    canonical = canonical_env_server_id(server_id)
     used_ips = set()
     for peer in get_all_peers():
-        if peer.server_id != server_id:
+        if canonical_env_server_id(peer.server_id) != canonical:
             continue
         try:
             iface = ipaddress.ip_interface(peer.wg_ip)
@@ -127,7 +143,7 @@ def _allocate_ip(network_cidr: str, server_id: str) -> str:
     try:
         reserved.add(net.network_address + 1)  # сервер, например 10.0.0.1
         # client1 (владелец) резервируем только на main
-        if server_id == "main":
+        if canonical == "main":
             reserved.add(net.network_address + 2)  # первый peer (client1) на main
     except Exception:  # noqa: BLE001
         # На случай экзотической сети просто игнорируем дополнительные резервы.
@@ -139,7 +155,35 @@ def _allocate_ip(network_cidr: str, server_id: str) -> str:
         if host not in used_ips:
             return f"{host}/{net.prefixlen}"
 
-    raise WireGuardError(f"Не удалось подобрать свободный IP для нового peer в сети WireGuard на сервере {server_id}.")
+    raise WireGuardError(
+        f"Не удалось подобрать свободный IP для нового peer в сети WireGuard на ноде {canonical}."
+    )
+
+
+def _allocate_ip_amnezia_eu(network_cidr: str) -> str:
+    """
+    Свободный IP в подсети AmneziaWG (eu1/eu2 на одном хосте — общий пул).
+    """
+    net = ipaddress.ip_network(network_cidr, strict=False)
+    used_ips: set = set()
+    for peer in get_all_peers():
+        if peer.server_id not in ("eu1", "eu2"):
+            continue
+        try:
+            iface = ipaddress.ip_interface(peer.wg_ip)
+            used_ips.add(iface.ip)
+        except ValueError:
+            continue
+    reserved = {net.network_address, net.broadcast_address}
+    try:
+        reserved.add(net.network_address + 1)
+    except Exception:  # noqa: BLE001
+        pass
+    used_ips |= reserved
+    for host in net.hosts():
+        if host not in used_ips:
+            return f"{host}/{net.prefixlen}"
+    raise WireGuardError("Не удалось подобрать свободный IP для AmneziaWG (eu1/eu2).")
 
 
 def _allocate_ip_in_pool(
@@ -486,7 +530,7 @@ def _make_amneziawg_config_android_safe(
 
 def create_peer_and_config_for_user(
     telegram_id: int,
-    server_id: str = "main",
+    server_id: str = "rus1",
     profile_type: Optional[str] = None,
     android_safe: bool = False,
 ) -> Tuple[Peer, str]:
@@ -504,8 +548,8 @@ def create_peer_and_config_for_user(
 
     Args:
         telegram_id: Telegram ID пользователя.
-        server_id: Идентификатор ноды ("main" для РФ, "eu1" для Европы и т.п.).
-        profile_type: Для eu1 — "vpn_gpt" (пул 8–19/51–254 + add-ss-redirect.sh), "unified" (пул 20–50, ipset на сервере) или None/"vpn".
+        server_id: rus1/rus2 (РФ), eu1/eu2 (Европа AmneziaWG или classic eu WG).
+        profile_type: Только для eu1 classic WG — "vpn_gpt" / "unified" / None.
     """
     env = _load_env()
     server_config = _get_server_config(server_id, env)
@@ -772,21 +816,21 @@ def create_amneziawg_peer_and_config_for_user(
     telegram_id: int,
     reuse_ip: Optional[str] = None,
     android_safe: bool = False,
+    server_id: str = "eu1",
 ) -> Tuple[Peer, str]:
     """
-    Создаёт peer AmneziaWG на eu1 через вызов скрипта на сервере по SSH.
-    Скрипт вызывается с аргументом client_ip; выводит первую строку PUBKEY=<pubkey>, далее — клиентский .conf.
-    Если задан reuse_ip (например "10.1.0.5/32") — используется этот IP вместо выделения нового (для регенерации).
-    android_safe: постобработка конфига для Android (один DNS), избегает ErrorCode 1000.
-    Возвращает (Peer, client_config_text).
+    Создаёт peer AmneziaWG на EU-ноде (eu1 или eu2 — один хост) через скрипт по SSH.
+    server_id: "eu1" | "eu2" — разные записи в peers.json и разные IP в общем пуле Amnezia.
     """
+    if server_id not in ("eu1", "eu2"):
+        raise WireGuardError("AmneziaWG выдаётся только для server_id eu1 или eu2.")
     env = _load_env()
     script_path = env.get("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT", "").strip()
     if not script_path:
         raise WireGuardError("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT не задан в env_vars.txt.")
 
     network_cidr = env.get("AMNEZIAWG_EU1_NETWORK_CIDR", "").strip() or "10.1.0.0/24"
-    server_config = _get_server_config("eu1", env)
+    server_config = _get_server_config(server_id, env)
     ssh_host = server_config.get("ssh_host")
     if not ssh_host:
         raise WireGuardError("SSH_HOST не настроен для eu1 (WG_EU1_SSH_HOST или WG_EU1_ENDPOINT_HOST).")
@@ -794,7 +838,7 @@ def create_amneziawg_peer_and_config_for_user(
     if reuse_ip:
         wg_ip = reuse_ip if "/" in reuse_ip else f"{reuse_ip}/32"
     else:
-        wg_ip = _allocate_ip(network_cidr, "eu1")
+        wg_ip = _allocate_ip_amnezia_eu(network_cidr)
     client_ip = wg_ip.split("/")[0].strip()
 
     # Интерфейс на eu1 (wg0 или awg0) — передаём в скрипт, иначе скрипт по умолчанию использует awg0
@@ -841,27 +885,31 @@ def create_amneziawg_peer_and_config_for_user(
         telegram_id=telegram_id,
         wg_ip=wg_ip,
         public_key=public_key,
-        server_id="eu1",
+        server_id=server_id,
         active=True,
         profile_type=None,
     )
     upsert_peer(peer)
     logger.info(
-        "Создан AmneziaWG peer для telegram_id=%s на eu1, wg_ip=%s",
-        telegram_id, wg_ip,
+        "Создан AmneziaWG peer для telegram_id=%s на %s, wg_ip=%s",
+        telegram_id, server_id, wg_ip,
     )
     return peer, client_config
 
 
 def regenerate_amneziawg_peer_and_config_for_user(
-    telegram_id: int, android_safe: bool = False
+    telegram_id: int, android_safe: bool = False, server_id: str = "eu1"
 ) -> Tuple[Peer, str]:
     """
-    Регенерирует AmneziaWG peer на eu1: удаляет старый peer, создаёт новый с тем же IP, возвращает новый конфиг.
+    Регенерирует AmneziaWG peer для слота eu1 или eu2 (тот же IP, новые ключи).
     """
-    existing_peer = find_peer_by_telegram_id(telegram_id, server_id="eu1")
+    if server_id not in ("eu1", "eu2"):
+        raise WireGuardError("Регенерация AmneziaWG только для eu1 или eu2.")
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
     if not existing_peer or not existing_peer.active:
-        raise WireGuardError("Не найден активный peer для Европы (eu1). Сначала используй /get_config.")
+        raise WireGuardError(
+            f"Не найден активный peer для Европы ({server_id}). Сначала используй /get_config для этого слота."
+        )
 
     try:
         _remove_amneziawg_peer(existing_peer.public_key)
@@ -872,40 +920,46 @@ def regenerate_amneziawg_peer_and_config_for_user(
         telegram_id,
         reuse_ip=existing_peer.wg_ip,
         android_safe=android_safe,
+        server_id=server_id,
     )
-    logger.info("Регенерирован AmneziaWG peer для telegram_id=%s на eu1", telegram_id)
+    logger.info("Регенерирован AmneziaWG peer для telegram_id=%s на %s", telegram_id, server_id)
     return peer, client_config
 
 
 def get_available_servers() -> Dict[str, Dict[str, str]]:
     """
-    Возвращает словарь доступных серверов с их метаданными (название, описание).
+    Возвращает словарь доступных логических слотов (rus1/rus2/eu1/eu2).
     
     Формат: {"server_id": {"name": "...", "description": "..."}}
     """
-    # Базовый сервер "main" всегда доступен.
     servers: Dict[str, Dict[str, str]] = {
-        "main": {
-            "name": "Россия (Timeweb)",
-            "description": "Низкий пинг, высокая скорость. Подходит для YouTube, Instagram и других сервисов.",
+        "rus1": {
+            "name": "Россия — основной (rus1)",
+            "description": "WireGuard, Timeweb. Низкий пинг, YouTube, Instagram. Дефолтный профиль РФ.",
+        },
+        "rus2": {
+            "name": "Россия — запасной (rus2)",
+            "description": "Тот же сервер, второй ключ/IP. Не трогает rus1 — отдельный .conf.",
         },
     }
 
-    # Попытаться включить дополнительные ноды на основе env_vars.txt.
     try:
         env = _load_env()
     except Exception:
         env = {}
 
-    # Нода "eu1" (Европа): доступна при наличии endpoint (или публичного ключа). Для выдачи конфигов используется AmneziaWG.
     has_eu1 = bool(
         env.get("WG_EU1_SERVER_PUBLIC_KEY")
         and (env.get("WG_EU1_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST"))
     ) or bool(env.get("WG_EU1_ENDPOINT_HOST") or env.get("WG_EU1_SSH_HOST"))
     if has_eu1:
         servers["eu1"] = {
-            "name": "Европа",
-            "description": "AmneziaWG: доступ из РФ, ChatGPT и другие сервисы. Импорт конфига в AmneziaVPN/AmneziaWG.",
+            "name": "Европа — основной (eu1)",
+            "description": "AmneziaWG: доступ из РФ, ChatGPT. Импорт в AmneziaVPN/AmneziaWG. Тип профиля — кнопки после выбора Европы.",
+        }
+        servers["eu2"] = {
+            "name": "Европа — запасной (eu2)",
+            "description": "Тот же EU-сервер, второй AmneziaWG peer. Если eu1 недоступен или нужен отдельный конфиг.",
         }
 
     return servers

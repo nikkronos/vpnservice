@@ -3,20 +3,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const tgResult = document.getElementById('recovery-result');
   const tgBtn = document.getElementById('btnRecoverTelegram');
 
-  const vpnInput = document.getElementById('vpnRecoveryTelegramId');
-  const vpnResult = document.getElementById('vpn-recovery-result');
-  const vpnBtn = document.getElementById('btnRecoverVpn');
-  const vpnAndroidSafe = document.getElementById('vpnRecoveryAndroidSafe');
+  const vpnEu1Input = document.getElementById('vpnRecoveryTelegramIdEu1');
+  const vpnEu1Result = document.getElementById('vpn-recovery-result-eu1');
+  const vpnEu1Btn = document.getElementById('btnRecoverVpnEu1');
+  const vpnEu1AndroidSafe = document.getElementById('vpnRecoveryAndroidSafeEu1');
 
-  // Nothing to do on pages without recovery widgets.
-  const hasAnyRecovery = !!(tgInput && tgBtn) || !!(vpnInput && vpnBtn);
+  const vpnEu2Input = document.getElementById('vpnRecoveryTelegramIdEu2');
+  const vpnEu2Result = document.getElementById('vpn-recovery-result-eu2');
+  const vpnEu2Btn = document.getElementById('btnRecoverVpnEu2');
+  const vpnEu2AndroidSafe = document.getElementById('vpnRecoveryAndroidSafeEu2');
+
+  const hasAnyRecovery =
+    !!(tgInput && tgBtn) ||
+    !!(vpnEu1Input && vpnEu1Btn) ||
+    !!(vpnEu2Input && vpnEu2Btn);
   if (!hasAnyRecovery) return;
 
   const savedId = localStorage.getItem('vpn_recovery_telegram_id');
   if (savedId) {
     if (tgInput) tgInput.value = savedId;
-    if (vpnInput) vpnInput.value = savedId;
+    if (vpnEu1Input) vpnEu1Input.value = savedId;
+    if (vpnEu2Input) vpnEu2Input.value = savedId;
   }
+
+  function mirrorVpnIds(from, to) {
+    if (!from || !to) return;
+    from.addEventListener('input', () => {
+      to.value = from.value;
+    });
+  }
+  mirrorVpnIds(vpnEu1Input, vpnEu2Input);
+  mirrorVpnIds(vpnEu2Input, vpnEu1Input);
 
   function setResult(el, text, isError) {
     if (!el) return;
@@ -76,18 +93,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (vpnInput && vpnBtn && vpnResult && vpnAndroidSafe) {
-    vpnBtn.addEventListener('click', async () => {
-      const telegramId = (vpnInput.value || '').trim();
-      const androidSafe = !!vpnAndroidSafe.checked;
+  function bindVpnRecovery(serverId, inputEl, btnEl, resultEl, androidSafeEl) {
+    if (!inputEl || !btnEl || !resultEl || !androidSafeEl) return;
+
+    btnEl.addEventListener('click', async () => {
+      const telegramId = (inputEl.value || '').trim();
+      const androidSafe = !!androidSafeEl.checked;
 
       if (!telegramId) {
-        setResult(vpnResult, 'Введите Telegram ID.', true);
+        setResult(resultEl, 'Введите Telegram ID.', true);
         return;
       }
 
-      vpnBtn.disabled = true;
-      setResult(vpnResult, 'Генерация VPN-конфига...', false);
+      btnEl.disabled = true;
+      setResult(resultEl, 'Генерация VPN-конфига (' + serverId.toUpperCase() + ')...', false);
 
       try {
         localStorage.setItem('vpn_recovery_telegram_id', telegramId);
@@ -95,23 +114,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const resp = await fetch('/api/recovery/vpn', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id: telegramId, android_safe: androidSafe }),
+          body: JSON.stringify({
+            telegram_id: telegramId,
+            android_safe: androidSafe,
+            server_id: serverId,
+          }),
         });
 
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
-          setResult(vpnResult, 'Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+          setResult(resultEl, 'Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
           return;
         }
 
         const filename = data.filename || 'vpn.conf';
         const cfg = data.config || '';
         if (!cfg) {
-          setResult(vpnResult, 'Сервер не вернул конфиг.', true);
+          setResult(resultEl, 'Сервер не вернул конфиг.', true);
           return;
         }
 
-        setResult(vpnResult, 'Готово. Скачивайте файл: ' + filename, false);
+        setResult(resultEl, 'Готово. Скачивайте файл: ' + filename, false);
 
         const blob = new Blob([cfg], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -123,11 +146,13 @@ document.addEventListener('DOMContentLoaded', () => {
         a.remove();
         URL.revokeObjectURL(url);
       } catch (err) {
-        setResult(vpnResult, 'Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
+        setResult(resultEl, 'Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
       } finally {
-        vpnBtn.disabled = false;
+        btnEl.disabled = false;
       }
     });
   }
-});
 
+  bindVpnRecovery('eu1', vpnEu1Input, vpnEu1Btn, vpnEu1Result, vpnEu1AndroidSafe);
+  bindVpnRecovery('eu2', vpnEu2Input, vpnEu2Btn, vpnEu2Result, vpnEu2AndroidSafe);
+});

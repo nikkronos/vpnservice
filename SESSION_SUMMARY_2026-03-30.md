@@ -13,7 +13,7 @@
 
 2. **2026-03-30:**
    - Ревью плана (устные замечания агенту): противоречие «пилот на eu1» vs blackhole; занизить `C_ops`; добавить SLO/runbook в следующих итерациях при необходимости.
-   - **`README_FOR_NEXT_AGENT.md`:** исправлено устаревшее утверждение «MTProto не работает — только VPN». Зафиксировано: на eu1 «голый» MTProto блокировался по сигнатуре; **MTProxy с Fake TLS на main (Timeweb)** описан в `docs/mtproxy-faketls-deploy.md` и `docs/telegram-unblock-algorithm.md`; команда `/proxy` в боте снята, ссылка через env/вручную.
+   - **`README_FOR_NEXT_AGENT.md`:** исправлено устаревшее утверждение «MTProto не работает — только VPN». Зафиксировано: на eu1 «голый» MTProto блокировался по сигнатуре; **MTProxy с Fake TLS на main (Timeweb)** описан в `docs/mtproxy-faketls-deploy.md` и `docs/telegram-unblock-algorithm.md`. В дальнейшем README обновлён: снова **`/proxy`** и **`/proxy_rotate`** (см. дополнение ниже и `docs/telegram-mtproxy-operators-guide.md`).
 
 3. **Согласовано с владельцем:** сторонний платный VPN (например Paper VPN) может показывать те же симптомы на LTE — это подтверждает системный характер ограничений сети, а не только ошибки нашей конфигурации.
 
@@ -25,3 +25,30 @@
 ## Статус
 
 Задачи сессии по документации и согласованию README выполнены. Дальнейшая реализация (мульти-`/mobile_vpn`, второй mobile-VPS и т.д.) — по отдельным спекам и приоритетам владельца.
+
+---
+
+## Дополнение (конец сессии 2026-03-30) — MTProxy: ротация, recovery, единая документация
+
+### Контекст
+
+Зафиксированы в коде и документах: «обновляемая» ссылка на MTProxy Fake TLS для пользователей без Telegram (страница recovery), согласованность с `/proxy`, явные пути к `pip` в venv на Ubuntu 24+ (PEP 668).
+
+### Реализовано (код, уже в `main`)
+
+- **`get_effective_mtproto_proxy_link()`:** приоритет `data/mtproto_proxy_link.txt`, fallback — `MTPROTO_PROXY_LINK` из `env_vars.txt`, читаемый **с диска** при каждом вызове.
+- **`/proxy`:** перед выдачей — `load_config()` + эффективная ссылка.
+- **`/proxy_rotate`:** только владелец; скрипт `MTPROXY_ROTATE_SCRIPT`; запись override-файла.
+- **Recovery API** (`POST /api/recovery/telegram-proxy`): поля `mtproto_proxy_link`, `hint`; ссылка отдаётся и при ошибке перезапуска Docker.
+- **`docs/deployment.md`:** установка зависимостей через `/opt/vpnservice/venv/bin/pip`.
+
+### Документация (этот коммит/итерация)
+
+- **`docs/telegram-mtproxy-operators-guide.md`** — единое руководство: команды бота, recovery, env, деплой, ссылки на остальные доки.
+- **`README_FOR_NEXT_AGENT.md`:** обновлены список команд (`/proxy`, `/proxy_rotate`), recovery URL, правило №5 (устранено устаревание «/proxy снята»).
+- Перекрёстные ссылки в разделе «Документация» README.
+
+### Критично для следующего агента
+
+- Один источник актуальной ссылки: override-файл → env `MTPROTO_PROXY_LINK`; recovery и `/proxy` используют ту же логику.
+- На сервере **не** вызывать системный `pip` без venv для пакетов проекта.

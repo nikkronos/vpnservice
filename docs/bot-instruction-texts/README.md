@@ -12,7 +12,7 @@
 ## Использование в боте
 
 1. Читать файлы при старте бота или по требованию (например, по команде «Инструкция» или после выдачи конфига).
-2. Ссылку MTProto подставлять из переменной окружения `MTPROTO_PROXY_LINK` (формат: `tg://proxy?server=...&port=443&secret=...`).
+2. Ссылку MTProto подставлять через **`get_effective_mtproto_proxy_link()`** в `bot/config.py`: приоритет `data/mtproto_proxy_link.txt`, иначе `MTPROTO_PROXY_LINK` из `env_vars.txt` (формат: `tg://proxy?server=...&port=443&secret=...`). Сводка: [telegram-mtproxy-operators-guide.md](../telegram-mtproxy-operators-guide.md).
 3. При выборе платформы (ПК / iPhone–iPad / Android) отправлять соответствующий текст; при необходимости отправлять все варианты.
 
 ## Обновление

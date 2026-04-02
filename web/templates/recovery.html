@@ -39,32 +39,57 @@
     </section>
 
     <section class="recovery">
-      <h2>🛠️ Восстановление VPN</h2>
+      <h2>🛠️ Восстановление VPN (Европа, AmneziaWG)</h2>
       <p class="section-hint">
-        Генерирует новый VPN-конфиг и даёт его скачать — чтобы вы могли подключиться даже при проблемах с Telegram.
+        Два слота: <b>EU1</b> и <b>EU2</b> — разные ключи и IP в одном пуле на EU-сервере.
+        Генерирует конфиг для выбранного слота, чтобы подключиться без Telegram.
       </p>
 
-      <div class="recovery-form">
-        <label for="vpnRecoveryTelegramId">Ваш Telegram ID</label>
+      <div class="recovery-form recovery-vpn-slot">
+        <h3 class="recovery-slot-title">Слот EU1</h3>
+        <label for="vpnRecoveryTelegramIdEu1">Ваш Telegram ID</label>
         <input
           type="number"
-          id="vpnRecoveryTelegramId"
+          id="vpnRecoveryTelegramIdEu1"
           inputmode="numeric"
           placeholder="Например, 123456789"
           autocomplete="off"
         />
 
         <label class="checkbox-row">
-          <input type="checkbox" id="vpnRecoveryAndroidSafe" />
+          <input type="checkbox" id="vpnRecoveryAndroidSafeEu1" />
           Android-safe (один DNS, обход ErrorCode 1000)
         </label>
 
-        <button type="button" id="btnRecoverVpn" class="btn-recovery">
-          Восстановить VPN (конфиг)
+        <button type="button" id="btnRecoverVpnEu1" class="btn-recovery">
+          Восстановить VPN EU1
         </button>
       </div>
 
-      <div id="vpn-recovery-result" class="recovery-result" aria-live="polite"></div>
+      <div id="vpn-recovery-result-eu1" class="recovery-result" aria-live="polite"></div>
+
+      <div class="recovery-form recovery-vpn-slot">
+        <h3 class="recovery-slot-title">Слот EU2</h3>
+        <label for="vpnRecoveryTelegramIdEu2">Ваш Telegram ID</label>
+        <input
+          type="number"
+          id="vpnRecoveryTelegramIdEu2"
+          inputmode="numeric"
+          placeholder="Например, 123456789"
+          autocomplete="off"
+        />
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="vpnRecoveryAndroidSafeEu2" />
+          Android-safe (один DNS, обход ErrorCode 1000)
+        </label>
+
+        <button type="button" id="btnRecoverVpnEu2" class="btn-recovery">
+          Восстановить VPN EU2
+        </button>
+      </div>
+
+      <div id="vpn-recovery-result-eu2" class="recovery-result" aria-live="polite"></div>
     </section>
 
     <footer>

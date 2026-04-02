@@ -1,5 +1,23 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-04-02 (дополнение) — Spec-08: без нового VPS
+
+- Решение владельца: **второй VPS не оплачивается.** Спека **spec-08** переписана: основной сценарий **B** — только **main + eu1** (несколько способов: WG, AmneziaWG, `/mobile_vpn`, `/proxy`; опц. REALITY на **main**, домен для MTProxy). Сценарий **A** (RU2/EU2 на отдельном VPS) оставлен как опция при появлении бюджета. Обновлены `ROADMAP_VPN.md`, `blocking-bypass-strategy.md`, `README_FOR_NEXT_AGENT.md`, `third-party-vpn-boosters-vs-multi-entry.md`.
+
+## 2026-04-02 — Спека вторая нода (RU2/EU2), документ про GearUp/мульти-вход
+
+- **`docs/specs/spec-08-multi-node-redundancy-ru2-eu2.md`** — первоначально план EU2/RU2; затем уточнение «без второго VPS» — см. дополнение выше.
+- **`docs/third-party-vpn-boosters-vs-multi-entry.md`** — что такое GearUp-подобные приложения, чем наш мульти-вход аналогичен и чем клонировать их продукт нецелесообразно.
+- **`docs/blocking-bypass-strategy.md`** — ссылка на spec-08 в блоке MVP; связанные документы дополнены.
+- **`ROADMAP_VPN.md`** — раздел «Второй/резервный сервер» переписан под spec-08 и актуальный приоритет.
+- **`README_FOR_NEXT_AGENT.md`** — ссылки на spec-08 и third-party doc.
+
+## 2026-03-30 — Сводная документация MTProxy + обновление README
+
+- **`docs/telegram-mtproxy-operators-guide.md`** — единое руководство: `/proxy`, `/proxy_rotate`, recovery, `get_effective_mtproto_proxy_link`, env, деплой через venv-pip, ссылка на альтернативы.
+- **`README_FOR_NEXT_AGENT.md`:** команды `/proxy` и `/proxy_rotate`, URL recovery, правило №5 приведено к текущему коду; раздел «Документация» дополнен ссылками.
+- **`SESSION_SUMMARY_2026-03-30.md`:** дополнение с итогами по MTProxy/recovery/документации pip.
+
 ## 2026-03-30 — Деплой: явный путь к pip в venv (PEP 668 на Ubuntu 24+)
 
 - **`docs/deployment.md`:** установка зависимостей бота и панели через `/opt/vpnservice/venv/bin/pip` (не системный `pip`); блок «Обновление бота» — опциональный `pip install -r requirements.txt` при смене зависимостей; «Обновление панели» — тот же путь к pip; примечание про перезапуск `vpn-bot` при общих изменениях в `bot/`.

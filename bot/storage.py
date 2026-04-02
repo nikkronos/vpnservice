@@ -3,10 +3,54 @@ import pathlib
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
 
-
 DATA_DIR = pathlib.Path(__file__).resolve().parent / "data"
 USERS_FILE = DATA_DIR / "users.json"
 PEERS_FILE = DATA_DIR / "peers.json"
+
+
+def normalize_peer_server_id(server_id: Optional[str]) -> str:
+    """main в peers → rus1 для единообразия."""
+    if not server_id or server_id == "main":
+        return "rus1"
+    return server_id
+
+
+def normalize_preferred_server_id(server_id: Optional[str]) -> str:
+    """Дефолт и legacy main → rus1."""
+    if not server_id or server_id == "main":
+        return "rus1"
+    return server_id
+
+
+def _peer_storage_key(telegram_id: int, server_id: str) -> str:
+    return f"{telegram_id}:{normalize_peer_server_id(server_id)}"
+
+
+def _migrate_peers_json_on_load(data: Dict[str, dict]) -> Dict[str, dict]:
+    """
+    Старый формат: ключ = только telegram_id (число).
+    Новый: ключ = "telegram_id:server_id".
+    main → rus1.
+    """
+    if not data:
+        return data
+    out: Dict[str, dict] = {}
+    for key, payload in data.items():
+        sk = str(key)
+        payload = dict(payload)
+        if ":" in sk:
+            tid_str, _, _rest = sk.partition(":")
+            sid = normalize_peer_server_id(payload.get("server_id", _rest or "rus1"))
+            payload["server_id"] = sid
+            nk = f"{tid_str}:{sid}"
+            out[nk] = payload
+        elif sk.isdigit():
+            sid = normalize_peer_server_id(payload.get("server_id", "main"))
+            payload["server_id"] = sid
+            out[f"{sk}:{sid}"] = payload
+        else:
+            out[sk] = payload
+    return out
 
 
 @dataclass
@@ -15,24 +59,23 @@ class User:
     username: Optional[str]
     role: str = "user"  # "owner" | "user"
     active: bool = True
-    preferred_server_id: Optional[str] = None  # "main" (РФ) | "eu1" (Европа) | None (дефолт)
-    preferred_profile_type: Optional[str] = None  # для eu1: "vpn" | "vpn_gpt"
+    preferred_server_id: Optional[str] = None  # rus1 | rus2 | eu1 | eu2 | legacy main
+    preferred_profile_type: Optional[str] = None  # для eu1: "vpn" | "vpn_gpt" | "unified"
 
 
 @dataclass
 class Peer:
     """
-    Описание одного VPN-подключения (peer) в WireGuard, привязанного к Telegram-пользователю.
-
-    На текущем этапе предполагается один активный peer на один Telegram-аккаунт.
+    Один VPN-подключение. Несколько peers на одного пользователя — разные ключи
+    f"{telegram_id}:{server_id}" в peers.json.
     """
 
     telegram_id: int
-    wg_ip: str  # например, "10.0.0.2/32"
+    wg_ip: str
     public_key: str
-    server_id: str = "main"  # идентификатор ноды/сервера, пока одна нода
+    server_id: str = "rus1"
     active: bool = True
-    profile_type: Optional[str] = None  # для eu1: "vpn" | "vpn_gpt" (обход ChatGPT через ss-redir)
+    profile_type: Optional[str] = None
 
 
 def _ensure_data_dir() -> None:
@@ -52,6 +95,14 @@ def _load_raw(path: pathlib.Path) -> Dict[str, dict]:
 def _save_raw(path: pathlib.Path, data: Dict[str, dict]) -> None:
     _ensure_data_dir()
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_peers_data() -> Dict[str, dict]:
+    raw = _load_raw(PEERS_FILE)
+    migrated = _migrate_peers_json_on_load(raw)
+    if migrated != raw:
+        _save_raw(PEERS_FILE, migrated)
+    return migrated
 
 
 def get_all_users() -> List[User]:
@@ -92,7 +143,6 @@ def find_user(telegram_id: int) -> Optional[User]:
 def upsert_user(user: User) -> None:
     data = _load_raw(USERS_FILE)
     payload = asdict(user)
-    # ключ — telegram_id как строка
     data[str(user.telegram_id)] = payload
     _save_raw(USERS_FILE, data)
 
@@ -102,66 +152,104 @@ def is_owner(user_id: int, owner_id: int) -> bool:
 
 
 def get_all_peers() -> List[Peer]:
-    """
-    Возвращает список всех peers (VPN-подключений), известных системе.
-    """
-    data = _load_raw(PEERS_FILE)
+    data = _load_peers_data()
     peers: List[Peer] = []
     for key, payload in data.items():
         try:
             peers.append(
                 Peer(
-                    telegram_id=int(payload.get("telegram_id", key)),
+                    telegram_id=int(payload.get("telegram_id", str(key).split(":")[0])),
                     wg_ip=payload["wg_ip"],
                     public_key=payload["public_key"],
-                    server_id=payload.get("server_id", "main"),
+                    server_id=normalize_peer_server_id(payload.get("server_id", "rus1")),
                     active=bool(payload.get("active", True)),
                     profile_type=payload.get("profile_type"),
                 )
             )
         except (ValueError, KeyError):
-            # Если данные повреждены или неполные — пропускаем запись,
-            # чтобы не ломать работу бота.
             continue
     return peers
 
 
 def find_peer_by_telegram_id(telegram_id: int, server_id: Optional[str] = None) -> Optional[Peer]:
     """
-    Ищет peer, связанный с указанным Telegram ID.
-    
-    Если указан server_id, ищет peer именно на этом сервере.
-    Если server_id не указан, возвращает первый найденный активный peer (для обратной совместимости).
+    Ищет peer. Если server_id задан — точное совпадение слота (rus1, eu2, ...).
+    main в запросе нормализуется в rus1.
+    Если server_id не указан — приоритет: rus1, eu1, первый найденный.
     """
-    data = _load_raw(PEERS_FILE)
-    payload = data.get(str(telegram_id))
-    if not payload:
-        return None
-    try:
-        peer = Peer(
-            telegram_id=int(payload.get("telegram_id", telegram_id)),
-            wg_ip=payload["wg_ip"],
-            public_key=payload["public_key"],
-            server_id=payload.get("server_id", "main"),
-            active=bool(payload.get("active", True)),
-            profile_type=payload.get("profile_type"),
-        )
-        # Если указан server_id, проверяем совпадение
-        if server_id is not None and peer.server_id != server_id:
+    data = _load_peers_data()
+    if server_id is not None:
+        sid = normalize_peer_server_id(server_id)
+        key = _peer_storage_key(telegram_id, sid)
+        payload = data.get(key)
+        if not payload:
             return None
-        return peer
-    except (ValueError, KeyError):
+        try:
+            return Peer(
+                telegram_id=int(payload.get("telegram_id", telegram_id)),
+                wg_ip=payload["wg_ip"],
+                public_key=payload["public_key"],
+                server_id=normalize_peer_server_id(payload.get("server_id", sid)),
+                active=bool(payload.get("active", True)),
+                profile_type=payload.get("profile_type"),
+            )
+        except (ValueError, KeyError):
+            return None
+
+    prefix = f"{telegram_id}:"
+    candidates: List[Peer] = []
+    for key, payload in data.items():
+        sk = str(key)
+        if not sk.startswith(prefix):
+            continue
+        try:
+            candidates.append(
+                Peer(
+                    telegram_id=int(payload.get("telegram_id", telegram_id)),
+                    wg_ip=payload["wg_ip"],
+                    public_key=payload["public_key"],
+                    server_id=normalize_peer_server_id(payload.get("server_id", sk.split(":")[-1])),
+                    active=bool(payload.get("active", True)),
+                    profile_type=payload.get("profile_type"),
+                )
+            )
+        except (ValueError, KeyError):
+            continue
+
+    if not candidates:
         return None
+
+    order = ["rus1", "rus2", "eu1", "eu2"]
+    for sid in order:
+        for p in candidates:
+            if p.server_id == sid and p.active:
+                return p
+    for p in candidates:
+        if p.active:
+            return p
+    return candidates[0]
 
 
 def upsert_peer(peer: Peer) -> None:
-    """
-    Создаёт или обновляет peer, привязанный к Telegram-пользователю.
-
-    Ключом служит telegram_id (строка).
-    """
-    data = _load_raw(PEERS_FILE)
-    payload = asdict(peer)
-    data[str(peer.telegram_id)] = payload
+    data = _load_peers_data()
+    sid = normalize_peer_server_id(peer.server_id)
+    peer_norm = Peer(
+        telegram_id=peer.telegram_id,
+        wg_ip=peer.wg_ip,
+        public_key=peer.public_key,
+        server_id=sid,
+        active=peer.active,
+        profile_type=peer.profile_type,
+    )
+    key = _peer_storage_key(peer_norm.telegram_id, sid)
+    data[key] = asdict(peer_norm)
     _save_raw(PEERS_FILE, data)
 
+
+def delete_peer(telegram_id: int, server_id: str) -> None:
+    """Удаляет запись peer из JSON (редко нужно)."""
+    data = _load_peers_data()
+    key = _peer_storage_key(telegram_id, normalize_peer_server_id(server_id))
+    if key in data:
+        del data[key]
+        _save_raw(PEERS_FILE, data)
