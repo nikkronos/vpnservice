@@ -8,6 +8,9 @@ ADMIN_ID=your_telegram_id
 # Ротация Fake TLS (новый секрет + контейнер): скрипт на том же сервере, что и бот (см. docs/mtproxy-proxy-rotation.md).
 # После успешного /proxy_rotate бот пишет актуальную ссылку в data/mtproto_proxy_link.txt (не в Git).
 # MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-faketls-rotate.sh
+# Если на том же хосте Xray уже слушает 443, задай внешний порт для Docker (см. docs/mtproxy-proxy-rotation.md).
+# MTPROXY_PORT=8444
+# MTPROXY_PUBLIC_IP=185.21.8.91
 
 # Ссылка на страницу восстановления (web-панель), чтобы пользователь мог перейти,
 # если Telegram не работает.

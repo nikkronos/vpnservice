@@ -7,7 +7,12 @@ from pathlib import Path
 import telebot
 from telebot import types
 
-from .config import BotConfig, get_effective_mtproto_proxy_link, load_config
+from .config import (
+    BotConfig,
+    environment_for_mtproxy_rotate,
+    get_effective_mtproto_proxy_link,
+    load_config,
+)
 from .storage import (
     User,
     find_peer_by_telegram_id,
@@ -48,6 +53,35 @@ def _parse_mtproto_link_from_rotate_stdout(stdout: str) -> str | None:
         if line.startswith("tg://proxy"):
             return line
     return None
+
+
+def _build_proxy_rotate_failure_message(returncode: int, combined_output: str) -> str:
+    """Формирует понятное сообщение об ошибке ротации MTProxy для владельца."""
+    lower = combined_output.lower()
+    port_conflict_markers = (
+        "failed to bind host port",
+        "address already in use",
+        "0.0.0.0:443",
+        ":443/tcp",
+    )
+    has_port_conflict = any(marker in lower for marker in port_conflict_markers)
+
+    if has_port_conflict:
+        return (
+            "Скрипт ротации не смог запустить MTProxy на порту 443: порт уже занят на сервере.\n\n"
+            "Это не ошибка парсинга ссылки — контейнер не стартовал из-за конфликта порта.\n\n"
+            "Проверь на сервере Fornex, кто слушает 443:\n"
+            "<code>docker ps --format \"table {{.Names}}\\t{{.Ports}}\"</code>\n"
+            "<code>ss -ltnp | grep :443</code>\n\n"
+            "После освобождения 443 повтори /proxy_rotate.\n\n"
+            f"Код скрипта: {returncode}"
+        )
+
+    tail = combined_output[-3500:] if len(combined_output) > 3500 else combined_output
+    return (
+        f"Скрипт завершился с кодом {returncode}. Новую ссылку разобрать не удалось.\n\n"
+        f"{tail}"
+    )
 
 
 def _load_instruction_text(base_dir: Path, name: str) -> str:
@@ -754,6 +788,7 @@ def main() -> None:
                 text=True,
                 timeout=180,
                 check=False,
+                env=environment_for_mtproxy_rotate(config.base_dir),
             )
         except subprocess.TimeoutExpired:
             safe_reply(message, "Ротация: тайм-аут 180 с. Проверь Docker и логи на сервере бота.")
@@ -767,10 +802,9 @@ def main() -> None:
         combined = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
 
         if completed.returncode != 0 or not link:
-            tail = combined[-3500:] if len(combined) > 3500 else combined
             safe_reply(
                 message,
-                f"Скрипт завершился с кодом {completed.returncode}. Новую ссылку разобрать не удалось.\n\n{tail}",
+                _build_proxy_rotate_failure_message(completed.returncode, combined),
             )
             return
 

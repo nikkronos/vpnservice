@@ -1,3 +1,4 @@
+import os
 import pathlib
 from dataclasses import dataclass
 from typing import Dict
@@ -82,6 +83,19 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         vpn_recovery_url=vpn_recovery_url,
         vless_reality_share_url=vless_reality_share_url,
     )
+
+
+def environment_for_mtproxy_rotate(base_dir: pathlib.Path) -> Dict[str, str]:
+    """
+    Окружение для subprocess скрипта ротации: копия os.environ плюс переменные MTPROXY_*
+    из env_vars.txt (иначе бот их не передаёт в bash, т.к. читает файл только через load_config).
+    """
+    env: Dict[str, str] = dict(os.environ)
+    data = _parse_env_file(base_dir / "env_vars.txt")
+    for key, value in data.items():
+        if key.startswith("MTPROXY_") and value.strip():
+            env[key] = value.strip()
+    return env
 
 
 def get_effective_mtproto_proxy_link(bot_config: BotConfig) -> str | None:
