@@ -1,5 +1,16 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-04-12 — Исправление доступа к мониторингу и recovery (UFW + обновление устаревших ссылок)
+
+- **Причина:** после переноса `vpn-web.service` на Fornex порт 5001 не был открыт в UFW — сервис работал, но снаружи был недоступен. Дополнительно: ряд файлов содержал старые ссылки `81.200.146.32:5001` (Timeweb).
+- **Сервер Fornex:** `ufw allow 5001/tcp && ufw reload` — панели `http://185.21.8.91:5001/` и `http://185.21.8.91:5001/recovery` снова доступны.
+- **Репозиторий (2 коммита):**
+  - `env_vars.example.txt` — пример `VPN_RECOVERY_URL` обновлён на Fornex IP.
+  - `docs/mtproxy-proxy-rotation.md` — ссылка Web recovery и заголовок раздела обновлены (Timeweb → Fornex).
+  - `docs/blocking-bypass-strategy.md` — URL панели мониторинга в разделе LTE-тестов обновлён на Fornex.
+  - `docs/deployment.md` — шаг `ufw allow 5001/tcp` вынесен как **обязательный** пункт в разделе деплоя `vpn-web`; добавлен шаг проверки curl.
+- **Сессия:** `SESSION_SUMMARY_2026-04-12.md`.
+
 ## 2026-04-11 — Документация и код: пост-миграция бота на Fornex (Россия `/get_config`, EU `/regen`, SSH)
 
 - **Контекст:** бот на Fornex; Россия (rus1) — WireGuard остаётся на **main** (Timeweb). В проде выявлено: на Fornex не было **`wireguard-tools`** → в логах `FileNotFoundError: 'wg'`, пользователь не получал ответ на `/get_config` для России. Второй кейс: в `env_vars.txt` был путь **`WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1`**, файла ключа на новом VPS не было → `/regen` AmneziaWG (в т.ч. слот eu2) — ошибка SSH до eu1.
