@@ -13,7 +13,7 @@ class BotConfig:
     # Скрипт ротации MTProxy Fake TLS на том же хосте, что и бот (команда /proxy_rotate, только владелец). См. docs/mtproxy-proxy-rotation.md
     mtproxy_rotate_script: str | None = None
     # URL страницы восстановления на web-панели
-    vpn_recovery_url: str = "http://81.200.146.32:5001/recovery"
+    vpn_recovery_url: str = "http://185.21.8.91:5001/recovery"
     # Share-ссылка vless:// для мобильного интернета (Xray REALITY), из VLESS_REALITY_SHARE_URL
     vless_reality_share_url: str | None = None
 
@@ -66,7 +66,7 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
 
     vpn_recovery_url = (data.get("VPN_RECOVERY_URL") or "").strip()
     if not vpn_recovery_url:
-        vpn_recovery_url = "http://81.200.146.32:5001/recovery"
+        vpn_recovery_url = "http://185.21.8.91:5001/recovery"
 
     vless_reality_share_url = data.get("VLESS_REALITY_SHARE_URL") or None
     if vless_reality_share_url:

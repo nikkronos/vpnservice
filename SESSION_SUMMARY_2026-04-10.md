@@ -1,49 +1,42 @@
-# Резюме сессии 2026-04-10 — MTProxy на Fornex, `/proxy_rotate`, код бота
+# Резюме сессии 2026-04-10 — 2026-04-11 — MTProxy на Fornex, панель на Fornex, Timeweb выключен
 
 ## Контекст работы
 
-После миграции Telegram-бота VPN на **Fornex** (см. `Main_docs/TELEGRAM_MIGRATION_TIMWEB_FORNEX_2026-04-10.md`) команда **`/proxy_rotate`** перестала работать: скрипт ротации поднимал Docker с пробросом **`0.0.0.0:443`**, но порт **443** на хосте **eu1 (185.21.8.91)** уже занят **`xray.service`** (VLESS+REALITY). Ошибка Docker: `failed to bind host port ... 443/tcp: address already in use`. Код выхода скрипта **125**, бот сообщал «новую ссылку разобрать не удалось».
+После миграции Telegram-бота VPN на **Fornex** (см. `Main_docs/TELEGRAM_MIGRATION_TIMWEB_FORNEX_2026-04-10.md`) команда **`/proxy_rotate`** перестала работать: Docker не мог занять **хост 443** — порт занят **`xray.service`** (VLESS+REALITY). MTProxy Fake TLS (**`nineseconds/mtg:2`**, **`mtproxy-faketls`**) переведён на внешний порт **8444**; удалён старый контейнер **`mtproto-proxy`**.
 
-Принцип: **не трогать** работающий основной стек (**Xray на 443/4443**, **AmneziaWG**). MTProxy Fake TLS (**`nineseconds/mtg:2`**, контейнер **`mtproxy-faketls`**) вынесен на **внешний порт хоста 8444** (порт **8443** был занят старым контейнером **`mtproto-proxy`**; **8444** был свободен по `ss`).
+Далее: перенос **веб-панели** (`/` мониторинг и **`/recovery`**) с **Timeweb** на **Fornex** (тот же `/opt/vpnservice`, что и бот), SSH **Fornex → main** для трафика WireGuard **rus1/rus2**, **`VPN_RECOVERY_URL`**, отключение **`vpn-web.service`** на Timeweb.
 
-## Выполненные задачи в этой сессии
+## Выполненные задачи
 
-### Код репозитория `nikkronos/vpnservice` (коммит на `main`)
+### Код `nikkronos/vpnservice` (ветка `main`)
 
-1. **`bot/main.py`**
-   - Сообщение об ошибке ротации: если в выводе скрипта признаки конфликта порта **443**, бот явно пишет, что это **занятость порта**, а не сбой парсинга ссылки, и подсказывает команды диагностики (`docker ps`, `ss`).
-2. **`bot/config.py`**
-   - Функция **`environment_for_mtproxy_rotate()`**: при запуске скрипта ротации в **`subprocess`** передаётся окружение **`os.environ` + все переменные `MTPROXY_*` из `env_vars.txt`**. Раньше переменные вроде **`MTPROXY_PORT`** в файле **не попадали** в bash-скрипт.
-3. **`env_vars.example.txt`**
-   - Закомментированные примеры **`MTPROXY_PORT`**, **`MTPROXY_PUBLIC_IP`** для случая «Xray уже на 443».
+1. **`bot/main.py`** — диагностика конфликта порта 443 при ротации; `env=environment_for_mtproxy_rotate(...)` для скрипта ротации.
+2. **`bot/config.py`** — `environment_for_mtproxy_rotate()` (проброс **`MTPROXY_*`** из `env_vars.txt` в subprocess).
+3. **`env_vars.example.txt`** — примеры **`MTPROXY_PORT`**, **`MTPROXY_PUBLIC_IP`**, **`WG_SSH_*`** (панель/бот не на main).
+4. **`web/app.py`** — трафик **main**: при **`WG_SSH_HOST`** в `env_vars.txt` — `wg show … dump` по SSH; блок сервисов EU1: проверка **MTProxy** по порту из **`get_effective_mtproto_proxy_link`**.
+5. **`docs/vpn-web-migration-fornex-plan.md`**, **`web/README.md`**, **`README_FOR_NEXT_AGENT.md`**, **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`bot/config.py`** (дефолт **`vpn_recovery_url`**) — актуальные URL и прод Fornex (по мере коммитов).
 
-### Прод на Fornex (оператор, не в Git)
+### Прод Fornex (`185.21.8.91`, VPS `284854`)
 
-- В **`/opt/vpnservice/env_vars.txt`**: **`MTPROXY_PORT=8444`**, **`MTPROXY_PUBLIC_IP=185.21.8.91`** (убран дублирующий старый **`MTPROXY_PUBLIC_IP=81.200.146.32`**); обновлён **`MTPROTO_PROXY_LINK`** на актуальную ссылку после успешной ротации (**`port=8444`**, новый секрет).
-- **`git pull origin main`** в `/opt/vpnservice`, **`systemctl restart vpn-bot.service`**.
-- Успешная проверка в Telegram: **`/proxy_rotate`** → вторая строка с **`tg://proxy?server=185.21.8.91&port=8444&secret=...`**.
-- **`docker ps`**: **`mtproxy-faketls`** — **`0.0.0.0:8444->443/tcp`**.
-- Удалён неиспользуемый контейнер **`mtproto-proxy`** (освобождён хост-порт **8443**).
+- **`env_vars.txt`:** `MTPROXY_PORT=8444`, `MTPROXY_PUBLIC_IP=185.21.8.91`, актуальный **`MTPROTO_PROXY_LINK`**; **`WG_SSH_*`** к **main** (Timeweb) для панели; **`VPN_RECOVERY_URL=http://185.21.8.91:5001/recovery`**.
+- Ключ **`/root/.ssh/id_ed25519_main`**, публичная часть в **`authorized_keys`** на Timeweb **root** (лишняя строка-плейсхолдер из `authorized_keys` удалена вручную).
+- **`vpn-web.service`**: unit создан в `/etc/systemd/system/`, `enable --now`, порт **5001**, проверка `curl` → **200** на `/` и `/recovery`.
+- **`vpn-bot.service`**: рестарты после правок `env_vars.txt`.
 
-## Важные изменения в коде (файлы)
+### Прод Timeweb (`81.200.146.32`)
 
-- `bot/main.py` — диагностика порта + `env=` для ротации.
-- `bot/config.py` — `environment_for_mtproxy_rotate`.
-- `env_vars.example.txt` — пример переменных Fornex+Xray.
+- **`sudo systemctl disable --now vpn-web.service`** — панель на Timeweb **выключена**; порт **5001** не слушается.
+- **main (WireGuard)** и каталог **`/opt/vpnservice`** на Timeweb по-прежнему используются как **нода RU** и для SSH с Fornex; бот на Timeweb для VPN **не** запускается (см. миграцию Telegram).
 
 ## Критические правила для следующего агента
 
-1. На **одном хосте** нельзя одновременно слушать **TCP 443** и **`docker -p 443:443`** для MTProxy, если **443** уже занят (**Xray**, **nginx** и т.д.). Либо другой **внешний** порт (**`MTPROXY_PORT`**), либо MTProxy на другом сервере.
-2. Переменные **`MTPROXY_*`** для скрипта ротации должны быть в **`env_vars.txt`** на машине бота (после обновления кода они **пробрасываются** в subprocess); только **`systemd` Environment=** не обязателен.
-3. **`MTPROTO_PROXY_LINK`** в `env_vars.txt` нужно периодически **синхронизировать** с фактической ссылкой (или полагаться на **`data/mtproto_proxy_link.txt`** после `/proxy_rotate`), иначе расходится fallback с панелью/recovery на **другом** хосте.
-4. **Веб-панель и `/recovery`** по-прежнему на **Timeweb** (`http://81.200.146.32:5001/recovery`). Перенос на Fornex — отдельный план: **`docs/vpn-web-migration-fornex-plan.md`**.
+1. **Панель и recovery:** прод — **`http://185.21.8.91:5001/`** и **`http://185.21.8.91:5001/recovery`** на Fornex; **`VPN_RECOVERY_URL`** в `env_vars.txt` должен совпадать. Старый **`http://81.200.146.32:5001/...`** не использовать (сервис на Timeweb отключён).
+2. **Трафик rus1/rus2 на панели:** без **`WG_SSH_HOST` / `WG_SSH_USER` / `WG_SSH_KEY_PATH`** к main блок трафика на Fornex будет пустым (локального `wg0` нет).
+3. **MTProxy:** внешний порт **8444**; **443** на eu1 занят Xray — не ставить `MTPROXY_PORT=443` без освобождения порта.
+4. **`MTPROXY_*`** в `env_vars.txt` обязательны для скрипта ротации (после фикса в коде передаются в subprocess).
+5. **Опционально доработать код:** `POST /api/recovery/telegram-proxy` перебирает **main/eu1** — при MTProxy только на Fornex кнопка «Восстановить Telegram» может сначала дёрнуть не тот хост; см. `docs/vpn-web-migration-fornex-plan.md` фаза 3.
 
-## Не сделано в этой сессии (следующие шаги)
+## Ссылки
 
-- Перенос **`vpn-web.service`** и URL **`VPN_RECOVERY_URL`** на Fornex — см. чеклист в **`docs/vpn-web-migration-fornex-plan.md`**.
-
-## Дополнение (та же сессия) — подготовка переноса панели `/` + `/recovery`
-
-- **`web/app.py`:** трафик WireGuard для **main (rus1/rus2)** — если в `env_vars.txt` задан **`WG_SSH_HOST`**, панель читает `wg show … dump` **по SSH на main** (иначе на Fornex локального `wg0` нет). Блок сервисов EU1: проверка **MTProxy** по **TCP-порту из актуальной ссылки** (`get_effective_mtproto_proxy_link`), а не жёстко 443.
-- **`env_vars.example.txt`:** пример **`WG_SSH_*`** для панели/бота не на Timeweb.
-- **`docs/vpn-web-migration-fornex-plan.md`**, **`web/README.md`**, **`README_FOR_NEXT_AGENT.md`:** явно главная **`http://…:5001/`** и **`/recovery`**, шаги SSH для трафика main.
+- План переноса (чеклист, история): **`docs/vpn-web-migration-fornex-plan.md`**
+- Миграция Telegram: **`Main_docs/TELEGRAM_MIGRATION_TIMWEB_FORNEX_2026-04-10.md`**

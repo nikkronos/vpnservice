@@ -8,11 +8,11 @@
 
 | Компонент | Где | Документ |
 |-----------|-----|----------|
-| MTProxy Fake TLS (`nineseconds/mtg:2`, контейнер `mtproxy-faketls`) | main, Timeweb, обычно порт **443** | [mtproxy-faketls-deploy.md](mtproxy-faketls-deploy.md) |
-| Telegram-бот | `/opt/vpnservice`, `vpn-bot.service` | [deployment.md](deployment.md) |
-| Веб-панель + recovery | порт **5001**, `vpn-web.service` | [deployment.md](deployment.md) |
+| MTProxy Fake TLS (`nineseconds/mtg:2`, контейнер `mtproxy-faketls`) | **Fornex eu1**, внешний порт **8444** (443 занят Xray) | [mtproxy-proxy-rotation.md](mtproxy-proxy-rotation.md), [SESSION_SUMMARY_2026-04-10.md](../SESSION_SUMMARY_2026-04-10.md) |
+| Telegram-бот | Fornex: `/opt/vpnservice`, `vpn-bot.service` | [deployment.md](deployment.md) |
+| Веб-панель + recovery | Fornex: порт **5001**, `vpn-web.service` | [deployment.md](deployment.md), [vpn-web-migration-fornex-plan.md](vpn-web-migration-fornex-plan.md) |
 
-**Не путать:** «голый» MTProto на eu1 и MTProxy Fake TLS на main — разные вещи; статусы см. [README_FOR_NEXT_AGENT.md](../README_FOR_NEXT_AGENT.md) и [telegram-unblock-algorithm.md](telegram-unblock-algorithm.md).
+**Не путать:** «голый» MTProto на eu1 и **MTProxy Fake TLS** — разные вещи; статусы см. [README_FOR_NEXT_AGENT.md](../README_FOR_NEXT_AGENT.md) и [telegram-unblock-algorithm.md](telegram-unblock-algorithm.md).
 
 ---
 
@@ -42,7 +42,7 @@
 
 ## 4. Страница восстановления (без работающего Telegram)
 
-- **URL:** `http://81.200.146.32:5001/recovery` (или значение `VPN_RECOVERY_URL` в `env_vars.txt`).
+- **URL:** `http://185.21.8.91:5001/recovery` (или значение `VPN_RECOVERY_URL` в `env_vars.txt` на сервере бота/панели).
 - **Только ссылка, без рестарта Docker:** пользователь вводит **Telegram ID**, нажимает **«Показать актуальную ссылку»** (или при сохранённом ID в браузере ссылка подгрузится при открытии страницы). API **`GET /api/recovery/proxy-link?telegram_id=...`** — та же проверка пользователя в `users.json`, что и у POST; ответ: **`mtproto_proxy_link`** + **`hint`** (источник ссылки — как у `/proxy`: override-файл или env).
 - **Рестарт контейнера + ссылка (как раньше):** кнопка «Восстановить Telegram» → **`POST /api/recovery/telegram-proxy`**: перезапуск Docker-контейнера прокси на подходящей ноде (main/eu1); в ответе **`mtproto_proxy_link`** и **`hint`** (в т.ч. при ошибке рестарта, HTTP 502).
 - Отдельно на той же странице: восстановление VPN AmneziaWG для слотов **EU1** и **EU2** (`POST /api/recovery/vpn` с `server_id`).
@@ -63,9 +63,9 @@
 
 ---
 
-## 6. Деплой кода и зависимостей (Timeweb)
+## 6. Деплой кода и зависимостей (Fornex, прод)
 
-- Репозиторий: **`nikkronos/vpnservice`**, каталог на сервере: **`/opt/vpnservice`**.
+- Репозиторий: **`nikkronos/vpnservice`**, каталог на сервере: **`/opt/vpnservice`** (бот и панель на одном хосте).
 - После `git pull` зависимости Python ставить **только из venv** (Ubuntu 24+, PEP 668):
 
 ```bash
@@ -79,9 +79,9 @@
 
 ---
 
-## 7. Веб-панель на другом хосте, чем бот
+## 7. Веб-панель на другом хосте, чем бот (редкий случай)
 
-Если `data/mtproto_proxy_link.txt` есть только на машине бота, на отдельном сервере панели override не виден — нужно либо обновлять **`MTPROTO_PROXY_LINK`** в `env_vars.txt` панели, либо синхронизировать файл `data/mtproto_proxy_link.txt`. См. [mtproxy-proxy-rotation.md](mtproxy-proxy-rotation.md).
+**Прод (2026-04-11):** бот и панель на **одном** Fornex — общий `env_vars.txt` и `data/`. Если когда-нибудь снова вынесешь панель на отдельный VPS: на машине панели не будет `data/mtproto_proxy_link.txt` — обновляй **`MTPROTO_PROXY_LINK`** в её `env_vars.txt` или синхронизируй override-файл с сервера бота. См. [mtproxy-proxy-rotation.md](mtproxy-proxy-rotation.md).
 
 ---
 

@@ -1,5 +1,12 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-04-11 — `vpn-web` и `/recovery` на Fornex; отключение панели на Timeweb
+
+- **Цель:** одна площадка с ботом — мониторинг **`http://185.21.8.91:5001/`** и **`/recovery`** на Fornex; **`VPN_RECOVERY_URL`** в `env_vars.txt`; трафик **main** на панели через **`WG_SSH_*`** (ключ `id_ed25519_main`, `authorized_keys` на Timeweb).
+- **Systemd Fornex:** создан и включён **`vpn-web.service`** (`PORT=5001`), проверка `curl` → 200.
+- **Timeweb:** **`systemctl disable --now vpn-web.service`**, порт 5001 не слушается.
+- **Код/доки (репозиторий):** дефолт **`vpn_recovery_url`** и fallback в **`bot/main.py`**, **`bot/config.py`**; **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`docs/vpn-web-migration-fornex-plan.md`** (статус «выполнено»), **`SESSION_SUMMARY_2026-04-10.md`**, **`README_FOR_NEXT_AGENT.md`**.
+
 ## 2026-04-10 — MTProxy Fake TLS на Fornex (порт 8444), починка `/proxy_rotate`, проброс `MTPROXY_*` в subprocess
 
 - **Контекст:** после переноса бота на Fornex ротация MTProxy падала: Docker не мог занять **хост 443** — порт занят **`xray.service`** (REALITY). Принцип: не менять Xray/AmneziaWG; внешний порт MTProxy — **8444** (свободен; **8443** был у старого `mtproto-proxy`).

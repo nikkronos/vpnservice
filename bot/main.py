@@ -150,7 +150,7 @@ def main() -> None:
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
         text_lines = [
             "Привет! Это VPN бот. 🔐",
             "",
@@ -882,7 +882,7 @@ def main() -> None:
     @bot.message_handler(commands=["help"])
     def cmd_help(message: types.Message) -> None:  # type: ignore[override]
         """Отправляет справку: два сервера, один конфиг на сервер."""
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
         help_text = (
             "📖 <b>Справка по VPN боту</b>\n\n"
             "🇷🇺 <b>Россия</b> — низкий пинг.\n"
@@ -1109,7 +1109,7 @@ def main() -> None:
             safe_reply(message, "Нет зарегистрированных пользователей для рассылки.")
             return
 
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://81.200.146.32:5001/recovery"
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
         broadcast_text = (
             BROADCAST_VPN_ISSUE_TEXT
             + "\n\n"

@@ -52,7 +52,7 @@
   - [x] **Интервал обновления и диагностика** — 2026-02-22: автообновление с 30 сек изменено на 5 мин (снижение нагрузки); в блоке «Трафик» выводится время последнего обновления данных с бэкенда. В web/README.md добавлена диагностика «если трафик не меняется».
   - [x] **Трафик на панели (eu1):** для eu1 с AmneziaWG используется `awg show <interface> dump` (интерфейс из AMNEZIAWG_EU1_INTERFACE, по умолчанию awg0); нормализация public_key при сопоставлении с peers.json. Если трафик не менялся — проверить на сервере панели переменную AMNEZIAWG_EU1_INTERFACE и доступ по SSH к eu1.
   - [x] **Очистка панели от Shadowsocks/MTProto** — 2026-02-26: удалены из API и фронтенда блоки проверки Shadowsocks и MTProto (нерабочие сервисы).
-  - [ ] **Перенос `vpn-web` и `/recovery` на Fornex** — 2026-04-10: чеклист `docs/vpn-web-migration-fornex-plan.md` (бот уже на Fornex; панель пока Timeweb `81.200.146.32:5001`).
+  - [x] **Перенос `vpn-web` и `/recovery` на Fornex** — 2026-04-11: панель и recovery на `http://185.21.8.91:5001/`; Timeweb `vpn-web` отключён; `VPN_RECOVERY_URL`, `WG_SSH_*`; чеклист `docs/vpn-web-migration-fornex-plan.md`.
 
 - [x] **Поддержка Android** — 2026-02-22
   - [x] Инструкция для пользователей: docs/client-instructions-android.md (WireGuard для России, AmneziaVPN/AmneziaWG для Европы).

@@ -1,91 +1,79 @@
 # План: перенос веб-панели и `/recovery` с Timeweb на Fornex
 
-**Текущее состояние (2026-04-10):**
+## Статус после миграции (2026-04-11) — выполнено
 
-- **Бот** `vpn-bot.service`: прод на **Fornex** (`/opt/vpnservice`).
-- **MTProxy Fake TLS** (`mtproxy-faketls`): на **Fornex**, внешний порт **8444** (внутри контейнера 443).
-- **Веб-панель** `vpn-web.service` и страница **[recovery](http://81.200.146.32:5001/recovery)**: по документации и URL — **Timeweb** (`81.200.146.32:5001`).
+**Прод сейчас:**
 
-Цель переноса: чтобы пользователи при недоступности Telegram открывали recovery на том же регионе/хосте, что и бот (Fornex), и чтобы панель видела те же `env_vars.txt` / `data/`, что и бот (упрощается синхронизация **`MTPROTO_PROXY_LINK`** и **`data/mtproto_proxy_link.txt`**).
+| Компонент | Хост | Примечание |
+|-----------|------|------------|
+| **`vpn-bot.service`** | Fornex (`185.21.8.91`), `/opt/vpnservice` | С 2026-04-10 |
+| **`vpn-web.service`** | Fornex, порт **5001** | Главная **`/`** и **`/recovery`** |
+| **URL панели** | `http://185.21.8.91:5001/` | Мониторинг |
+| **URL recovery** | `http://185.21.8.91:5001/recovery` | В `env_vars.txt`: **`VPN_RECOVERY_URL`** |
+| **Трафик rus1/rus2 на панели** | SSH Fornex → main | **`WG_SSH_HOST`**, **`WG_SSH_USER`**, **`WG_SSH_KEY_PATH`** в `env_vars.txt` |
+| **`vpn-web` на Timeweb** | — | **`systemctl disable --now`**, порт 5001 не слушается |
+
+Детали сессии: **`SESSION_SUMMARY_2026-04-10.md`** (объединённое резюме 10–11.04), **`DONE_LIST_VPN.md`**.
 
 ---
 
 ## Фаза 0 — Решения до работ
 
-- [ ] Подтвердить **целевой URL**: только IP+порт (`http://185.21.8.91:5001/recovery`) или позже домен + HTTPS (отдельная задача).
-- [ ] Решить судьбу панели на **Timeweb**: оставить редирект/заглушку, выключить сервис, или удалить после переноса.
-- [ ] Убедиться, что на **Fornex** есть **тот же код** `vpnservice`, venv и зависимости панели (`web/requirements.txt`), что и для бота.
+- [x] Целевой URL: **`http://185.21.8.91:5001/`** и **`/recovery`** (IP eu1 Fornex).
+- [x] Панель на Timeweb: **отключена** после стабилизации на Fornex.
+- [x] Код и venv на Fornex: `git pull`, `venv/bin/pip install -r web/requirements.txt`.
 
 ---
 
 ## Фаза 1 — Развёртывание `vpn-web` на Fornex
 
-- [ ] Скопировать/синхронизировать каталог проекта (или `git clone` / `git pull`) в `/opt/vpnservice` — уже есть для бота; панель запускается из того же дерева.
-- [ ] Установить зависимости панели в **тот же venv**, что у бота (PEP 668):
-  ```bash
-  /opt/vpnservice/venv/bin/pip install -r /opt/vpnservice/web/requirements.txt
-  ```
-- [ ] Создать или скопировать **unit** `vpn-web.service` на Fornex. В репозитории: **`web/vpn-web.service.example`** (`WorkingDirectory=/opt/vpnservice`, `PORT=5001`, `ExecStart=.../venv/bin/python web/app.py`). Сверить с Timeweb:
-  ```bash
-  # на Timeweb
-  systemctl cat vpn-web.service
-  ```
-- [ ] **SSH с Fornex на main (Timeweb)** для блока «трафик» по **rus1/rus2**: в `env_vars.txt` на Fornex задать **`WG_SSH_HOST`**, **`WG_SSH_USER`**, **`WG_SSH_KEY_PATH`** (приватный ключ только на Fornex; в `authorized_keys` на main — публичная часть). Без этого панель на Fornex не сможет выполнить `wg show wg0 dump` на Timeweb — см. `web/app.py` (`_get_wg_transfer_for_server`).
-- [ ] Открыть порт **5001/tcp** в firewall Fornex (ufw/панель провайдера), если доступ нужен с интернета (**и главная** `http://…:5001/`, и `/recovery`).
-- [ ] Запуск: `systemctl enable --now vpn-web.service`, проверка `curl -sS http://127.0.0.1:5001/recovery | head` и `curl -sS http://127.0.0.1:5001/ | head`.
-- [ ] Проверка с внешнего IP: `http://185.21.8.91:5001/` и `http://185.21.8.91:5001/recovery` (замени IP, если изменится).
+- [x] Проект в `/opt/vpnservice` (общий с ботом).
+- [x] Зависимости панели в venv.
+- [x] Unit **`/etc/systemd/system/vpn-web.service`** (по образцу **`web/vpn-web.service.example`**): `PORT=5001`, `ExecStart=.../venv/bin/python web/app.py`.
+- [x] SSH **Fornex → main** для `wg show` (переменные **`WG_SSH_*`**).
+- [x] Firewall **5001/tcp** (по необходимости у провайдера/ufw).
+- [x] `systemctl enable --now vpn-web.service`, проверка `curl` localhost **200** на `/` и `/recovery`.
 
 ---
 
 ## Фаза 2 — Конфигурация и согласованность с ботом
 
-- [ ] На Fornex в **`/opt/vpnservice/env_vars.txt`** выставить **`VPN_RECOVERY_URL`** на новый адрес, например:
-  ```bash
-  VPN_RECOVERY_URL=http://185.21.8.91:5001/recovery
-  ```
-- [ ] Убедиться, что **`MTPROTO_PROXY_LINK`** и при необходимости файл **`data/mtproto_proxy_link.txt`** на Fornex актуальны (после `/proxy_rotate` бот уже пишет override локально).
-- [ ] Перезапуск после правок: `systemctl restart vpn-bot.service` и `systemctl restart vpn-web.service` (если панель кэширует пути — по факту код читает env с диска; перезапуск безопасен).
-- [ ] Обновить **тексты бота** (`/start`, `/help`), если там захардкожен старый URL — сейчас часто используется `VPN_RECOVERY_URL` из конфига; проверить в `bot/main.py`.
+- [x] **`VPN_RECOVERY_URL=http://185.21.8.91:5001/recovery`** в `env_vars.txt`.
+- [x] **`MTPROTO_PROXY_LINK`** / override синхронизированы с `/proxy`.
+- [x] Рестарт **`vpn-bot`** и **`vpn-web`** после правок env.
+- [x] Fallback URL в коде обновлён: **`bot/config.py`**, **`bot/main.py`** (дефолт recovery).
 
 ---
 
 ## Фаза 3 — SSH, recovery API и ноды
 
-Панель для мониторинга и recovery может ходить по **SSH** на **main** и **eu1** (ключи, `WG_EU1_SSH_*` и т.д. в `env_vars.txt`).
-
-- [ ] На **Fornex** разместить **те же SSH-ключи** и пути, что ожидает `web/app.py` (например ключ к eu1 — локальный на Fornex уже используется ботом; ключ к **main** Timeweb — если панель рестартует прокси на `main`, ключ должен быть на машине панели).
-- [ ] Прогнать сценарии:
-  - [ ] `GET /api/recovery/proxy-link?telegram_id=...` — ссылка совпадает с `/proxy` в боте.
-  - [ ] `POST /api/recovery/telegram-proxy` — осознанно: сейчас MTProxy на **Fornex**, не на main; если код всё ещё таргетит `main` для рестарта контейнера — **обновить логику** или отключить кнопку «Восстановить Telegram» на рестарт, оставив только «показать ссылку» (иначе рестарт на Timeweb не тронет Fornex-контейнер).
-- [ ] `POST /api/recovery/vpn` для EU1/EU2 — проверить выдачу конфига с Fornex-панели.
-
-**Важно:** после переноса MTProxy на **eu1** кнопка recovery «перезапустить контейнер прокси», если она жёстко привязана к **server_id=main**, станет вводящей в заблуждение. Имеет смысл в отдельной задаче привести `web/app.py` в соответствие с фактическим хостом **`mtproxy-faketls`** (Fornex).
+- [x] Ключи на Fornex: **`WG_EU1_SSH_*`**, **`WG_SSH_*`** к main; recovery **VPN** (EU1/EU2) с Fornex-панели работает.
+- [x] **`GET /api/recovery/proxy-link`** — та же ссылка, что `/proxy`.
+- [ ] **Улучшение (отложено):** `POST /api/recovery/telegram-proxy` перебирает **main/eu1**; при MTProxy только на Fornex порядок попыток может быть запутанным — при необходимости сузить до **eu1** или определять из IP в ссылке (см. `_determine_target_server_id_from_env` в `web/app.py`).
 
 ---
 
 ## Фаза 4 — DNS, HTTPS (опционально)
 
-- [ ] При желании: домен на IP Fornex, reverse-proxy (caddy/nginx) и TLS для `https://vpn.example/recovery`.
-- [ ] Обновить **`VPN_RECOVERY_URL`** и ссылки в документации.
+- [ ] Домен, reverse-proxy, TLS для панели на Fornex.
 
 ---
 
 ## Фаза 5 — Отключение старого инстанса на Timeweb
 
-- [ ] После стабильной работы на Fornex: на Timeweb `systemctl disable --now vpn-web.service`.
-- [ ] Опционально: редирект с `http://81.200.146.32:5001/recovery` на новый URL (если оставляешь лёгкий nginx/curl на старом IP).
+- [x] **`sudo systemctl disable --now vpn-web.service`** на Timeweb (`81.200.146.32`).
+- [ ] Опционально: редирект со старого URL (если когда-нибудь поднимут лёгкий nginx на Timeweb).
 
 ---
 
 ## Фаза 6 — Документация в репозитории
 
-- [ ] Обновить `README_FOR_NEXT_AGENT.md`, `docs/deployment.md`, `docs/telegram-mtproxy-operators-guide.md` — новый URL recovery и расположение `vpn-web`.
-- [ ] При необходимости — строка в `Main_docs/TELEGRAM_MIGRATION_TIMWEB_FORNEX_2026-04-10.md` или `Main_docs/PROJECTS.md`.
+- [x] Обновлены **`README_FOR_NEXT_AGENT.md`**, **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`SESSION_SUMMARY`**, **`DONE_LIST`**, **`ROADMAP`**, **`Main_docs`**, **`docs/server-timeweb.md`** (по мере коммита в `Cursor_Projects` / `vpnservice`).
 
 ---
 
-## Критерий готовности
+## Критерий готовности — достигнут
 
-- Пользователь с рабочим Telegram ID открывает **`http://<Fornex>:5001/recovery`**, получает ту же **`tg://proxy`**, что и **`/proxy`** в боте.
-- Выдача VPN recovery (EU1/EU2) работает с панели на Fornex.
-- Старый URL на Timeweb либо отключён, либо ведёт на новый адрес.
+- Пользователь открывает **`http://185.21.8.91:5001/recovery`**, получает актуальную **`tg://proxy`** (как **`/proxy`** в боте).
+- Панель **`/`** на Fornex отвечает **200**.
+- Старый инстанс **`vpn-web`** на Timeweb отключён.
