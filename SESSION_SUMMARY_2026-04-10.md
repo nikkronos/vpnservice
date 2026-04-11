@@ -41,3 +41,9 @@
 ## Не сделано в этой сессии (следующие шаги)
 
 - Перенос **`vpn-web.service`** и URL **`VPN_RECOVERY_URL`** на Fornex — см. чеклист в **`docs/vpn-web-migration-fornex-plan.md`**.
+
+## Дополнение (та же сессия) — подготовка переноса панели `/` + `/recovery`
+
+- **`web/app.py`:** трафик WireGuard для **main (rus1/rus2)** — если в `env_vars.txt` задан **`WG_SSH_HOST`**, панель читает `wg show … dump` **по SSH на main** (иначе на Fornex локального `wg0` нет). Блок сервисов EU1: проверка **MTProxy** по **TCP-порту из актуальной ссылки** (`get_effective_mtproto_proxy_link`), а не жёстко 443.
+- **`env_vars.example.txt`:** пример **`WG_SSH_*`** для панели/бота не на Timeweb.
+- **`docs/vpn-web-migration-fornex-plan.md`**, **`web/README.md`**, **`README_FOR_NEXT_AGENT.md`:** явно главная **`http://…:5001/`** и **`/recovery`**, шаги SSH для трафика main.

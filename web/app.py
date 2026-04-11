@@ -11,6 +11,7 @@
 import json
 import logging
 import pathlib
+import shlex
 import socket
 import subprocess
 import threading
@@ -229,6 +230,22 @@ def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
     env = _parse_env_file(base / "env_vars.txt")
     if physical == "main":
         interface = env.get("WG_INTERFACE", "wg0")
+        ssh_host = (env.get("WG_SSH_HOST") or "").strip()
+        # Панель на Fornex: локального wg0 нет — читаем dump с main по SSH (см. env_vars WG_SSH_*).
+        if ssh_host:
+            try:
+                from bot.wireguard_peers import execute_server_command
+
+                iface_q = shlex.quote(interface)
+                stdout, _stderr = execute_server_command(
+                    "main",
+                    f"wg show {iface_q} dump 2>/dev/null || true",
+                    timeout=15,
+                )
+                return _parse_wg_dump_transfer(stdout or "")
+            except Exception as e:
+                logger.warning("SSH wg show для main (%s): %s", ssh_host, e)
+                return {}
         try:
             out = subprocess.run(
                 ["wg", "show", interface, "dump"],
@@ -407,14 +424,21 @@ def api_services():
                     "status": "online" if ss_ok else "offline",
                     "note": "Порт 8388",
                 })
-                # MTProto — проверка порта 443
-                mt_ok = check_port(host, 443)
+                # MTProxy / MTProto: порт из актуальной ссылки (как /proxy), иначе 443
+                try:
+                    fresh_cfg = load_config()
+                    mlink = get_effective_mtproto_proxy_link(fresh_cfg) or ""
+                    pq = _parse_tg_proxy_link(mlink)
+                    proxy_check_port = int(pq.get("port") or "443")
+                except (TypeError, ValueError):
+                    proxy_check_port = 443
+                mt_ok = check_port(host, proxy_check_port)
                 services_list.append({
                     "server_id": server_id,
                     "server_name": server_name,
-                    "service": "MTProto (Telegram)",
+                    "service": "MTProxy (Telegram)",
                     "status": "online" if mt_ok else "offline",
-                    "note": "Порт 443",
+                    "note": f"TCP порт {proxy_check_port} (из ссылки /proxy)",
                 })
         
         return jsonify({"services": services_list})

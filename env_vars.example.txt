@@ -38,6 +38,12 @@ WG_ENDPOINT_HOST=81.200.146.32
 WG_ENDPOINT_PORT=51820
 WG_DNS=1.1.1.1
 
+# Опционально: SSH к ноде main (Timeweb), если бот или веб-панель работают на другом хосте (например Fornex).
+# Нужно для /api/traffic по rus1/rus2: панель вызывает `wg show` на main через SSH (см. web/app.py и docs/vpn-web-migration-fornex-plan.md).
+# WG_SSH_HOST=81.200.146.32
+# WG_SSH_USER=root
+# WG_SSH_KEY_PATH=/root/.ssh/id_ed25519_main
+
 # WireGuard settings для второй ноды "eu1" (Европа)
 # Раскомментируй и заполни, когда вторая нода будет готова:
 # WG_EU1_SERVER_PUBLIC_KEY=your_eu_server_public_key_here

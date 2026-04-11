@@ -54,7 +54,7 @@ python app.py
 
 **Автоматического деплоя нет.** Обновления на сервере: `git pull` в `/opt/vpnservice`, затем `/opt/vpnservice/venv/bin/pip install -r web/requirements.txt` (зависимости только из venv — см. `../docs/deployment.md`), `sudo systemctl restart vpn-web.service`.
 
-Веб-панель разворачивается на том же сервере Timeweb, где работает бот (`/opt/vpnservice`). Пошаговая инструкция: **`../docs/deployment.md`** — раздел «Веб-панель мониторинга (Timeweb)».
+Исторически панель стояла на **Timeweb** вместе с ботом (`/opt/vpnservice`). **Прод-бот** может быть на **Fornex** — тогда `vpn-web` тоже переносят на Fornex (главная **`/`** и **`/recovery`**), см. **`../docs/vpn-web-migration-fornex-plan.md`**. Для трафика **main (rus1/rus2)** с панели на Fornex в `env_vars.txt` нужны **`WG_SSH_*`** к Timeweb. Пошаговая инструкция: **`../docs/deployment.md`**.
 
 Пример systemd unit: `vpn-web.service.example` в этой папке.
 

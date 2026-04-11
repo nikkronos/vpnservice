@@ -6,6 +6,7 @@
 - **Код (репозиторий, `main`):** `bot/main.py` — понятное сообщение при конфликте порта 443; `subprocess.run(..., env=environment_for_mtproxy_rotate(...))`. `bot/config.py` — `environment_for_mtproxy_rotate()`: `os.environ` + все **`MTPROXY_*`** из `env_vars.txt`. `env_vars.example.txt` — пример `MTPROXY_PORT` / `MTPROXY_PUBLIC_IP`.
 - **Прод Fornex:** `env_vars.txt` — `MTPROXY_PORT=8444`, `MTPROXY_PUBLIC_IP=185.21.8.91`, обновлён `MTPROTO_PROXY_LINK` после ротации; `git pull`, `systemctl restart vpn-bot`; контейнер **`mtproxy-faketls`** — `8444->443`; удалён **`mtproto-proxy`**.
 - **Документы:** `SESSION_SUMMARY_2026-04-10.md`; план переноса панели/recovery на Fornex — `docs/vpn-web-migration-fornex-plan.md`.
+- **Код (перенос панели):** `web/app.py` — трафик **main** через SSH при наличии `WG_SSH_HOST`; проверка MTProxy по порту из ссылки `/proxy`. `env_vars.example.txt` — `WG_SSH_*`; обновлены `docs/vpn-web-migration-fornex-plan.md`, `web/README.md`, `README_FOR_NEXT_AGENT.md` (главная `/` и `/recovery`).
 
 ## 2026-04-02 — Логические слоты rus1 / rus2 / eu1 / eu2 + recovery EU1+EU2 + ссылка прокси без рестарта
 

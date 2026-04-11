@@ -25,14 +25,15 @@
   ```bash
   /opt/vpnservice/venv/bin/pip install -r /opt/vpnservice/web/requirements.txt
   ```
-- [ ] Создать или скопировать **unit** `vpn-web.service` на Fornex (по аналогии с Timeweb): `WorkingDirectory=/opt/vpnservice`, `ExecStart=/opt/vpnservice/venv/bin/python -m web.app` или как в текущем unit на Timeweb — **сверить** с файлом на старом сервере:
+- [ ] Создать или скопировать **unit** `vpn-web.service` на Fornex. В репозитории: **`web/vpn-web.service.example`** (`WorkingDirectory=/opt/vpnservice`, `PORT=5001`, `ExecStart=.../venv/bin/python web/app.py`). Сверить с Timeweb:
   ```bash
   # на Timeweb
   systemctl cat vpn-web.service
   ```
-- [ ] Открыть порт **5001/tcp** в firewall Fornex (ufw/панель провайдера), если доступ нужен с интернета.
-- [ ] Запуск: `systemctl enable --now vpn-web.service`, проверка `curl -sS http://127.0.0.1:5001/recovery | head`.
-- [ ] Проверка с внешнего IP: `http://185.21.8.91:5001/recovery` (замени IP, если изменится).
+- [ ] **SSH с Fornex на main (Timeweb)** для блока «трафик» по **rus1/rus2**: в `env_vars.txt` на Fornex задать **`WG_SSH_HOST`**, **`WG_SSH_USER`**, **`WG_SSH_KEY_PATH`** (приватный ключ только на Fornex; в `authorized_keys` на main — публичная часть). Без этого панель на Fornex не сможет выполнить `wg show wg0 dump` на Timeweb — см. `web/app.py` (`_get_wg_transfer_for_server`).
+- [ ] Открыть порт **5001/tcp** в firewall Fornex (ufw/панель провайдера), если доступ нужен с интернета (**и главная** `http://…:5001/`, и `/recovery`).
+- [ ] Запуск: `systemctl enable --now vpn-web.service`, проверка `curl -sS http://127.0.0.1:5001/recovery | head` и `curl -sS http://127.0.0.1:5001/ | head`.
+- [ ] Проверка с внешнего IP: `http://185.21.8.91:5001/` и `http://185.21.8.91:5001/recovery` (замени IP, если изменится).
 
 ---
 
