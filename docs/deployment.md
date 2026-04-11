@@ -1,4 +1,4 @@
-# Инструкция по развёртыванию VPN Service
+﻿# Инструкция по развёртыванию VPN Service
 
 ## Обзор
 
@@ -344,7 +344,7 @@ cd /opt/vpnservice
 FLASK_ENV=production PORT=5001 /opt/vpnservice/venv/bin/python web/app.py
 ```
 
-Панель слушает порт **5001** (чтобы не конфликтовать с другими сервисами на 5000). Открыть в браузере: **`http://185.21.8.91:5001/`** (IP eu1 Fornex; при необходимости: `ufw allow 5001/tcp` и `ufw reload`).
+Панель слушает порт **5001** (чтобы не конфликтовать с другими сервисами на 5000). Открыть в браузере: **`http://185.21.8.91:5001/`** (IP eu1 Fornex).
 
 ### Systemd (постоянный запуск)
 
@@ -354,7 +354,13 @@ FLASK_ENV=production PORT=5001 /opt/vpnservice/venv/bin/python web/app.py
    ```
    Если путь к проекту не `/opt/vpnservice`, отредактировать `WorkingDirectory` и пути в `ExecStart` и `Environment`.
 
-2. Включить и запустить:
+2. Открыть порт 5001 в UFW (обязательно, иначе панель недоступна снаружи):
+   ```bash
+   ufw allow 5001/tcp
+   ufw reload
+   ```
+
+3. Включить и запустить:
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable vpn-web.service
@@ -362,7 +368,13 @@ FLASK_ENV=production PORT=5001 /opt/vpnservice/venv/bin/python web/app.py
    sudo systemctl status vpn-web.service
    ```
 
-3. Логи:
+4. Проверить доступность:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}" http://localhost:5001/
+   curl -s -o /dev/null -w "%{http_code}" http://185.21.8.91:5001/
+   ```
+
+5. Логи:
    ```bash
    journalctl -u vpn-web.service -f
    ```
