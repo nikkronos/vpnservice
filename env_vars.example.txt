@@ -14,7 +14,7 @@ ADMIN_ID=your_telegram_id
 
 # Ссылка на страницу восстановления (web-панель), чтобы пользователь мог перейти,
 # если Telegram не работает.
-# VPN_RECOVERY_URL=http://81.200.146.32:5001/recovery
+# VPN_RECOVERY_URL=http://185.21.8.91:5001/recovery
 
 # Резерв для мобильного интернета (LTE/5G): полная share-ссылка VLESS+XTLS-Vision+REALITY (команда /mobile_vpn).
 # Генерируется на eu1 после развёртывания Xray (см. docs/xray-vless-reality-eu1-deploy.md). Одна строка, без кавычек.
