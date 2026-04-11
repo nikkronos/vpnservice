@@ -342,6 +342,13 @@ def _generate_keypair() -> Tuple[str, str]:
         )
         public_key = result.stdout.strip()
         return private_key, public_key
+    except FileNotFoundError as exc:
+        logger.exception("Утилита wg не найдена на хосте бота: %s", exc)
+        raise WireGuardError(
+            "На сервере бота не установлен пакет wireguard-tools (нет команды wg). "
+            "Для выдачи конфигов России (rus1/rus2) бот локально вызывает wg genkey/wg pubkey. "
+            "Установи: apt install -y wireguard-tools и перезапусти vpn-bot."
+        ) from exc
     except subprocess.CalledProcessError as exc:
         logger.exception("Ошибка при генерации ключей WireGuard: %s", exc)
         raise WireGuardError("Не удалось сгенерировать ключи WireGuard.") from exc
@@ -846,14 +853,17 @@ def create_amneziawg_peer_and_config_for_user(
     remote_cmd = f"AWG_INTERFACE={shlex.quote(interface)} {script_path} {shlex.quote(client_ip)}"
     stdout, stderr = execute_server_command("eu1", remote_cmd, timeout=60)
 
-    # Ошибка SSH (ключ не найден или доступ запрещён) — подсказка по настройке на сервере бота (Timeweb)
+    # Ошибка SSH (ключ не найден или доступ запрещён) — подсказка по настройке на хосте, где запущен бот
     stderr_lower = (stderr or "").lower()
     if "identity file" in stderr_lower or "permission denied" in stderr_lower:
         logger.error("SSH к eu1 не удался. stderr: %s", stderr)
         raise WireGuardError(
             "Не удалось подключиться к eu1 по SSH: ключ не найден или доступ запрещён. "
-            f"На сервере бота (Timeweb) проверь: 1) WG_EU1_SSH_KEY_PATH в env_vars.txt — путь к ключу; "
-            "2) файл ключа существует (ls -la /root/.ssh/). Если ключ называется id_ed25519_eu1 — укажи его в env."
+            "На сервере, где запущен vpn-bot, проверь: 1) WG_EU1_SSH_KEY_PATH в env_vars.txt — путь к приватному ключу; "
+            "2) файл ключа существует и читается (ls -la путь_из_env); chmod 600 на ключ; "
+            "3) публичный ключ добавлен в authorized_keys на EU-хосте. "
+            "После переноса бота на новый VPS ключи из старой машины нужно скопировать или создать заново "
+            "(например ssh-keygen -f /root/.ssh/id_ed25519_eu1 и добавить .pub в authorized_keys на 185.21.8.91)."
         )
 
     # Парсим вывод: первая строка PUBKEY=..., остальное — клиентский .conf

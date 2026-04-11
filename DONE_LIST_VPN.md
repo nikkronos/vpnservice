@@ -1,5 +1,12 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-04-11 — Документация и код: пост-миграция бота на Fornex (Россия `/get_config`, EU `/regen`, SSH)
+
+- **Контекст:** бот на Fornex; Россия (rus1) — WireGuard остаётся на **main** (Timeweb). В проде выявлено: на Fornex не было **`wireguard-tools`** → в логах `FileNotFoundError: 'wg'`, пользователь не получал ответ на `/get_config` для России. Второй кейс: в `env_vars.txt` был путь **`WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1`**, файла ключа на новом VPS не было → `/regen` AmneziaWG (в т.ч. слот eu2) — ошибка SSH до eu1.
+- **Операции на проде (зафиксировано для повторения):** `apt install -y wireguard-tools`; `ssh-keygen` для `id_ed25519_eu1` + добавление `.pub` в `authorized_keys` на EU; `systemctl restart vpn-bot`; проверка `ssh -i ... root@185.21.8.91 "echo OK"`.
+- **Репозиторий:** **`docs/deployment.md`** — раздел «Бот (Telegram)» переименован с устаревшего «Timeweb»; добавлен **чеклист хоста бота после переноса на Fornex** (wg, WG_SSH_*, WG_EU1_SSH_KEY_PATH, eu2 vs SSH); правка примера `WG_EU1_SSH_KEY_PATH` в блоке env; MTProxy — правка «сервер бота» вместо только Timeweb. **`env_vars.example.txt`** — комментарий про ключ на хосте бота. **`README_FOR_NEXT_AGENT.md`** — путь к `env_vars.txt` и ссылка на чеклист. **`bot/wireguard_peers.py`** — при отсутствии `wg` поднимается понятный `WireGuardError` с текстом про `apt install wireguard-tools`; сообщение об ошибке SSH к eu1 без упоминания Timeweb, с шагами после переноса VPS.
+- **Сессия:** **`SESSION_SUMMARY_2026-04-11.md`**.
+
 ## 2026-04-11 — `vpn-web` и `/recovery` на Fornex; отключение панели на Timeweb
 
 - **Цель:** одна площадка с ботом — мониторинг **`http://185.21.8.91:5001/`** и **`/recovery`** на Fornex; **`VPN_RECOVERY_URL`** в `env_vars.txt`; трафик **main** на панели через **`WG_SSH_*`** (ключ `id_ed25519_main`, `authorized_keys` на Timeweb).

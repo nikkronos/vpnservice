@@ -181,7 +181,31 @@ chmod +x /opt/vpnservice/scripts/add-ss-redirect.sh
 0 * * * * /opt/vpnservice/scripts/update-unified-ss-ips.sh
 ```
 
-## Бот (Timeweb)
+## Бот (Telegram)
+
+**Прод (с 2026-04-10):** процесс **`vpn-bot.service`** на **Fornex** (`185.21.8.91`), каталог **`/opt/vpnservice`**. Раньше бот жил на Timeweb вместе со старой панелью; после миграции Telegram см. `Main_docs/TELEGRAM_MIGRATION_TIMWEB_FORNEX_2026-04-10.md`.
+
+### Чеклист хоста бота после переноса на Fornex
+
+На машине, где крутится **`vpn-bot`**, должны выполняться условия ниже — иначе Россия или `/regen` по Европе ломаются без явной причины в чате.
+
+1. **`wireguard-tools`** (команды `wg`, `wg pubkey` в `PATH`):
+   - Для слотов **rus1/rus2** бот **локально** вызывает `wg genkey` / `wg pubkey` при создании peer, затем по **`WG_SSH_*`** применяет `wg set` на **main** (Timeweb). Без пакета в логах: `FileNotFoundError: 'wg'` — пользователь может не получить ответ.
+   - Установка: `apt install -y wireguard-tools`, затем `systemctl restart vpn-bot`.
+
+2. **SSH на main (Россия):** в `env_vars.txt` заданы **`WG_SSH_HOST`**, **`WG_SSH_USER`**, **`WG_SSH_KEY_PATH`**, с Timeweb разрешён вход по этому ключу (бот не на Timeweb — без SSH peer на WG не добавится).
+
+3. **SSH на eu1 (AmneziaWG):** **`WG_EU1_SSH_HOST`**, **`WG_EU1_SSH_USER`**, **`WG_EU1_SSH_KEY_PATH`** — файл по пути **`WG_EU1_SSH_KEY_PATH` должен существовать на хосте бота**. Типичная ошибка после копирования только `env_vars.txt`: в логах SSH `Identity file ... not accessible: No such file or directory`, в боте — «ключ не найден или доступ запрещён».
+   - Если бот и EU на **одном** хосте (Fornex → тот же IP): создать ключ и разрешить себе:
+     ```bash
+     ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519_eu1 -N ""
+     chmod 600 /root/.ssh/id_ed25519_eu1
+     cat /root/.ssh/id_ed25519_eu1.pub >> /root/.ssh/authorized_keys
+     ssh -i /root/.ssh/id_ed25519_eu1 -o BatchMode=yes root@185.21.8.91 "echo OK"
+     ```
+   - Слот **eu2** в меню — отдельный peer в данных бота; **SSH для скриптов AmneziaWG всё равно идёт на тот же EU-хост**, что и для eu1 (`execute_server_command("eu1", ...)` в коде).
+
+4. Перезапуск: `systemctl restart vpn-bot` после правок `env_vars.txt` или ключей.
 
 ### Установка зависимостей
 
@@ -217,9 +241,11 @@ WG_EU1_ENDPOINT_PORT=51820
 WG_EU1_DNS=1.1.1.1,8.8.8.8
 WG_EU1_SSH_HOST=185.21.8.91
 WG_EU1_SSH_USER=root
-WG_EU1_SSH_KEY_PATH=/root/.ssh/id_rsa_eu1
+WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1
 WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh
 ```
+
+Если бот не на EU-сервере, в блок **main** добавь **`WG_SSH_HOST`**, **`WG_SSH_USER`**, **`WG_SSH_KEY_PATH`** (см. чеклист выше и `env_vars.example.txt`).
 
 ### Systemd сервис
 
@@ -268,7 +294,7 @@ systemctl status vpn-bot.service --no-pager
 Если на eu1 переустановили MTProto-прокси (Docker), у контейнера новый `secret`. Нужно обновить ссылку в боте:
 
 1. На eu1 получить секрет: `sudo docker logs mtproto-proxy 2>&1 | grep -o 'secret=[a-f0-9]*' | head -1`
-2. На **Timeweb** (сервер бота) в `/opt/vpnservice/env_vars.txt` задать или заменить строку:
+2. На **сервере бота** (прод: Fornex) в `/opt/vpnservice/env_vars.txt` задать или заменить строку:
    ```bash
    MTPROTO_PROXY_LINK=tg://proxy?server=185.21.8.91&port=443&secret=НОВЫЙ_СЕКРЕТ
    ```
