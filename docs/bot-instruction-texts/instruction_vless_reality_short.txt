@@ -3,7 +3,7 @@
 Если AmneziaWG / WireGuard по Wi‑Fi работает, а по сотовой сети — тайм-аут, используй <b>резервный профиль</b> (TCP, маскировка под обычный HTTPS).
 
 <b>Шаги:</b>
-1. Установи клиент: Android — <b>v2rayNG</b> или <b>Hiddify</b>; iOS — <b>Streisand</b>, <b>FoXray</b> или <b>Hiddify</b> (уточни актуальное в App Store).
+1. Установи клиент: Android — <b>v2rayNG</b> или <b>Hiddify</b>; iOS — <b>Happ</b>, <b>Streisand</b>, <b>FoXray</b> или <b>Hiddify</b> (уточни актуальное в App Store).
 2. Ниже вторым сообщением бот пришлёт ссылку <code>vless://...</code> — скопируй её целиком.
 3. В приложении: «Импорт из буфера» / «+» → вставь ссылку → подключи VPN / включи туннель.
 
