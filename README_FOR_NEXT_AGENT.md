@@ -171,6 +171,7 @@ AMNEZIAWG_EU1_INTERFACE=awg0
 | Обычный MTProto (`telegrammessenger/proxy`) на eu1 | ❌ | Оператор блокировал по сигнатуре (не порт); см. `docs/telegram-unblock-algorithm.md` |
 | Xray VLESS/TCP без TLS | ❌ | DPI распознаёт |
 | Remnawave | ❌ | Ошибки конфигурации |
+| Cloudflare CDN + VLESS/WS (при whitelist-режиме LTE) | ❌ | Даже Cloudflare IPs не входят в whitelist; см. `SESSION_SUMMARY_2026-05-05.md` |
 
 ## Что РАБОТАЕТ
 
@@ -178,9 +179,10 @@ AMNEZIAWG_EU1_INTERFACE=awg0
 |------------|--------|--------|
 | WireGuard | main (Timeweb) | ✅ Автоматическая выдача через бота |
 | AmneziaWG (Docker) | eu1 (Fornex) | ✅ Автоматическая выдача через бота |
-| VLESS + REALITY (TCP) | eu1 (опционально) | ⚙️ Резерв для LTE/5G; см. `docs/xray-vless-reality-eu1-deploy.md`, бот `/mobile_vpn` |
+| VLESS + WebSocket + Cloudflare CDN | eu1 (Fornex), `sub.vpnnkrns.ru:443` | ⚙️ Настроен; работает при обычных блокировках, бесполезен при whitelist-режиме LTE; Xray port 80, `path=/vpn` |
+| VLESS + REALITY (Yandex Cloud) | `158.160.236.147:443`, SNI `www.yandex.ru` | ✅ Резерв для LTE whitelist-режима; Yandex Cloud IP в whitelist у всех операторов; бот `/mobile_vpn`; см. `docs/yandex-cloud-reality-setup.md` |
 | Telegram | Через VPN (AmneziaWG eu1 / WG main) | ✅ |
-| MTProxy с Fake TLS (`mtproxy-faketls`, `nineseconds/mtg:2`) | **Fornex eu1**, внешний порт **8444** (443 на хосте занят Xray); ранее в доках — main Timeweb :443 | ✅ Развёртывание: `docs/mtproxy-faketls-deploy.md`; ротация: `docs/mtproxy-proxy-rotation.md`; сессия 2026-04-10 — `SESSION_SUMMARY_2026-04-10.md` |
+| MTProxy с Fake TLS (`mtproxy-faketls`, `nineseconds/mtg:2`) | **Fornex eu1**, внешний порт **8444** | ✅ Развёртывание: `docs/mtproxy-faketls-deploy.md`; ротация: `docs/mtproxy-proxy-rotation.md`; сессия 2026-04-10 — `SESSION_SUMMARY_2026-04-10.md` |
 
 ## Полезные команды
 
@@ -223,20 +225,42 @@ docker exec amnezia-awg2 cat /opt/amnezia/awg/awg0.conf
 
 ## Документация
 
-- **`docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md`** — попытка обхода LTE через Xray REALITY на eu1: что сделано, диагностика (tcpdump, Safari), вывод «блок до IP Fornex», **что делать дальше** (REALITY на Timeweb, другой VPS)
-- **SESSION_SUMMARY_2026-03-07.md** — последняя сессия (Telegram-прокси Fake TLS, алгоритм разблокировки, оценка провайдера)
-- **SESSION_SUMMARY_2026-02-26.md** — автоматизация выдачи конфигов + удаление /proxy
-- **SESSION_SUMMARY_2026-02-23.md** — попытки Remnawave, Xray, MTProto (неудачны)
+### Активные операционные доки
+- **`docs/yandex-cloud-reality-setup.md`** — полная документация YC VM: параметры, Xray конфиг, ключи, Security Group, SSH, known issues
+- **`docs/risks-and-mitigations.md`** — реестр рисков инфраструктуры с приоритетными действиями
+- **`docs/blocking-bypass-strategy.md`** — стратегия обхода блокировок, включая whitelist-режим LTE
+- **`docs/deployment.md`** — чеклист деплоя и переноса бота
+- **`docs/backup-restore.md`** — процедуры бэкапа и восстановления
+- **`docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md`** — попытка REALITY на eu1: диагностика, вывод «блок до IP Fornex»
+- **`docs/yandex-cloud-reality-setup.md`** — YC VM setup (актуально)
+
+### Telegram / MTProxy
+- **`docs/telegram-mtproxy-operators-guide.md`** — сводка для владельца: `/proxy`, `/proxy_rotate`, recovery, env
+- **`docs/mtproxy-faketls-deploy.md`** — развёртывание MTProxy Fake TLS
+- **`docs/mtproxy-proxy-rotation.md`** — ротация секрета
+- **`docs/telegram-unblock-algorithm.md`** — алгоритм сохранения доступа к Telegram
+
+### Клиентские инструкции
+- **`docs/client-instructions-pc.md`**, **`docs/client-instructions-ios.md`**, **`docs/client-instructions-android.md`**, **`docs/client-instructions-amneziawg.md`**
+
+### Прочее
+- **`docs/provider-choice-evaluation.md`** — оценка провайдеров
+- **`docs/telegram-proxy-alternatives.md`** — альтернативы MTProxy
+- **`docs/specs/`** — спецификации фич
+
+### Сессии (docs/sessions/)
+- **`docs/sessions/SESSION_SUMMARY_2026-05-06.md`** — YC VM, VLESS+REALITY, routing через eu1 ✅
+- **`docs/sessions/SESSION_SUMMARY_2026-05-05.md`** — Cloudflare CDN (whitelist-блок)
+- **`docs/sessions/SESSION_SUMMARY_2026-04-12.md`** — UFW fix, обновление ссылок
+- **`docs/sessions/SESSION_SUMMARY_2026-04-11.md`** — миграция бота на Fornex (часть 2)
+- **`docs/sessions/SESSION_SUMMARY_2026-04-10.md`** — MTProxy Fake TLS, миграция на Fornex
+- *(остальные — ранние сессии разработки)*
+
+### Архив (docs/archive/)
+Устаревшие одноразовые файлы (команды установки, старые планы, нереализованные эксперименты).
+
 - **ROADMAP_VPN.md** — план развития
 - **DONE_LIST_VPN.md** — выполненные задачи
-- **docs/provider-choice-evaluation.md** — оценка выбора провайдера (Fornex vs FirstVDS и др.)
-- **docs/telegram-unblock-algorithm.md** — алгоритм сохранения доступа к Telegram при блокировках/троттлинге (без правок в боте)
-- **docs/mtproxy-faketls-deploy.md** — пошаговое развёртывание MTProxy с Fake TLS (готовые команды под копипаст)
-- **docs/telegram-mtproxy-operators-guide.md** — **сводка для владельца/агентов:** `/proxy`, `/proxy_rotate`, recovery, env, деплой pip через venv
-- **docs/mtproxy-proxy-rotation.md** — ротация секрета, скрипт, переменные
-- **docs/telegram-proxy-alternatives.md** — сторонние варианты (справочно, не официальный стек)
-- **`docs/specs/spec-08-multi-node-redundancy-ru2-eu2.md`** — резервы и мульти-вход: **без нового VPS** (сценарий B: main+eu1, опц. REALITY на main); отдельный VPS (RU2/EU2) — только если появится бюджет
-- **`docs/third-party-vpn-boosters-vs-multi-entry.md`** — «ускорители» вроде GearUp vs наш мульти-вход (что реалистично в MVP)
 
 ## Важные правила
 

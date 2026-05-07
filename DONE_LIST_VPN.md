@@ -1,5 +1,37 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-06 — Yandex Cloud VLESS+REALITY relay (резерв для LTE whitelist-режима)
+
+- **Диагностика:** Timeweb (81.200.146.32) тоже недоступен на LTE — whitelist не включает даже российский хостинг.
+- **Yandex Cloud VM:** создан аккаунт (грант 4000₽), VM `vrprnt` — Ubuntu 24.04, Shared-core 2vCPU/1GB, публичный IP `158.160.236.147`, зона `ru-central1-d`.
+- **Xray:** установлен, конфиг VLESS+REALITY (port 443, SNI `www.yandex.ru`); UFW открыт 443/tcp; Security Group YC добавлено входящее правило TCP 443.
+- **Ключи:** UUID `11dd653c-944b-4320-b29e-f1a9f2d75db8`, PublicKey `XKK9qJfFVdG3fegYC5vP8uF-OIzYK6YzKPz-sLVh_lE`, ShortId `ad88588f88ea4246`.
+- **Бот:** `VLESS_REALITY_SHARE_URL` в `env_vars.txt` на Fornex обновлена на YC-Reality ссылку; `vpn-bot.service` перезапущен. Команда `/mobile_vpn` отдаёт YC-Reality ссылку.
+- **Тест:** VPN подключается по Wi-Fi ✅. Тест на LTE в whitelist-режиме — ожидает следующего ограничения.
+- **Документация:** `docs/yandex-cloud-reality-setup.md` создан с полными параметрами VM и конфига.
+- **Сессия:** `SESSION_SUMMARY_2026-05-06.md`.
+
+## 2026-05-05 — Cloudflare CDN стек для мобильного LTE (настроен, whitelist-блок)
+
+- **Cloudflare:** зарегистрирован аккаунт, домен `vpnnkrns.ru` добавлен, NS изменены на CF (`ray`/`susan`), домен Active.
+- **DNS:** `sub.vpnnkrns.ru` → A → `185.21.8.91`, Proxied; SSL Flexible; WebSockets включены.
+- **Xray на Fornex:** конфиг переписан с REALITY на **VLESS + WebSocket** (port 80, no TLS); `ufw allow 80/tcp`; сервис активен.
+- **env_vars.txt (Fornex):** `VLESS_REALITY_SHARE_URL` обновлена на CDN-ссылку (`sub.vpnnkrns.ru:443`, `type=ws`, `alpn=http/1.1`).
+- **Итог:** LTE whitelist-режим блокирует даже Cloudflare IPs — решение отложено до снятия ограничений (после 9 мая 2026). CDN-стек сохранён как рабочий резерв для обычных условий.
+- **Сессия:** `SESSION_SUMMARY_2026-05-05.md`.
+
+## 2026-04-13 — Документирован предпрод-план коммерциализации + синхронизация с AI-идеями
+
+- Добавлен документ **`docs/commercialization-prelaunch-plan-2026-04.md`**:
+  - as-is архитектура (Fornex/Timeweb, слоты `rus1/rus2/eu1/eu2`, recovery и MTProxy flow);
+  - prelaunch-риски (техника, продукт, коммерция/юридика);
+  - обязательный минимум до платного запуска (PostgreSQL, production web stack, мониторинг, бэкапы/restore, webhook-безопасность, подписки);
+  - этапный план A/B/C/D и Definition of Ready.
+- Включена синхронизация с внешними AI-идеями из профильных чатов:
+  - что брать в проект сейчас (PostgreSQL, agent-автоматизация рутины, точечные MCP-интеграции),
+  - что отложить (рекламные Meta-агенты как не-core для VPN-инфраструктуры).
+- `ROADMAP_VPN.md` обновлён: добавлен отдельный блок «Предпрод-пакет для коммерциализации» со ссылкой на новый документ.
+
 ## 2026-04-12 — Исправление доступа к мониторингу и recovery (UFW + обновление устаревших ссылок)
 
 - **Причина:** после переноса `vpn-web.service` на Fornex порт 5001 не был открыт в UFW — сервис работал, но снаружи был недоступен. Дополнительно: ряд файлов содержал старые ссылки `81.200.146.32:5001` (Timeweb).

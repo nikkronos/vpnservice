@@ -146,34 +146,32 @@ def main() -> None:
             logger.exception("Ошибка при отправке ответа: %s", e)
             return False
 
+    # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
+    _pending_add_user: set[int] = set()
+
     @bot.message_handler(commands=["start"])
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
         recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        text_lines = [
-            "Привет! Это VPN бот. 🔐",
-            "",
-            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.",
-            "",
-            f"Ссылка на сайт, если телеграм не работает: {recovery_url}",
-            "",
-            "📋 <b>Команды:</b>",
-            "/server — выбрать сервер (Россия или Европа)",
-            "/get_config — получить конфиг",
-            "/get_config_android — конфиг для Android (обход ErrorCode 1000)",
-            "/regen — обновить конфиг (новые ключи)",
-            "/regen_android — обновить конфиг для Android",
-            "/instruction — как подключиться (ПК, iPhone/iPad и Android)",
-            "/proxy — ссылка прокси для Telegram",
-            "/proxy_rotate — новая ссылка MTProxy после смены секрета (только владелец)",
-            "/mobile_vpn — резерв для LTE/5G (VLESS+REALITY), если AmneziaWG не коннектится",
-            "/status — статус доступа",
-            "/help — справка",
-            "/my_config — синоним /get_config",
-            "/broadcast — рассылка уведомления всем (только владелец)",
-        ]
-        safe_reply(message, "\n".join(text_lines))
+        text = (
+            "Привет! Это VPN бот. 🔐\n\n"
+            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
+            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
+            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
+            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
+            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
+            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
+        )
+        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
+        if message.from_user and is_owner(message.from_user.id, admin_id):
+            markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
+        bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
 
         # Автоматически регистрируем владельца как пользователя (owner),
         # чтобы в списке /users он тоже отображался.
@@ -405,10 +403,6 @@ def main() -> None:
     def cmd_get_config(message: types.Message) -> None:  # type: ignore[override]
         _do_get_config(message, False)
 
-    @bot.message_handler(commands=["get_config_android"])
-    def cmd_get_config_android(message: types.Message) -> None:  # type: ignore[override]
-        _do_get_config(message, True)
-
     def _do_regen(message: types.Message, android_safe: bool) -> None:
         """Регенерация конфига. android_safe=True — формат для Android (один DNS)."""
         if not message.from_user:
@@ -526,10 +520,6 @@ def main() -> None:
     @bot.message_handler(commands=["regen"])
     def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
         _do_regen(message, False)
-
-    @bot.message_handler(commands=["regen_android"])
-    def cmd_regen_android(message: types.Message) -> None:  # type: ignore[override]
-        _do_regen(message, True)
 
     @bot.message_handler(commands=["server"])
     def cmd_server(message: types.Message) -> None:  # type: ignore[override]
@@ -667,7 +657,301 @@ def main() -> None:
             call.message.message_id,
             parse_mode="HTML",
         )
-    
+
+    # ──────────────────────────────────────────────────────────────
+    # Callbacks: главное меню (/start кнопки)
+    # ──────────────────────────────────────────────────────────────
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("menu_"))
+    def callback_main_menu(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Обрабатывает нажатия кнопок главного меню /start."""
+        bot.answer_callback_query(call.id)
+        # call.message.from_user — это бот, а не пользователь.
+        # Подставляем реального пользователя, нажавшего кнопку.
+        call.message.from_user = call.from_user
+        action = call.data
+        if action == "menu_server":
+            cmd_server(call.message)
+        elif action == "menu_get_config":
+            cmd_get_config(call.message)
+        elif action == "menu_regen":
+            cmd_regen(call.message)
+        elif action == "menu_instruction":
+            cmd_instruction(call.message)
+        elif action == "menu_proxy":
+            cmd_proxy(call.message)
+        elif action == "menu_mobile_vpn":
+            cmd_mobile_vpn(call.message)
+        elif action == "menu_status":
+            cmd_status(call.message)
+
+    # ──────────────────────────────────────────────────────────────
+    # Callbacks: админ-панель
+    # ──────────────────────────────────────────────────────────────
+
+    def _send_users_list(chat_id: int) -> None:
+        """Отправляет список пользователей в указанный чат."""
+        try:
+            users = get_all_users()
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(chat_id, f"Ошибка при чтении списка: {e!r}", parse_mode="HTML")
+            return
+        if not users:
+            bot.send_message(chat_id, "Пока нет зарегистрированных пользователей.")
+            return
+        lines = ["<b>Пользователи VPN:</b>"]
+        for u in users:
+            role_label = "👑 owner" if u.role == "owner" else "user"
+            status_label = "✅ active" if u.active else "⛔ disabled"
+            uname = f"@{u.username}" if u.username else "(без username)"
+            lines.append(f"- <code>{u.telegram_id}</code> {uname} — {role_label}, {status_label}")
+        bot.send_message(chat_id, "\n".join(lines), parse_mode="HTML")
+
+    def _do_proxy_rotate(chat_id: int) -> None:
+        """Выполняет ротацию MTProxy и отправляет результат в указанный чат."""
+        script = config.mtproxy_rotate_script
+        if not script:
+            bot.send_message(
+                chat_id,
+                "Ротация не настроена: добавь MTPROXY_ROTATE_SCRIPT в env_vars.txt.",
+                parse_mode="HTML",
+            )
+            return
+        script_path = Path(script).expanduser()
+        if not script_path.is_file():
+            bot.send_message(chat_id, f"Файл скрипта не найден: <code>{script_path}</code>", parse_mode="HTML")
+            return
+        try:
+            argv = ["/bin/bash", str(script_path)] if script_path.suffix == ".sh" else [str(script_path)]
+            completed = subprocess.run(  # noqa: S603
+                argv, capture_output=True, text=True, timeout=180, check=False,
+                env=environment_for_mtproxy_rotate(config.base_dir),
+            )
+        except subprocess.TimeoutExpired:
+            bot.send_message(chat_id, "Ротация: тайм-аут 180 с. Проверь Docker и логи.")
+            return
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(chat_id, f"Не удалось запустить скрипт: {e}")
+            return
+        link = _parse_mtproto_link_from_rotate_stdout(completed.stdout or "")
+        if completed.returncode != 0 or not link:
+            combined = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
+            bot.send_message(chat_id, _build_proxy_rotate_failure_message(completed.returncode, combined), parse_mode="HTML")
+            return
+        data_dir = config.base_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        override_path = data_dir / "mtproto_proxy_link.txt"
+        try:
+            override_path.write_text(link.strip() + "\n", encoding="utf-8")
+        except OSError as e:
+            bot.send_message(chat_id, f"Ссылка получена, но не записана в файл ({e}). Сохрани вручную:\n\n{link}")
+            return
+        bot.send_message(
+            chat_id,
+            "✅ MTProxy пересобран. Новая ссылка — следующим сообщением.\n\n"
+            "Команда /proxy уже отдаёт эту ссылку всем.",
+            parse_mode="HTML",
+        )
+        bot.send_message(chat_id, link, parse_mode=None)
+
+    def _admin_panel_markup() -> types.InlineKeyboardMarkup:
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
+            types.InlineKeyboardButton("👥 Пользователи", callback_data="admin_users"),
+            types.InlineKeyboardButton("🔄 Ротация прокси", callback_data="admin_proxy_rotate"),
+            types.InlineKeyboardButton("➕ Добавить пользователя", callback_data="admin_add_user"),
+            types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+        )
+        markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_back"))
+        return markup
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_panel")
+    def callback_admin_panel(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Показывает админ-панель (только для владельца)."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
+            "⚙️ <b>Панель администратора</b>",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=_admin_panel_markup(),
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_back")
+    def callback_admin_back(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Возврат из админ-панели в главное меню."""
+        bot.answer_callback_query(call.id)
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
+        text = (
+            "Привет! Это VPN бот. 🔐\n\n"
+            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
+            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
+            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
+            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
+            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
+            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
+        )
+        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
+        markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
+        bot.edit_message_text(
+            text,
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_stats")
+    def callback_admin_stats(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        # Переиспользуем логику /stats
+        try:
+            users = get_all_users()
+            peers = get_all_peers()
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(call.message.chat.id, f"Ошибка при чтении данных: {e!r}", parse_mode="HTML")
+            return
+        users_total = len(users)
+        users_active = sum(1 for u in users if u.active)
+        peers_active = sum(1 for p in peers if p.active)
+        by_server: dict[str, int] = {}
+        for p in peers:
+            if p.active:
+                by_server[p.server_id] = by_server.get(p.server_id, 0) + 1
+        servers_info = get_available_servers()
+        server_lines = [
+            f"  • {servers_info.get(sid, {}).get('name', sid)} ({sid}): {count}"
+            for sid, count in sorted(by_server.items())
+        ]
+        text = (
+            "<b>📊 Сводка VPN</b>\n\n"
+            f"<b>Пользователи:</b> {users_active} активных из {users_total}\n"
+            f"<b>Активных конфигов:</b> {peers_active}\n\n"
+            "<b>По серверам:</b>\n"
+            + ("\n".join(server_lines) if server_lines else "  — пока нет")
+        )
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_users")
+    def callback_admin_users(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        # Переиспользуем логику /users — отправляем как новое сообщение
+        _send_users_list(call.message.chat.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_proxy_rotate")
+    def callback_admin_proxy_rotate(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id, "Запускаю ротацию...")
+        # Создаём фиктивный message-объект для переиспользования cmd_proxy_rotate
+        # Проще отправить результат напрямую через send_message
+        _do_proxy_rotate(call.message.chat.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_add_user")
+    def callback_admin_add_user(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        _pending_add_user.add(call.from_user.id)
+        bot.send_message(
+            call.message.chat.id,
+            "➕ Напиши Telegram ID или @username пользователя, которого хочешь добавить:",
+            parse_mode="HTML",
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_broadcast")
+    def callback_admin_broadcast(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("✅ Да, разослать", callback_data="admin_broadcast_confirm"),
+            types.InlineKeyboardButton("❌ Отмена", callback_data="admin_panel"),
+        )
+        bot.edit_message_text(
+            "⚠️ <b>Разослать уведомление всем активным пользователям?</b>\n\n"
+            "Это отправит сообщение о проблемах с VPN каждому пользователю в базе.",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_broadcast_confirm")
+    def callback_admin_broadcast_confirm(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id, "Рассылка запущена...")
+        bot.edit_message_text(
+            "📢 Рассылка запущена...",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="HTML",
+        )
+        try:
+            users = get_all_users()
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(call.message.chat.id, f"Ошибка при чтении пользователей: {e!r}")
+            return
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
+        broadcast_text = (
+            BROADCAST_VPN_ISSUE_TEXT
+            + "\n\nЕсли Telegram снова не отвечает — восстановление доступно на сайте.\n"
+            + f"Ссылка: {recovery_url}\n"
+            + "На странице введите свой Telegram ID и нажмите «Восстановить VPN (конфиг)»."
+        )
+        sent = 0
+        failed = 0
+        for u in users:
+            try:
+                bot.send_message(u.telegram_id, broadcast_text, parse_mode="HTML")
+                sent += 1
+                time.sleep(0.05)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Broadcast: не отправлено %s: %s", u.telegram_id, e)
+                failed += 1
+        bot.send_message(
+            call.message.chat.id,
+            f"✅ Рассылка завершена: отправлено <b>{sent}</b>, не доставлено <b>{failed}</b>.",
+            parse_mode="HTML",
+        )
+
+    # ──────────────────────────────────────────────────────────────
+    # Обработчик текстовых сообщений: ввод пользователя для add_user
+    # ──────────────────────────────────────────────────────────────
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_add_user
+    )
+    def handle_pending_add_user(message: types.Message) -> None:  # type: ignore[override]
+        """Получает ID/username от владельца после нажатия кнопки ➕ Добавить пользователя."""
+        if not message.from_user:
+            return
+        _pending_add_user.discard(message.from_user.id)
+        # Подставляем аргумент и вызываем существующую логику /add_user
+        message.text = f"/add_user {message.text}"
+        cmd_add_user(message)
+
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
         """Показывает статус доступа пользователя."""
@@ -721,17 +1005,21 @@ def main() -> None:
 
     @bot.message_handler(commands=["instruction"])
     def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет инструкцию по подключению: ПК, iOS, Android; один конфиг, импорт в WireGuard или AmneziaVPN/AmneziaWG."""
+        """Отправляет инструкцию по подключению и справку."""
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
         instr = (
             "📱 <b>Как подключиться</b>\n\n"
-            "1. Выбери сервер: /server (Россия или Европа).\n"
-            "2. Получи конфиг: /get_config — бот пришлёт файл .conf.\n"
+            "1. Выбери сервер — кнопка <b>Выбрать сервер</b> в меню.\n"
+            "2. Получи конфиг — кнопка <b>Получить конфиг</b>, бот пришлёт файл .conf.\n"
             "3. Импортируй .conf на устройство:\n"
             "   • <b>ПК:</b> WireGuard (Россия) или AmneziaVPN (Европа) → «Импорт из файла» → выбери .conf.\n"
-            "   • <b>iPhone/iPad:</b> сохрани .conf → «Файлы» → долгое нажатие на файл → <b>Поделиться</b> → WireGuard или AmneziaWG.\n"
-            "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) из Google Play → «+» → «Импорт из файла» или из буфера обмена. Если ошибка 1000 — /get_config_android.\n\n"
-            "Сервер Россия — WireGuard. Сервер Европа — AmneziaVPN/AmneziaWG (обход блокировок). Скачать: amnezia.org/en/downloads\n\n"
-            "📶 По мобильному интернету AmneziaWG иногда не подключается — тогда команда /mobile_vpn (резерв TCP)."
+            "   • <b>iPhone/iPad:</b> сохрани .conf → «Файлы» → долгое нажатие → <b>Поделиться</b> → WireGuard или AmneziaWG.\n"
+            "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) → «+» → «Импорт из файла».\n\n"
+            "🇷🇺 <b>Россия</b> — низкий пинг, WireGuard.\n"
+            "🇪🇺 <b>Европа</b> — обход блокировок, AmneziaVPN/AmneziaWG. Скачать: amnezia.org/en/downloads\n\n"
+            "📶 <b>На LTE/5G не подключается?</b> — используй кнопку <b>Мобильный VPN</b> (резерв TCP).\n\n"
+            f"💬 <b>Telegram заблокирован?</b> — кнопка <b>Прокси Telegram</b> или сайт: {recovery_url}\n\n"
+            "❓ Вопросы — владельцу бота."
         )
         safe_reply(message, instr)
 
@@ -867,35 +1155,15 @@ def main() -> None:
         instr = _load_instruction_text(config.base_dir, "vless_reality")
         safe_reply(message, instr)
         try:
-            bot.send_message(message.chat.id, url, parse_mode=None)
+            import html as _html
+            safe_url = _html.escape(url)
+            bot.send_message(message.chat.id, f"<code>{safe_url}</code>", parse_mode="HTML")
         except Exception as e:  # noqa: BLE001
             logger.exception("Не удалось отправить VLESS ссылку: %s", e)
             safe_reply(
                 message,
                 "Не удалось отправить ссылку. Напиши владельцу.",
             )
-
-    @bot.message_handler(commands=["my_config"])
-    def cmd_my_config(message: types.Message) -> None:  # type: ignore[override]
-        cmd_get_config(message)
-
-    @bot.message_handler(commands=["help"])
-    def cmd_help(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет справку: два сервера, один конфиг на сервер."""
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        help_text = (
-            "📖 <b>Справка по VPN боту</b>\n\n"
-            "🇷🇺 <b>Россия</b> — низкий пинг.\n"
-            "🇪🇺 <b>Европа</b> — доступ из РФ (обход блокировок).\n"
-            "Один конфиг на сервер, импорт в AmneziaVPN/AmneziaWG.\n\n"
-            "📱 /server → /get_config → импортируй .conf по /instruction.\n\n"
-            "📱 <b>Android:</b> если ошибка 1000 при подключении — используй /get_config_android и /regen_android.\n\n"
-            f"💬 Telegram заблокирован? — /proxy или сайт: {recovery_url}.\n"
-            "Владелец: новая ссылка MTProxy после смены секрета — /proxy_rotate (см. docs/mtproxy-proxy-rotation.md).\n\n"
-            "📶 На LTE/5G не коннектится VPN? — /mobile_vpn (если настроено владельцем).\n\n"
-            "❓ Вопросы — владельцу или /instruction."
-        )
-        safe_reply(message, help_text)
 
     @bot.message_handler(commands=["server_exec"])
     def cmd_server_exec(message: types.Message) -> None:  # type: ignore[override]
