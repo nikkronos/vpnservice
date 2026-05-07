@@ -137,14 +137,23 @@ def main() -> None:
     bot = telebot.TeleBot(config.bot_token, parse_mode="HTML")
     admin_id = config.admin_id
 
-    def safe_reply(message: types.Message, text: str) -> bool:
-        """Отправляет ответ; при ошибке логирует и возвращает False."""
+    def safe_reply(message: types.Message, text: str, reply_markup=None) -> bool:
+        """Отправляет ответ; при ошибке логирует и возвращает False.
+        Если reply_markup не задан, автоматически использует _back_markup из message (если есть).
+        """
+        effective_markup = reply_markup or getattr(message, "_back_markup", None)
         try:
-            bot.reply_to(message, text)
+            bot.reply_to(message, text, reply_markup=effective_markup)
             return True
         except Exception as e:  # noqa: BLE001
             logger.exception("Ошибка при отправке ответа: %s", e)
             return False
+
+    def _back_to_menu_markup() -> types.InlineKeyboardMarkup:
+        """Inline-клавиатура с одной кнопкой возврата в главное меню."""
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        return markup
 
     # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
     _pending_add_user: set[int] = set()
@@ -553,6 +562,7 @@ def main() -> None:
                 text=label,
                 callback_data=f"server_select_{server_id}"
             ))
+        keyboard.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         
         current_server_name = servers_info.get(current_server_id, {}).get("name", current_server_id)
         current_desc = servers_info.get(current_server_id, {}).get("description", "")
@@ -669,6 +679,8 @@ def main() -> None:
         # call.message.from_user — это бот, а не пользователь.
         # Подставляем реального пользователя, нажавшего кнопку.
         call.message.from_user = call.from_user
+        # Все safe_reply внутри команд автоматически добавят кнопку "« Главное меню"
+        call.message._back_markup = _back_to_menu_markup()
         action = call.data
         if action == "menu_server":
             cmd_server(call.message)
@@ -809,6 +821,30 @@ def main() -> None:
             parse_mode="HTML",
             reply_markup=markup,
         )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "go_main_menu")
+    def callback_go_main_menu(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Отправляет главное меню новым сообщением (возврат из любого экрана)."""
+        bot.answer_callback_query(call.id)
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
+        text = (
+            "Привет! Это VPN бот. 🔐\n\n"
+            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
+            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
+        )
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
+            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
+            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
+            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
+            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
+        )
+        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
+        if call.from_user and is_owner(call.from_user.id, admin_id):
+            markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
 
     @bot.callback_query_handler(func=lambda call: call.data == "admin_stats")
     def callback_admin_stats(call: types.CallbackQuery) -> None:  # type: ignore[override]
