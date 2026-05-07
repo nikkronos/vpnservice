@@ -1,5 +1,16 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-07 — Рефакторинг UX бота + git setup
+
+- **VLESS code-блок:** `/mobile_vpn` теперь отправляет ссылку в `<code>` блоке — Telegram не авто-линкует `www.yandex.ru` внутри строки, копирование чистое.
+- **Удалены команды:** `/get_config_android`, `/regen_android`, `/my_config`, `/help` — убраны из кода полностью.
+- **Inline-меню /start:** вместо списка 13 команд — 7 inline-кнопок + кнопка ⚙️ Администратор (только владельцу).
+- **Inline админ-панель:** 5 кнопок — статистика, пользователи, ротация прокси, добавить пользователя (state machine), рассылка с подтверждением.
+- **Исправление:** `call.message.from_user` → `call.from_user` в menu-callbacks (бот ≠ пользователь).
+- **GitHub:** первый коммит в `nikkronos/vpnservice`, 54 файла (реструктуризация + YC-Reality + bot refactor).
+- **Yota:** расследование — ссылка корректная, проблема в whitelist MegaFon. Проверить при следующем событии.
+- **Сессия:** `SESSION_SUMMARY_2026-05-07.md`.
+
 ## 2026-05-06 — Yandex Cloud VLESS+REALITY relay (резерв для LTE whitelist-режима)
 
 - **Диагностика:** Timeweb (81.200.146.32) тоже недоступен на LTE — whitelist не включает даже российский хостинг.
