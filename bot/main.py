@@ -1041,23 +1041,39 @@ def main() -> None:
 
     @bot.message_handler(commands=["instruction"])
     def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет инструкцию по подключению и справку."""
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        instr = (
-            "📱 <b>Как подключиться</b>\n\n"
-            "1. Выбери сервер — кнопка <b>Выбрать сервер</b> в меню.\n"
-            "2. Получи конфиг — кнопка <b>Получить конфиг</b>, бот пришлёт файл .conf.\n"
-            "3. Импортируй .conf на устройство:\n"
-            "   • <b>ПК:</b> WireGuard (Россия) или AmneziaVPN (Европа) → «Импорт из файла» → выбери .conf.\n"
-            "   • <b>iPhone/iPad:</b> сохрани .conf → «Файлы» → долгое нажатие → <b>Поделиться</b> → WireGuard или AmneziaWG.\n"
-            "   • <b>Android:</b> WireGuard (Россия) или AmneziaVPN/AmneziaWG (Европа) → «+» → «Импорт из файла».\n\n"
-            "🇷🇺 <b>Россия</b> — низкий пинг, WireGuard.\n"
-            "🇪🇺 <b>Европа</b> — обход блокировок, AmneziaVPN/AmneziaWG. Скачать: amnezia.org/en/downloads\n\n"
-            "📶 <b>На LTE/5G не подключается?</b> — используй кнопку <b>Мобильный VPN</b> (резерв TCP).\n\n"
-            f"💬 <b>Telegram заблокирован?</b> — кнопка <b>Прокси Telegram</b> или сайт: {recovery_url}\n\n"
-            "❓ Вопросы — владельцу бота."
+        """Показывает выбор платформы для инструкции по подключению."""
+        markup = types.InlineKeyboardMarkup(row_width=3)
+        markup.add(
+            types.InlineKeyboardButton("📱 iOS", callback_data="instr_ios"),
+            types.InlineKeyboardButton("🤖 Android", callback_data="instr_android"),
+            types.InlineKeyboardButton("💻 Windows", callback_data="instr_windows"),
         )
-        safe_reply(message, instr)
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        bot.reply_to(
+            message,
+            "📖 <b>Инструкции по подключению</b>\n\nВыбери своё устройство:",
+            reply_markup=markup,
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("instr_"))
+    def callback_instruction_platform(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Отправляет инструкцию для выбранной платформы."""
+        bot.answer_callback_query(call.id)
+        platform = call.data.replace("instr_", "")
+        name_map = {"ios": "ios", "android": "android", "windows": "windows"}
+        file_key = name_map.get(platform)
+        if not file_key:
+            bot.send_message(call.message.chat.id, "Неизвестная платформа.")
+            return
+        instr = _load_instruction_text(config.base_dir, file_key)
+        markup = types.InlineKeyboardMarkup(row_width=3)
+        markup.add(
+            types.InlineKeyboardButton("📱 iOS", callback_data="instr_ios"),
+            types.InlineKeyboardButton("🤖 Android", callback_data="instr_android"),
+            types.InlineKeyboardButton("💻 Windows", callback_data="instr_windows"),
+        )
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        bot.send_message(call.message.chat.id, instr, parse_mode="HTML", reply_markup=markup)
 
     @bot.message_handler(commands=["proxy"])
     def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
