@@ -161,13 +161,11 @@ def _allocate_ip(network_cidr: str, server_id: str) -> str:
 
 
 def _allocate_ip_amnezia_eu(network_cidr: str) -> str:
-    """
-    Свободный IP в подсети AmneziaWG (eu1/eu2 на одном хосте — общий пул).
-    """
+    """Свободный IP в подсети AmneziaWG (eu1)."""
     net = ipaddress.ip_network(network_cidr, strict=False)
     used_ips: set = set()
     for peer in get_all_peers():
-        if peer.server_id not in ("eu1", "eu2"):
+        if peer.server_id != "eu1":
             continue
         try:
             iface = ipaddress.ip_interface(peer.wg_ip)
@@ -183,7 +181,7 @@ def _allocate_ip_amnezia_eu(network_cidr: str) -> str:
     for host in net.hosts():
         if host not in used_ips:
             return f"{host}/{net.prefixlen}"
-    raise WireGuardError("Не удалось подобрать свободный IP для AmneziaWG (eu1/eu2).")
+    raise WireGuardError("Не удалось подобрать свободный IP для AmneziaWG (eu1).")
 
 
 def _allocate_ip_in_pool(
@@ -825,12 +823,9 @@ def create_amneziawg_peer_and_config_for_user(
     android_safe: bool = False,
     server_id: str = "eu1",
 ) -> Tuple[Peer, str]:
-    """
-    Создаёт peer AmneziaWG на EU-ноде (eu1 или eu2 — один хост) через скрипт по SSH.
-    server_id: "eu1" | "eu2" — разные записи в peers.json и разные IP в общем пуле Amnezia.
-    """
-    if server_id not in ("eu1", "eu2"):
-        raise WireGuardError("AmneziaWG выдаётся только для server_id eu1 или eu2.")
+    """Создаёт peer AmneziaWG на eu1 через скрипт по SSH."""
+    if server_id != "eu1":
+        raise WireGuardError("AmneziaWG выдаётся только для server_id eu1.")
     env = _load_env()
     script_path = env.get("AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT", "").strip()
     if not script_path:
@@ -910,11 +905,9 @@ def create_amneziawg_peer_and_config_for_user(
 def regenerate_amneziawg_peer_and_config_for_user(
     telegram_id: int, android_safe: bool = False, server_id: str = "eu1"
 ) -> Tuple[Peer, str]:
-    """
-    Регенерирует AmneziaWG peer для слота eu1 или eu2 (тот же IP, новые ключи).
-    """
-    if server_id not in ("eu1", "eu2"):
-        raise WireGuardError("Регенерация AmneziaWG только для eu1 или eu2.")
+    """Регенерирует AmneziaWG peer для eu1 (тот же IP, новые ключи)."""
+    if server_id != "eu1":
+        raise WireGuardError("Регенерация AmneziaWG только для eu1.")
     existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
     if not existing_peer or not existing_peer.active:
         raise WireGuardError(
@@ -958,10 +951,5 @@ def get_available_servers() -> Dict[str, Dict[str, str]]:
             "name": "Европа — основной (eu1)",
             "description": "AmneziaWG: доступ из РФ, ChatGPT. Импорт в AmneziaVPN/AmneziaWG. Тип профиля — кнопки после выбора Европы.",
         }
-        servers["eu2"] = {
-            "name": "Европа — запасной (eu2)",
-            "description": "Тот же EU-сервер, второй AmneziaWG peer. Если eu1 недоступен или нужен отдельный конфиг.",
-        }
-
     return servers
 

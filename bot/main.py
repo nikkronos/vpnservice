@@ -170,14 +170,13 @@ def main() -> None:
         )
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
             types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
             types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
             types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
             types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
             types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
         )
-        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
         if message.from_user and is_owner(message.from_user.id, admin_id):
             markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
         bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
@@ -274,14 +273,14 @@ def main() -> None:
                         f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
                         f"{profile_note}\n"
                         "📥 Импортируй новый конфиг в WireGuard. Старый конфиг больше не будет работать.\n"
-                        f"\n💡 Другой сервер/профиль — /server. Инструкция — /instruction.",
+                        f"\n💡 Инструкция — /instruction.",
                     )
                     return
                 # Peer уже существует, тип профиля совпадает — просто сообщаем
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                 # Европа (eu1/eu2) — AmneziaWG
-                if preferred_server_id in ("eu1", "eu2"):
+                if preferred_server_id == "eu1":
                     if is_amneziawg_eu1_configured():
                         safe_reply(
                             message,
@@ -313,7 +312,7 @@ def main() -> None:
                 )
 
             # Европа (eu1/eu2): AmneziaWG
-            if preferred_server_id in ("eu1", "eu2"):
+            if preferred_server_id == "eu1":
                 if is_amneziawg_eu1_configured():
                     try:
                         peer, client_config = create_amneziawg_peer_and_config_for_user(
@@ -443,7 +442,7 @@ def main() -> None:
             preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
 
             # Европа (eu1/eu2): AmneziaWG
-            if preferred_server_id in ("eu1", "eu2"):
+            if preferred_server_id == "eu1":
                 if is_amneziawg_eu1_configured():
                     try:
                         peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
@@ -532,93 +531,16 @@ def main() -> None:
 
     @bot.message_handler(commands=["server"])
     def cmd_server(message: types.Message) -> None:  # type: ignore[override]
-        """
-        Команда для выбора сервера (ноды) VPN.
-        Показывает кнопки с доступными серверами и позволяет пользователю выбрать предпочтительный.
-        """
-        if not message.from_user:
-            safe_reply(message, "Не удалось определить пользователя.")
-            return
-        
-        user = find_user(message.from_user.id)
-        if not user or not user.active:
-            safe_reply(
-                message,
-                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
-                "Попроси владельца добавить тебя командой /add_user.",
-            )
-            return
-        
-        servers_info = get_available_servers()
-        current_server_id = normalize_preferred_server_id(user.preferred_server_id)
-        
-        # Создаём inline-кнопки для выбора сервера
-        keyboard = types.InlineKeyboardMarkup()
-        for server_id, info in servers_info.items():
-            label = info["name"]
-            if server_id == current_server_id:
-                label = f"✅ {label} (текущий)"
-            keyboard.add(types.InlineKeyboardButton(
-                text=label,
-                callback_data=f"server_select_{server_id}"
-            ))
-        keyboard.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
-        
-        current_server_name = servers_info.get(current_server_id, {}).get("name", current_server_id)
-        current_desc = servers_info.get(current_server_id, {}).get("description", "")
-        
-        text_lines = [
-            f"<b>Выбор сервера VPN</b>",
-            "",
-            f"Текущий сервер: <b>{current_server_name}</b>",
-            f"{current_desc}",
-            "",
-            "Выбери сервер, на котором будет создан твой VPN‑доступ:",
-        ]
-        
-        bot.reply_to(message, "\n".join(text_lines), reply_markup=keyboard)
-    
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("server_select_"))
-    def callback_server_select(call: types.CallbackQuery) -> None:  # type: ignore[override]
-        """Обработчик выбора сервера через inline-кнопку."""
-        if not call.from_user:
-            bot.answer_callback_query(call.id, "Ошибка: не удалось определить пользователя.")
-            return
-        
-        user = find_user(call.from_user.id)
-        if not user or not user.active:
-            bot.answer_callback_query(call.id, "Ты не зарегистрирован в VPN‑сервисе.")
-            return
-        
-        server_id = call.data.replace("server_select_", "")
-        servers_info = get_available_servers()
-        
-        if server_id not in servers_info:
-            bot.answer_callback_query(call.id, f"Неизвестный сервер: {server_id}")
-            return
-        
-        server_name = servers_info[server_id]["name"]
-        server_desc = servers_info[server_id]["description"]
-
-        # Для всех серверов (в т.ч. Европа) — сразу сохраняем выбор, без выбора типа профиля
-        user.preferred_server_id = server_id
-        user.preferred_profile_type = None
-        upsert_user(user)
-        
-        bot.answer_callback_query(
-            call.id,
-            f"Выбран сервер: {server_name}",
-            show_alert=False,
-        )
-        
-        bot.edit_message_text(
-            f"✅ <b>Сервер выбран</b>\n\n"
-            f"Твой предпочтительный сервер: <b>{server_name}</b>\n"
-            f"{server_desc}\n\n"
-            f"Теперь при вызове /get_config будет создан доступ на этом сервере.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
+        """Информация о текущем сервере (eu1 — единственный)."""
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        safe_reply(
+            message,
+            "🌍 <b>Сервер VPN</b>\n\n"
+            "Активный сервер: <b>Европа — eu1</b> (Fornex, Германия)\n"
+            "Протокол: AmneziaWG (обход блокировок из РФ)\n\n"
+            "Используй /get_config чтобы получить конфиг.",
+            reply_markup=markup,
         )
     
     @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt", "profile_eu1_unified"))
@@ -682,9 +604,7 @@ def main() -> None:
         # Все safe_reply внутри команд автоматически добавят кнопку "« Главное меню"
         call.message._back_markup = _back_to_menu_markup()
         action = call.data
-        if action == "menu_server":
-            cmd_server(call.message)
-        elif action == "menu_get_config":
+        if action == "menu_get_config":
             cmd_get_config(call.message)
         elif action == "menu_regen":
             cmd_regen(call.message)
@@ -805,14 +725,13 @@ def main() -> None:
         )
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
             types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
             types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
             types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
             types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
             types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
         )
-        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
         markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
         bot.edit_message_text(
             text,
@@ -834,14 +753,13 @@ def main() -> None:
         )
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            types.InlineKeyboardButton("🖥 Выбрать сервер", callback_data="menu_server"),
             types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
             types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
             types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
             types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
             types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
         )
-        markup.add(types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"))
         if call.from_user and is_owner(call.from_user.id, admin_id):
             markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
         bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)

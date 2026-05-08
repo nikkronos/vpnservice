@@ -219,7 +219,7 @@ def find_peer_by_telegram_id(telegram_id: int, server_id: Optional[str] = None) 
     if not candidates:
         return None
 
-    order = ["rus1", "rus2", "eu1", "eu2"]
+    order = ["eu1"]
     for sid in order:
         for p in candidates:
             if p.server_id == sid and p.active:
