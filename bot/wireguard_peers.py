@@ -942,16 +942,7 @@ def get_available_servers() -> Dict[str, Dict[str, str]]:
     
     Формат: {"server_id": {"name": "...", "description": "..."}}
     """
-    servers: Dict[str, Dict[str, str]] = {
-        "rus1": {
-            "name": "Россия — основной (rus1)",
-            "description": "WireGuard, Timeweb. Низкий пинг, YouTube, Instagram. Дефолтный профиль РФ.",
-        },
-        "rus2": {
-            "name": "Россия — запасной (rus2)",
-            "description": "Тот же сервер, второй ключ/IP. Не трогает rus1 — отдельный .conf.",
-        },
-    }
+    servers: Dict[str, Dict[str, str]] = {}
 
     try:
         env = _load_env()

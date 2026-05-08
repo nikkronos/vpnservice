@@ -16,9 +16,9 @@ def normalize_peer_server_id(server_id: Optional[str]) -> str:
 
 
 def normalize_preferred_server_id(server_id: Optional[str]) -> str:
-    """Дефолт и legacy main → rus1."""
-    if not server_id or server_id == "main":
-        return "rus1"
+    """Дефолт → eu1 (российские серверы отключены). legacy main/rus1/rus2 → eu1."""
+    if not server_id or server_id in ("main", "rus1", "rus2"):
+        return "eu1"
     return server_id
 
 

@@ -109,6 +109,32 @@
       <div id="vpn-recovery-result-eu2" class="recovery-result" aria-live="polite"></div>
     </section>
 
+    <section class="recovery">
+      <h2>📱 Мобильный VPN (VLESS+REALITY)</h2>
+      <p class="section-hint">
+        Резервный профиль для мобильных сетей (LTE/5G) — работает когда AmneziaWG недоступен.
+        Введите Telegram ID, чтобы получить ссылку <code>vless://...</code> для импорта в приложение.
+        <br><b>Android:</b> v2rayNG или Hiddify — «+» → «Импорт из буфера».
+        <br><b>iOS:</b> Happ, Streisand, FoXray или Hiddify — импорт ссылки.
+      </p>
+
+      <div class="recovery-form">
+        <label for="mobileVpnTelegramId">Ваш Telegram ID</label>
+        <input
+          type="number"
+          id="mobileVpnTelegramId"
+          inputmode="numeric"
+          placeholder="Например, 123456789"
+          autocomplete="off"
+        />
+        <button type="button" id="btnGetMobileVpn" class="btn-recovery">
+          Получить ссылку
+        </button>
+      </div>
+
+      <div id="mobile-vpn-result" class="recovery-result" aria-live="polite"></div>
+    </section>
+
     <footer>
       <p>Последнее обновление: <span id="last-update"></span></p>
     </footer>

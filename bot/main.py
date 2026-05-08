@@ -252,11 +252,11 @@ def main() -> None:
                     )
                     pt = getattr(peer, "profile_type", None)
                     if pt == "vpn_gpt":
-                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+                        filename = f"wg_{peer.server_id}_gpt.conf"
                     elif pt == "unified":
-                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+                        filename = f"wg_{peer.server_id}_uni.conf"
                     else:
-                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+                        filename = f"wg_{peer.server_id}.conf"
                     _send_config_file(chat_id, client_config, filename)
                     servers_info = get_available_servers()
                     server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
@@ -321,7 +321,7 @@ def main() -> None:
                             android_safe=android_safe,
                             server_id=preferred_server_id,
                         )
-                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+                        filename = f"awg_{peer.server_id}.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
                         server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
@@ -369,11 +369,11 @@ def main() -> None:
         # Имя файла: для VPN+GPT — _gpt.conf, для Unified — _unified.conf
         pt = getattr(peer, "profile_type", None)
         if pt == "vpn_gpt":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+            filename = f"wg_{peer.server_id}_gpt.conf"
         elif pt == "unified":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+            filename = f"wg_{peer.server_id}_uni.conf"
         else:
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+            filename = f"wg_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()
@@ -451,7 +451,7 @@ def main() -> None:
                             android_safe=android_safe,
                             server_id=preferred_server_id,
                         )
-                        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+                        filename = f"awg_{peer.server_id}.conf"
                         _send_config_file(chat_id, client_config, filename)
                         servers_info = get_available_servers()
                         server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
@@ -507,11 +507,11 @@ def main() -> None:
         # Отправляем новый конфиг (имя файла по типу профиля)
         pt = getattr(peer, "profile_type", None)
         if pt == "vpn_gpt":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_gpt.conf"
+            filename = f"wg_{peer.server_id}_gpt.conf"
         elif pt == "unified":
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}_unified.conf"
+            filename = f"wg_{peer.server_id}_uni.conf"
         else:
-            filename = f"vpn_{peer.telegram_id}_{peer.server_id}.conf"
+            filename = f"wg_{peer.server_id}.conf"
         _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()

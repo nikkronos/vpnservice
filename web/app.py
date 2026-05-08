@@ -716,10 +716,48 @@ def api_recovery_vpn():
             peer, cfg = create_amneziawg_peer_and_config_for_user(
                 telegram_id, android_safe=android_safe, server_id=server_id
             )
-        filename = f"vpn_{peer.telegram_id}_{peer.server_id}_amneziawg.conf"
+        filename = f"awg_{peer.server_id}.conf"
         return jsonify({"ok": True, "filename": filename, "config": cfg})
     except Exception as e:
         logger.exception("Ошибка recovery/vpn: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/mobile-vpn", methods=["GET"])
+def api_recovery_mobile_vpn():
+    """
+    Возвращает VLESS+REALITY ссылку для резервного мобильного VPN.
+    Авторизация по telegram_id (пользователь должен быть в базе).
+    """
+    try:
+        telegram_id = request.args.get("telegram_id")
+        if telegram_id is None or str(telegram_id).strip() == "":
+            return jsonify({"error": "telegram_id query parameter is required"}), 400
+        try:
+            telegram_id = int(telegram_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "telegram_id must be integer"}), 400
+
+        user = find_user(telegram_id)
+        if not user or not user.active:
+            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+
+        fresh_cfg = load_config()
+        vless_url = getattr(fresh_cfg, "vless_reality_share_url", None)
+        if not vless_url:
+            return jsonify({"error": "VLESS_REALITY_SHARE_URL is not configured on server"}), 503
+
+        return jsonify({
+            "ok": True,
+            "vless_url": vless_url.strip(),
+            "hint": (
+                "Скопируй ссылку vless://... целиком. "
+                "Android: v2rayNG или Hiddify → «+» → «Импорт из буфера». "
+                "iOS: Happ, Streisand, FoXray или Hiddify → импорт ссылки."
+            ),
+        })
+    except Exception as e:
+        logger.exception("Ошибка recovery/mobile-vpn: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

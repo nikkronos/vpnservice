@@ -243,4 +243,84 @@ document.addEventListener('DOMContentLoaded', () => {
 
   bindVpnRecovery('eu1', vpnEu1Input, vpnEu1Btn, vpnEu1Result, vpnEu1AndroidSafe);
   bindVpnRecovery('eu2', vpnEu2Input, vpnEu2Btn, vpnEu2Result, vpnEu2AndroidSafe);
+
+  // ── Мобильный VPN (VLESS+REALITY) ─────────────────────────────────────────
+  const mobileVpnInput = document.getElementById('mobileVpnTelegramId');
+  const mobileVpnBtn = document.getElementById('btnGetMobileVpn');
+  const mobileVpnResult = document.getElementById('mobile-vpn-result');
+
+  if (savedId && mobileVpnInput) mobileVpnInput.value = savedId;
+
+  if (mobileVpnInput && mobileVpnBtn && mobileVpnResult) {
+    // Синхронизация ID с остальными полями
+    mirrorVpnIds(vpnEu1Input, mobileVpnInput);
+    mirrorVpnIds(mobileVpnInput, vpnEu1Input);
+    mirrorVpnIds(mobileVpnInput, vpnEu2Input);
+
+    mobileVpnBtn.addEventListener('click', async () => {
+      const telegramId = (mobileVpnInput.value || '').trim();
+      if (!telegramId) {
+        setResult(mobileVpnResult, 'Введите Telegram ID.', true);
+        return;
+      }
+
+      mobileVpnBtn.disabled = true;
+      setResult(mobileVpnResult, 'Запрос ссылки...', false);
+
+      try {
+        localStorage.setItem('vpn_recovery_telegram_id', telegramId);
+
+        const resp = await fetch(
+          '/api/recovery/mobile-vpn?telegram_id=' + encodeURIComponent(telegramId),
+          { method: 'GET' }
+        );
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setResult(mobileVpnResult, 'Ошибка: ' + (data.error || resp.statusText || 'unknown'), true);
+          return;
+        }
+
+        const vlessUrl = data.vless_url || '';
+        const hint = data.hint || '';
+        if (!vlessUrl) {
+          setResult(mobileVpnResult, 'Сервер не вернул ссылку.', true);
+          return;
+        }
+
+        // Показываем ссылку + кнопку копирования
+        mobileVpnResult.innerHTML = '';
+        const hintEl = document.createElement('p');
+        hintEl.style.color = '#1b5e20';
+        hintEl.textContent = hint || 'Скопируйте ссылку ниже и импортируйте в приложение.';
+        mobileVpnResult.appendChild(hintEl);
+
+        const linkEl = document.createElement('code');
+        linkEl.style.wordBreak = 'break-all';
+        linkEl.style.display = 'block';
+        linkEl.style.marginTop = '8px';
+        linkEl.textContent = vlessUrl;
+        mobileVpnResult.appendChild(linkEl);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Копировать ссылку';
+        copyBtn.className = 'btn-recovery btn-recovery-secondary';
+        copyBtn.style.marginTop = '8px';
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(vlessUrl);
+            copyBtn.textContent = 'Скопировано!';
+            setTimeout(() => { copyBtn.textContent = 'Копировать ссылку'; }, 2000);
+          } catch {
+            linkEl.focus();
+          }
+        });
+        mobileVpnResult.appendChild(copyBtn);
+      } catch (err) {
+        setResult(mobileVpnResult, 'Ошибка сети: ' + (err && err.message ? err.message : String(err)), true);
+      } finally {
+        mobileVpnBtn.disabled = false;
+      }
+    });
+  }
 });
