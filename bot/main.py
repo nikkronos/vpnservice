@@ -529,20 +529,6 @@ def main() -> None:
     def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
         _do_regen(message, False)
 
-    @bot.message_handler(commands=["server"])
-    def cmd_server(message: types.Message) -> None:  # type: ignore[override]
-        """Информация о текущем сервере (eu1 — единственный)."""
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
-        safe_reply(
-            message,
-            "🌍 <b>Сервер VPN</b>\n\n"
-            "Активный сервер: <b>Европа — eu1</b> (Fornex, Германия)\n"
-            "Протокол: AmneziaWG (обход блокировок из РФ)\n\n"
-            "Используй /get_config чтобы получить конфиг.",
-            reply_markup=markup,
-        )
-    
     @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt", "profile_eu1_unified"))
     def callback_profile_eu1(call: types.CallbackQuery) -> None:  # type: ignore[override]
         """Обработчик выбора типа профиля для Европы: Обычный VPN, VPN+GPT или Универсальный."""
