@@ -1,5 +1,55 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-11 — Защита сервера Fornex от брутфорса и UDP-флуда
+
+- **Причина:** скачок CPU до 98.69% из-за SSH-брутфорса (нет fail2ban) + возможный UDP-флуд на порт 39580.
+- **fail2ban** установлен и активен — банит IP после неудачных попыток входа.
+- **SSH по паролю отключён** — только ключ. Важно: настройка была в `/etc/ssh/sshd_config.d/50-cloud-init.conf` (перекрывает основной конфиг).
+- **SSH-ключ Fornex:** `C:\Users\krono\.ssh\id_ed25519_fornex`, алиас `ssh fornex` в `~/.ssh/config`.
+- **Rate-limit UDP 39580** через iptables (1000 пакетов/сек), сохранён через `iptables-persistent`.
+- **sysstat** установлен — история CPU/сети: `sar -u 1 10`.
+- Подробно: `docs/sessions/SESSION_SUMMARY_2026-05-11.md`
+
+## 2026-05-09 — xHTTP packet-up на YC VM (обход ТСПУ-заморозки)
+
+- **Проблема:** ТСПУ замораживает TCP+REALITY сессии после 15–20 КБ; `/mobile_vpn` не работает у Yota/MegaFon в whitelist-режиме.
+- **Изменение:** транспорт на YC VM (`158.160.236.147`) переключён с `TCP + xtls-rprx-vision` на `xHTTP packet-up` (каждый пакет — отдельный HTTP-запрос, нет долгоживущей сессии для заморозки).
+- **Файл на сервере:** `/usr/local/etc/xray/config.json` — `network: xhttp`, `xhttpSettings: {mode: packet-up, path: /download}`, убран `flow`.
+- **Бот:** `VLESS_REALITY_SHARE_URL` в `/opt/vpnservice/env_vars.txt` на Fornex обновлена (`type=xhttp&mode=packet-up&path=%2Fdownload`); `vpn-bot.service` перезапущен.
+- **Статус:** развёрнуто ✅, тест на MegaFon-SIM — ожидает фидбэка от пользователей.
+- **Документация:** `docs/yandex-cloud-reality-setup.md` обновлён.
+
+## 2026-05-08 — Анализ конкурентов, удаление eu2, редизайн панели мониторинга
+
+### Анализ конкурентов
+
+- **VlexNet:** balance-модель (бесплатно за рефералов), Mini App, Telegram-прокси бесплатно, 3 дня пробного, без карты.
+- **Barin VPN:** 13 399 пользователей/мес, слот-машина как геймификация, Telegram OAuth для веб-кабинета, 199₽/3 устройства.
+- **SPACE Connect:** уточнены данные — Mini App ✅ (через Happ), split tunneling, 8610 пользователей/мес, 1% партнёрская программа.
+- Обновлена таблица сравнения в `docs/competitors-analysis.md` (7 конкурентов, новые строки: Telegram proxy, split tunneling, новостной канал, геймификация, подарочный VPN).
+- **Вывод по анализу:** все конкуренты используют key-based систему (не .conf), белые списки у конкурентов не работают — наш VLESS+REALITY через YC — преимущество на LTE.
+
+### Удаление eu2 из бота
+
+- **`bot/wireguard_peers.py`:** `not in ("eu1", "eu2")` → `!= "eu1"` (3 вхождения); `get_available_servers()` — eu2 удалён.
+- **`bot/storage.py`:** приоритет поиска peer `["rus1", "rus2", "eu1", "eu2"]` → `["eu1"]`.
+- **`bot/main.py`:** все `in ("eu1", "eu2")` → `== "eu1"`; кнопка «🖥 Выбрать сервер» удалена из меню (3 места); удалены хендлеры `cmd_server` и `callback_server_select`; упоминание `/server` в тексте бота убрано.
+
+### Редизайн панели мониторинга (http://185.21.8.91:5001/)
+
+**Проблема трафика (root cause):** панель работает на eu1, старый код SSHился к eu1 с eu1 (self-SSH). AmneziaWG живёт в Docker-контейнере `amnezia-awg2` — `awg` недоступен на хосте напрямую.
+
+**Исправление:** `_get_awg_dump_eu1()` теперь использует `docker exec amnezia-awg2 awg show awg0 dump` вместо локального subprocess.
+
+**Изменения файлов:**
+- **`web/app.py`:** добавлены `_parse_wg_dump_full()` (парсит rx, tx, last_handshake по pubkey), `_get_awg_dump_eu1()` (docker exec); `/api/traffic` возвращает список пользователей с rx_bytes, tx_bytes, last_handshake, отсортированный по трафику; `/api/services` упрощён до AmneziaWG + VLESS.
+- **`web/templates/index.html`:** полный переписан — тёмная тема, статус-бар (AWG/VLESS точки, счётчики), таблица пользователей (IP, ↓ Принято, ↑ Отправлено, Последний сеанс), статическая сводка конфигов, footer с Recovery.
+- **`web/static/main.js`:** переписан — `fmt(bytes)` (КБ/МБ/ГБ), `relTime(ts)` («● сейчас» / «N мин назад» / «N ч назад» / «никогда»), автообновление каждые 60 сек.
+- **`web/static/style.css`:** полная замена старой светлой темы на тёмную неоновую (CSS variables, neon glow для dot-on, cyan accent, purple tx, зелёный «сейчас»).
+- **`web/templates/recovery.html`:** удалён блок «Слот EU2», описание упрощено, кнопка переименована в «Восстановить VPN».
+
+**Результат:** трафик отображается корректно (8.3 ГБ, 7.6 ГБ и т.д.), last_handshake показывает «● сейчас» / время, строки без трафика уходят вниз и затемняются.
+
 ## 2026-05-07 — Рефакторинг UX бота + git setup
 
 - **VLESS code-блок:** `/mobile_vpn` теперь отправляет ссылку в `<code>` блоке — Telegram не авто-линкует `www.yandex.ru` внутри строки, копирование чистое.
