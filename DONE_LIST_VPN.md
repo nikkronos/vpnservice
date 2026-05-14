@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-14 — Аудит безопасности веб-панели
+
+- **`/api/users`**: убрана авторизация по telegram_id (легко угадать). Теперь требует `ADMIN_SECRET` — случайная 64-char hex строка из `env_vars.txt`.
+- **Legacy recovery endpoints** (`/api/recovery/vpn`, `/api/recovery/telegram-proxy`, `/api/recovery/proxy-link`, `/api/recovery/mobile-vpn`): добавлена проверка `RECOVERY_SECRET` через заголовок `X-Recovery-Secret` или тело запроса. Без секрета — 403/503. Frontend (`/recovery`) использует email/OTP, эти эндпоинты не затронуты.
+- **`/api/traffic`**: убран `telegram_id` из публичного ответа — остались только `username`, `wg_ip`, трафик.
+- **`bot/config.py`**: добавлены поля `admin_secret` и `recovery_secret` в `BotConfig`.
+- **`env_vars.example.txt`**: добавлены примеры новых переменных.
+- Приватные ключи WG/Xray: не хранятся в БД, генерируются на сервере и отдаются единожды — OK.
+- Email/OTP флоу: защищён session token'ом — OK.
+
 ## 2026-05-14 — IPv6 в AllowedIPs (защита от IPv6 leak)
 
 - **Задача:** трафик к IPv6-адресам шёл мимо VPN — реальный IP виден на сайтах с IPv6.
