@@ -3,89 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VPN Мониторинг</title>
+    <title>VPN Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🔐 VPN Мониторинг</h1>
-            <p class="subtitle">Статус сервиса и статистика использования</p>
+            <div class="header-left">
+                <h1>🔐 VPN Admin</h1>
+                <span class="header-sub">eu1 · Fornex · Германия</span>
+            </div>
+            <div class="header-right">
+                <span class="update-time" id="update-time">—</span>
+                <button class="refresh-btn" id="refresh-btn" onclick="loadAll()">↺ Обновить</button>
+            </div>
         </header>
 
-        <section class="stats">
-            <h2>📊 Общая статистика</h2>
-            <p class="section-hint">Пользователь — аккаунт в боте. Подключение — один выданный конфиг (один конфиг на телефоне и ПК = одно подключение).</p>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-value">{{ stats.active_users }}</div>
-                    <div class="stat-label">Активных пользователей</div>
-                    <div class="stat-total">из {{ stats.total_users }} всего</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value">{{ stats.active_peers }}</div>
-                    <div class="stat-label">Активных подключений</div>
-                    <div class="stat-total">из {{ stats.total_peers }} всего</div>
-                </div>
+        <!-- Статус-бар -->
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-dot" id="dot-awg"></span>
+                <span id="label-awg">AmneziaWG</span>
+            </div>
+            <div class="status-item">
+                <span class="status-dot" id="dot-vless"></span>
+                <span id="label-vless">VLESS</span>
+            </div>
+            <div class="status-sep"></div>
+            <div class="status-item">
+                <span class="stat-num" id="stat-users">—</span>
+                <span class="stat-desc">пользователей</span>
+            </div>
+            <div class="status-item">
+                <span class="stat-num" id="stat-peers">—</span>
+                <span class="stat-desc">конфигов</span>
+            </div>
+        </div>
+
+        <!-- Таблица пользователей -->
+        <section class="users-section">
+            <div class="section-header">
+                <h2>Пользователи</h2>
+                <span class="traffic-note" id="traffic-note"></span>
+            </div>
+            <div class="table-wrap">
+                <table class="users-table" id="users-table">
+                    <thead>
+                        <tr>
+                            <th>Пользователь</th>
+                            <th>IP</th>
+                            <th title="Принято сервером (скачано пользователем)">↓ Принято</th>
+                            <th title="Отправлено сервером (загружено пользователем)">↑ Отправлено</th>
+                            <th>Последний сеанс</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                        <tr><td colspan="5" class="loading">Загрузка...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </section>
 
-        <section class="servers">
-            <h2>🖥️ Статус серверов</h2>
-            <p class="section-hint">Онлайн/офлайн — по пингу с сервера панели до ноды. Европа может быть «офлайн» здесь, но VPN для клиентов при этом работать (AmneziaWG из РФ).</p>
-            <div id="servers-list" class="servers-list">
-                <p>Загрузка...</p>
-            </div>
-        </section>
-
-        <section class="by-server">
-            <h2>📈 По серверам</h2>
-            <p class="section-hint">main — РФ (Timeweb), eu1 — Европа (Fornex). Число — сколько активных конфигов на каждой ноде.</p>
-            <div id="by-server-chart" class="chart">
-                {% if stats.by_server %}
-                    {% for server_id, count in stats.by_server.items() %}
-                        <div class="chart-item">
-                            <span class="chart-label">{{ server_id }}</span>
-                            <div class="chart-bar">
-                                <div class="chart-fill" style="width: {{ (count / stats.active_peers * 100) if stats.active_peers > 0 else 0 }}%"></div>
-                            </div>
-                            <span class="chart-value">{{ count }}</span>
-                        </div>
-                    {% endfor %}
-                {% else %}
-                    <p>Нет активных подключений</p>
-                {% endif %}
-            </div>
-        </section>
-
-        <section class="services">
-            <h2>🔧 Сервисы</h2>
-            <p class="section-hint">WireGuard/AmneziaWG — по пингу до хоста; Shadowsocks и MTProto — по проверке TCP-порта. Пинг до Европы с панели может не проходить, тогда первые два «недоступны», порты при этом бывают открыты.</p>
-            <div id="services-list" class="services-list">
-                <p>Загрузка...</p>
-            </div>
-        </section>
-
-        <section class="traffic">
-            <h2>📶 Трафик по пользователям</h2>
-            <p class="section-hint">Данные с нод WireGuard/AmneziaWG (main — локально, eu1 — по SSH). Обновление раз в 5 минут. Счётчики — <b>накопленные с последнего перезапуска</b> интерфейса на сервере (не сбрасываются при отключении клиента).</p>
-            <p id="traffic-last-update" class="traffic-last-update" style="margin-bottom: 0.5rem; font-size: 0.9em; color: #666;"></p>
-            <div id="traffic-list" class="traffic-content">
-                <p>Загрузка...</p>
-            </div>
-        </section>
-
-        {% if stats.users_summary %}
-        <section class="users-summary">
-            <h2>👥 Пользователи (сводка)</h2>
-            <p class="section-hint">Подключений — число выданных конфигов (peer), не физических устройств. Один конфиг на двух устройствах = 1 подключение.</p>
-            <div class="users-table-wrap">
+        <!-- Сводка из stats (серверная, без JS) -->
+        <section class="summary-section">
+            <h2>Все конфиги</h2>
+            <div class="table-wrap">
                 <table class="users-table">
                     <thead>
                         <tr>
                             <th>Пользователь</th>
                             <th>Серверы</th>
-                            <th>Подключений</th>
+                            <th>Конфигов</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -100,11 +88,9 @@
                 </table>
             </div>
         </section>
-        {% endif %}
 
         <footer>
-            <p>Последнее обновление: <span id="last-update"></span></p>
-            <p><a href="/api/stats" target="_blank">API статистики (JSON)</a></p>
+            <a href="/recovery">Recovery →</a>
         </footer>
     </div>
 

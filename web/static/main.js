@@ -1,155 +1,102 @@
-// Обновление статуса серверов
-async function updateServersStatus() {
-    try {
-        const response = await fetch('/api/servers', { cache: 'no-store' });
-        const servers = await response.json();
-        
-        const serversList = document.getElementById('servers-list');
-        serversList.innerHTML = '';
-        
-        for (const [serverId, server] of Object.entries(servers)) {
-            const card = document.createElement('div');
-            card.className = `server-card ${server.status}`;
-            
-            const statusBadge = server.status === 'online' ? '🟢 Онлайн' : 
-                               server.status === 'offline' ? '🔴 Офлайн' : 
-                               '⚠️ Ошибка';
-            
-            const pingInfo = server.ping_ms ? `Пинг: ${server.ping_ms.toFixed(0)} мс` : '';
-            
-            card.innerHTML = `
-                <div class="server-info">
-                    <h3>${server.name}</h3>
-                    <p>${server.description || ''}</p>
-                    <p><small>${server.endpoint || ''} ${pingInfo}</small></p>
-                </div>
-                <div class="server-status">
-                    <span class="status-badge ${server.status}">${statusBadge}</span>
-                </div>
-            `;
-            
-            serversList.appendChild(card);
-        }
-    } catch (error) {
-        console.error('Ошибка загрузки статуса серверов:', error);
-        document.getElementById('servers-list').innerHTML = 
-            '<p style="color: red;">Ошибка загрузки статуса серверов</p>';
-    }
-}
-
-// Обновление статуса сервисов (WireGuard, AmneziaWG, Shadowsocks, MTProto)
-async function updateServicesStatus() {
-    const el = document.getElementById('services-list');
-    if (!el) return;
-    try {
-        const response = await fetch('/api/services', { cache: 'no-store' });
-        const data = await response.json();
-        if (data.error) {
-            el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
-            return;
-        }
-        el.innerHTML = '';
-        for (const s of data.services || []) {
-            const card = document.createElement('div');
-            card.className = 'service-card ' + (s.status || 'unknown');
-            const statusBadge = s.status === 'online' ? '🟢 Доступен' :
-                s.status === 'offline' ? '🔴 Недоступен' : '⚠️ Не проверено';
-            card.innerHTML = `
-                <div class="service-info">
-                    <strong>${s.server_name}</strong> — ${s.service}
-                    ${s.note ? '<br><small>' + s.note + '</small>' : ''}
-                </div>
-                <span class="status-badge ${s.status || 'unknown'}">${statusBadge}</span>
-            `;
-            el.appendChild(card);
-        }
-    } catch (err) {
-        console.error('Ошибка загрузки сервисов:', err);
-        el.innerHTML = '<p style="color: red;">Ошибка загрузки сервисов</p>';
-    }
-}
-
-// Форматирование байтов в МБ/ГБ
-function formatBytes(bytes) {
-    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' ГБ';
-    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' МБ';
-    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' КБ';
+function fmt(bytes) {
+    if (!bytes) return '—';
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' ГБ';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' МБ';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' КБ';
     return bytes + ' Б';
 }
 
-// Обновление блока трафика
-async function updateTraffic() {
-    const el = document.getElementById('traffic-list');
-    const lastUpdateEl = document.getElementById('traffic-last-update');
+function relTime(ts) {
+    if (!ts) return '<span class="hs-never">никогда</span>';
+    const diff = Math.floor(Date.now() / 1000) - ts;
+    if (diff < 0) return '—';
+    if (diff < 180) return '<span class="hs-now">● сейчас</span>';
+    if (diff < 3600) return `<span class="hs-recent">${Math.floor(diff / 60)} мин назад</span>`;
+    if (diff < 86400) return `<span class="hs-today">${Math.floor(diff / 3600)} ч назад</span>`;
+    return `<span class="hs-old">${Math.floor(diff / 86400)} дн назад</span>`;
+}
+
+function setDot(id, status) {
+    const el = document.getElementById(id);
     if (!el) return;
+    el.className = 'status-dot ' + (status === 'online' ? 'dot-on' : status === 'offline' ? 'dot-off' : 'dot-unknown');
+}
+
+async function loadServices() {
     try {
-        const response = await fetch('/api/traffic', { cache: 'no-store' });
-        const data = await response.json();
-        if (data.error) {
-            el.innerHTML = '<p style="color: red;">Ошибка: ' + data.error + '</p>';
-            if (lastUpdateEl) lastUpdateEl.textContent = '';
-            return;
+        const r = await fetch('/api/services', { cache: 'no-store' });
+        const data = await r.json();
+        for (const s of data.services || []) {
+            if (s.service.startsWith('Amnezia')) setDot('dot-awg', s.status);
+            if (s.service.startsWith('VLESS')) setDot('dot-vless', s.status);
         }
-        // Показываем время последнего обновления данных с бэкенда
-        if (lastUpdateEl && data.last_update) {
-            try {
-                const d = new Date(data.last_update);
-                lastUpdateEl.textContent = 'Данные на: ' + d.toLocaleString('ru-RU');
-            } catch (_) {
-                lastUpdateEl.textContent = 'Данные на: ' + data.last_update;
-            }
-        }
-        const rows = data.rows || [];
-        const byUser = data.by_user || [];
-        if (rows.length === 0 && byUser.length === 0) {
-            el.innerHTML = '<p>Нет данных о трафике (подключите клиентов к нодам).</p>';
-            return;
-        }
-        let html = '';
-        if (byUser.length > 0) {
-            html += '<table class="users-table traffic-table"><thead><tr><th>Пользователь</th><th>Принято</th><th>Отправлено</th></tr></thead><tbody>';
-            for (const u of byUser) {
-                const name = (u.username || 'ID ' + u.telegram_id);
-                html += '<tr><td>' + name + '</td><td>' + formatBytes(u.rx_bytes) + '</td><td>' + formatBytes(u.tx_bytes) + '</td></tr>';
-            }
-            html += '</tbody></table>';
-        }
-        if (rows.length > 0) {
-            html += '<p class="traffic-detail-caption"><strong>По устройствам (сервер / IP):</strong></p>';
-            html += '<table class="users-table traffic-table"><thead><tr><th>Пользователь</th><th>Сервер</th><th>IP</th><th>Принято</th><th>Отправлено</th></tr></thead><tbody>';
-            for (const r of rows) {
-                const name = (r.username || 'ID ' + r.telegram_id);
-                html += '<tr><td>' + name + '</td><td>' + r.server_id + '</td><td>' + (r.wg_ip || '—') + '</td><td>' + formatBytes(r.rx_bytes) + '</td><td>' + formatBytes(r.tx_bytes) + '</td></tr>';
-            }
-            html += '</tbody></table>';
-        }
-        el.innerHTML = html;
-    } catch (err) {
-        console.error('Ошибка загрузки трафика:', err);
-        el.innerHTML = '<p style="color: red;">Ошибка загрузки трафика</p>';
+    } catch (e) {
+        setDot('dot-awg', 'unknown');
+        setDot('dot-vless', 'unknown');
     }
 }
 
-// Обновление времени последнего обновления
-function updateLastUpdate() {
-    const now = new Date();
-    const el = document.getElementById('last-update');
-    if (el) el.textContent = now.toLocaleString('ru-RU');
+async function loadStats() {
+    try {
+        const r = await fetch('/api/stats', { cache: 'no-store' });
+        const d = await r.json();
+        const u = document.getElementById('stat-users');
+        const p = document.getElementById('stat-peers');
+        if (u) u.textContent = d.active_users ?? '—';
+        if (p) p.textContent = d.active_peers ?? '—';
+    } catch (e) {}
 }
 
-// Автообновление каждые 5 минут (снижение нагрузки на сервер)
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 минут
-setInterval(() => {
-    updateServersStatus();
-    updateServicesStatus();
-    updateTraffic();
-    updateLastUpdate();
-}, REFRESH_INTERVAL_MS);
+async function loadTraffic() {
+    const tbody = document.getElementById('users-tbody');
+    const note = document.getElementById('traffic-note');
+    if (!tbody) return;
+    try {
+        const r = await fetch('/api/traffic', { cache: 'no-store' });
+        const data = await r.json();
+        if (data.error) {
+            tbody.innerHTML = `<tr><td colspan="5" class="err">Ошибка: ${data.error}</td></tr>`;
+            return;
+        }
+        if (note && data.last_update) {
+            const d = new Date(data.last_update);
+            note.textContent = 'обновлено ' + d.toLocaleTimeString('ru-RU');
+        }
+        const users = data.users || [];
+        if (!users.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="loading">Нет данных</td></tr>';
+            return;
+        }
+        tbody.innerHTML = users.map(u => {
+            const name = u.username ? `@${u.username}` : `ID ${u.telegram_id}`;
+            const ip = (u.wg_ip || '').replace('/32', '').replace('/24', '');
+            const total = u.rx_bytes + u.tx_bytes;
+            const rowClass = total > 0 ? '' : ' class="row-idle"';
+            return `<tr${rowClass}>
+                <td class="td-name">${name}</td>
+                <td class="td-ip">${ip || '—'}</td>
+                <td class="td-rx">${fmt(u.rx_bytes)}</td>
+                <td class="td-tx">${fmt(u.tx_bytes)}</td>
+                <td class="td-hs">${relTime(u.last_handshake)}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="err">Ошибка загрузки</td></tr>`;
+    }
+}
 
-// Инициализация при загрузке страницы
-document.addEventListener('DOMContentLoaded', () => {
-    updateServersStatus();
-    updateServicesStatus();
-    updateTraffic();
-    updateLastUpdate();
-});
+function updateClock() {
+    const el = document.getElementById('update-time');
+    if (el) el.textContent = new Date().toLocaleTimeString('ru-RU');
+}
+
+async function loadAll() {
+    const btn = document.getElementById('refresh-btn');
+    if (btn) { btn.textContent = '↺'; btn.disabled = true; }
+    updateClock();
+    await Promise.all([loadServices(), loadStats(), loadTraffic()]);
+    if (btn) { btn.textContent = '↺ Обновить'; btn.disabled = false; }
+}
+
+document.addEventListener('DOMContentLoaded', loadAll);
+setInterval(loadAll, 60 * 1000);
