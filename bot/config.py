@@ -16,6 +16,16 @@ class BotConfig:
     vpn_recovery_url: str = "http://185.21.8.91:5001/recovery"
     # Share-ссылка vless:// для мобильного интернета (Xray REALITY), из VLESS_REALITY_SHARE_URL
     vless_reality_share_url: str | None = None
+    # Email: Resend API
+    resend_api_key: str | None = None
+    resend_from_email: str = "noreply@vpn.example.com"
+    # Telegram IDs, которые не требуют email-авторизации (тестовые аккаунты)
+    # Запятая-разделённый список в env_vars.txt: TELEGRAM_ID_WHITELIST=123,456
+    telegram_id_whitelist: list[int] | None = None
+    # Секрет для /api/users (вместо telegram_id как admin_key)
+    admin_secret: str | None = None
+    # Секрет для legacy telegram_id-based recovery endpoints
+    recovery_secret: str | None = None
 
 
 def _parse_env_file(path: pathlib.Path) -> Dict[str, str]:
@@ -74,6 +84,19 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         if not vless_reality_share_url.lower().startswith("vless://"):
             vless_reality_share_url = None
 
+    resend_api_key = (data.get("RESEND_API_KEY") or "").strip() or None
+    resend_from_email = (data.get("RESEND_FROM_EMAIL") or "").strip() or "noreply@vpn.example.com"
+
+    whitelist_raw = (data.get("TELEGRAM_ID_WHITELIST") or "").strip()
+    telegram_id_whitelist: list[int] = []
+    for part in whitelist_raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            telegram_id_whitelist.append(int(part))
+
+    admin_secret = (data.get("ADMIN_SECRET") or "").strip() or None
+    recovery_secret = (data.get("RECOVERY_SECRET") or "").strip() or None
+
     return BotConfig(
         bot_token=token,
         admin_id=admin_id,
@@ -82,6 +105,11 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         mtproxy_rotate_script=mtproxy_rotate_script,
         vpn_recovery_url=vpn_recovery_url,
         vless_reality_share_url=vless_reality_share_url,
+        resend_api_key=resend_api_key,
+        resend_from_email=resend_from_email,
+        telegram_id_whitelist=telegram_id_whitelist or None,
+        admin_secret=admin_secret,
+        recovery_secret=recovery_secret,
     )
 
 

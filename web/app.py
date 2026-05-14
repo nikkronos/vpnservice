@@ -27,9 +27,22 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
+from bot.database import (
+    db_create_otp,
+    db_verify_otp,
+    db_create_session,
+    db_verify_session,
+    db_find_user_by_email,
+    db_upsert_user,
+    db_get_effective_telegram_id,
+    init_db,
+)
+from bot.email_otp import generate_otp, send_otp_email
 from bot.wireguard_peers import (
+    WireGuardError,
     create_amneziawg_peer_and_config_for_user,
     execute_server_command,
+    generate_vpn_url,
     regenerate_amneziawg_peer_and_config_for_user,
     find_peer_by_telegram_id,
     is_amneziawg_eu1_configured,
@@ -44,11 +57,32 @@ app = Flask(__name__)
 try:
     config = load_config()
     ADMIN_ID = config.admin_id
+    # Инициализируем SQLite DB (включая миграцию users.json)
+    init_db(whitelist_seed=config.telegram_id_whitelist or [])
 except Exception as e:
-    logger.error(f"Ошибка загрузки конфига: {e}")
+    logger.error(f"Ошибка загрузки конфига/БД: {e}")
     ADMIN_ID = None
 
 _recovery_lock = threading.Lock()
+
+
+def _check_recovery_secret() -> Optional[tuple]:
+    """
+    Проверяет RECOVERY_SECRET из заголовка X-Recovery-Secret или query-параметра recovery_secret.
+    Возвращает None если всё ок, или (jsonify(error), status_code) если проверка не прошла.
+    Если секрет не задан в env — запрещаем доступ к legacy-эндпоинтам (fail secure).
+    """
+    secret = getattr(config, "recovery_secret", None) if config else None
+    if not secret:
+        return jsonify({"error": "Recovery secret not configured on server"}), 503
+    provided = (
+        request.headers.get("X-Recovery-Secret")
+        or request.args.get("recovery_secret")
+        or (request.get_json(silent=True) or {}).get("recovery_secret")
+    )
+    if not provided or provided != secret:
+        return jsonify({"error": "Unauthorized"}), 403
+    return None
 
 
 def _parse_tg_proxy_link(link: Optional[str]) -> Dict[str, str]:
@@ -197,88 +231,57 @@ def check_server_status(server_id: str, endpoint_host: Optional[str] = None) -> 
 
 
 def _parse_wg_dump_transfer(stdout: str) -> Dict[str, tuple]:
-    """
-    Парсит вывод `wg show <interface> dump`.
-    Возвращает dict: public_key -> (rx_bytes, tx_bytes).
-    Формат dump: первая строка — интерфейс, далее по строке на peer (табы):
-    public_key, preshared_key, endpoint, allowed_ips, latest_handshake, transfer_rx, transfer_tx, ...
-    """
+    """Парсит dump → public_key -> (rx_bytes, tx_bytes)."""
     result: Dict[str, tuple] = {}
-    lines = stdout.strip().split("\n")
-    for line in lines[1:]:  # пропускаем строку интерфейса
+    for line in stdout.strip().split("\n")[1:]:
         parts = line.split("\t")
         if len(parts) >= 7:
             try:
-                pubkey = parts[0].strip()
-                rx = int(parts[5])
-                tx = int(parts[6])
-                result[pubkey] = (rx, tx)
+                result[parts[0].strip()] = (int(parts[5]), int(parts[6]))
             except (ValueError, IndexError):
                 continue
     return result
 
 
-def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
-    """
-    Получает трафик (rx, tx в байтах) по каждому pubkey для указанной ноды.
-    rus1/rus2 → main (локально); eu1/eu2 → EU по SSH (awg/wg).
-    """
-    from bot.wireguard_peers import canonical_env_server_id
-
-    physical = canonical_env_server_id(server_id)
-    base = pathlib.Path(__file__).parent.parent
-    env = _parse_env_file(base / "env_vars.txt")
-    if physical == "main":
-        interface = env.get("WG_INTERFACE", "wg0")
-        ssh_host = (env.get("WG_SSH_HOST") or "").strip()
-        # Панель на Fornex: локального wg0 нет — читаем dump с main по SSH (см. env_vars WG_SSH_*).
-        if ssh_host:
+def _parse_wg_dump_full(stdout: str) -> Dict[str, Dict]:
+    """Парсит dump → public_key -> {rx, tx, last_handshake}."""
+    result: Dict[str, Dict] = {}
+    for line in stdout.strip().split("\n")[1:]:
+        parts = line.split("\t")
+        if len(parts) >= 7:
             try:
-                from bot.wireguard_peers import execute_server_command
+                result[parts[0].strip()] = {
+                    "rx": int(parts[5]),
+                    "tx": int(parts[6]),
+                    "last_handshake": int(parts[4]),
+                }
+            except (ValueError, IndexError):
+                continue
+    return result
 
-                iface_q = shlex.quote(interface)
-                stdout, _stderr = execute_server_command(
-                    "main",
-                    f"wg show {iface_q} dump 2>/dev/null || true",
-                    timeout=15,
-                )
-                return _parse_wg_dump_transfer(stdout or "")
-            except Exception as e:
-                logger.warning("SSH wg show для main (%s): %s", ssh_host, e)
-                return {}
-        try:
-            out = subprocess.run(
-                ["wg", "show", interface, "dump"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if out.returncode != 0:
-                return {}
-            return _parse_wg_dump_transfer(out.stdout)
-        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-            logger.warning("Локальный wg show для %s: %s", physical, e)
-            return {}
-    else:
-        try:
-            from bot.wireguard_peers import execute_server_command, _get_server_config, _load_env
-            env = _load_env()
-            cfg = _get_server_config(physical, env)
-            # eu1 может использовать AmneziaWG (интерфейс awg0) — тогда нужна команда awg
-            awg_interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip()
-            interface = awg_interface or cfg.get("interface", "wg0")
-            use_awg = interface.startswith("awg") or bool(awg_interface)
-            cmd = f"awg show {interface} dump 2>/dev/null" if use_awg else f"wg show {interface} dump 2>/dev/null"
-            fallback_cmd = f"wg show {interface} dump 2>/dev/null" if use_awg else None
-            stdout, stderr = execute_server_command(physical, f"{cmd} || true", timeout=15)
-            result = _parse_wg_dump_transfer(stdout or "")
-            if not result and fallback_cmd:
-                stdout2, _ = execute_server_command(physical, f"{fallback_cmd} || true", timeout=15)
-                result = _parse_wg_dump_transfer(stdout2 or "")
-            return result
-        except Exception as e:
-            logger.warning("SSH wg/awg show для %s: %s", server_id, e)
-            return {}
+
+def _get_awg_dump_eu1() -> str:
+    """awg живёт внутри Docker-контейнера amnezia-awg2."""
+    try:
+        out = subprocess.run(
+            ["docker", "exec", "amnezia-awg2", "awg", "show", "awg0", "dump"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+    return ""
+
+
+def _get_wg_transfer_for_server(server_id: str) -> Dict[str, tuple]:
+    """Трафик по pubkey для eu1 (локально, панель на том же хосте)."""
+    if server_id == "eu1":
+        stdout = _get_awg_dump_eu1()
+        if stdout:
+            return _parse_wg_dump_transfer(stdout)
+        return {}
+    return {}
 
 
 def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -375,72 +378,35 @@ def api_servers():
 
 @app.route("/api/services")
 def api_services():
-    """API: статус сервисов (WireGuard, AmneziaWG, Shadowsocks, MTProto) по нодам."""
+    """API: статус сервисов eu1 (AmneziaWG локально + VLESS порт)."""
     try:
-        from bot.wireguard_peers import get_available_servers, canonical_env_server_id
-        from bot.config import _parse_env_file
-
-        servers_info = get_available_servers()
         env = _parse_env_file(pathlib.Path(__file__).parent.parent / "env_vars.txt")
+        eu1_host = env.get("WG_EU1_ENDPOINT_HOST") or env.get("WG_EU1_SSH_HOST") or "185.21.8.91"
 
-        services_list: List[Dict] = []
+        dump = _get_awg_dump_eu1()
+        awg_ok = bool(dump.strip())
 
-        for server_id, info in servers_info.items():
-            physical = canonical_env_server_id(server_id)
-            if physical == "main":
-                host = env.get("WG_ENDPOINT_HOST") or env.get("VPN_SERVER_HOST")
-            else:
-                host = env.get(f"WG_{physical.upper()}_ENDPOINT_HOST")
+        vless_port = 443
+        vless_ok = check_port("158.160.0.1", vless_port, timeout=2.0)
+        try:
+            yc_host = env.get("VLESS_YC_HOST") or ""
+            if yc_host:
+                vless_ok = check_port(yc_host, vless_port, timeout=2.0)
+        except Exception:
+            pass
 
-            if not host:
-                continue
-
-            server_name = info.get("name", server_id)
-
-            wg_status = check_server_status(server_id, host)
-            services_list.append({
-                "server_id": server_id,
-                "server_name": server_name,
-                "service": "WireGuard",
-                "status": wg_status["status"],
-                "note": "Низкий пинг (Timeweb)" if physical == "main" else "Из РФ может не работать (используйте AmneziaWG)",
-            })
-
-            # Доп. сервисы EU — один раз на eu1 (не дублируем для eu2)
-            if server_id == "eu1":
-                services_list.append({
-                    "server_id": server_id,
-                    "server_name": server_name,
-                    "service": "AmneziaWG",
-                    "status": wg_status["status"],
-                    "note": "Доступ из РФ, обфускация",
-                })
-                # Shadowsocks — проверка порта 8388
-                ss_ok = check_port(host, 8388)
-                services_list.append({
-                    "server_id": server_id,
-                    "server_name": server_name,
-                    "service": "Shadowsocks",
-                    "status": "online" if ss_ok else "offline",
-                    "note": "Порт 8388",
-                })
-                # MTProxy / MTProto: порт из актуальной ссылки (как /proxy), иначе 443
-                try:
-                    fresh_cfg = load_config()
-                    mlink = get_effective_mtproto_proxy_link(fresh_cfg) or ""
-                    pq = _parse_tg_proxy_link(mlink)
-                    proxy_check_port = int(pq.get("port") or "443")
-                except (TypeError, ValueError):
-                    proxy_check_port = 443
-                mt_ok = check_port(host, proxy_check_port)
-                services_list.append({
-                    "server_id": server_id,
-                    "server_name": server_name,
-                    "service": "MTProxy (Telegram)",
-                    "status": "online" if mt_ok else "offline",
-                    "note": f"TCP порт {proxy_check_port} (из ссылки /proxy)",
-                })
-        
+        services_list = [
+            {
+                "service": "AmneziaWG",
+                "status": "online" if awg_ok else "offline",
+                "note": "eu1 — обход блокировок из РФ",
+            },
+            {
+                "service": "VLESS+REALITY (мобильный)",
+                "status": "online" if vless_ok else "unknown",
+                "note": "YC VM → eu1, для LTE/5G",
+            },
+        ]
         return jsonify({"services": services_list})
     except Exception as e:
         logger.exception(f"Ошибка API сервисов: {e}")
@@ -450,9 +416,11 @@ def api_services():
 @app.route("/api/users")
 def api_users():
     """API: список пользователей (только для админа)."""
-    # Простая проверка админа через query параметр (в продакшене использовать сессии)
+    admin_secret = getattr(config, "admin_secret", None) if config else None
+    if not admin_secret:
+        return jsonify({"error": "Admin secret not configured on server"}), 503
     admin_key = request.args.get("admin_key")
-    if admin_key != str(ADMIN_ID):
+    if not admin_key or admin_key != admin_secret:
         return jsonify({"error": "Unauthorized"}), 403
     
     try:
@@ -480,46 +448,36 @@ def api_users():
 
 @app.route("/api/traffic")
 def api_traffic():
-    """API: трафик по пользователям и пирам (rx/tx с нод WireGuard)."""
+    """API: трафик по пользователям с last_handshake."""
     try:
-        from bot.wireguard_peers import get_available_servers
         peers = get_all_peers()
-        servers = get_available_servers()
-        rows: List[Dict] = []
-        for server_id in servers:
-            transfer = _get_wg_transfer_for_server(server_id)
-            for peer in peers:
-                if peer.server_id != server_id or not peer.active:
-                    continue
-                # Сопоставление по public_key (нормализуем пробелы/переносы из JSON)
-                pk = (peer.public_key or "").strip()
-                rx_tx = transfer.get(pk)
-                if rx_tx is None and pk:
-                    rx_tx = transfer.get(peer.public_key)  # без strip на случай другого формата
-                if rx_tx is None:
-                    rx_tx = (0, 0)
-                rx_bytes, tx_bytes = rx_tx
-                user = find_user(peer.telegram_id)
-                username = user.username if user else None
-                rows.append({
-                    "telegram_id": peer.telegram_id,
-                    "username": username,
-                    "server_id": server_id,
-                    "wg_ip": peer.wg_ip,
-                    "rx_bytes": rx_bytes,
-                    "tx_bytes": tx_bytes,
-                })
-        # Суммы по пользователям
+        dump_stdout = _get_awg_dump_eu1()
+        full_data = _parse_wg_dump_full(dump_stdout) if dump_stdout else {}
+
         by_user: Dict[int, Dict] = {}
-        for r in rows:
-            uid = r["telegram_id"]
+        for peer in peers:
+            if peer.server_id != "eu1" or not peer.active:
+                continue
+            pk = (peer.public_key or "").strip()
+            d = full_data.get(pk) or {"rx": 0, "tx": 0, "last_handshake": 0}
+            uid = peer.telegram_id
             if uid not in by_user:
-                by_user[uid] = {"username": r["username"], "rx_bytes": 0, "tx_bytes": 0}
-            by_user[uid]["rx_bytes"] += r["rx_bytes"]
-            by_user[uid]["tx_bytes"] += r["tx_bytes"]
+                user = find_user(uid)
+                by_user[uid] = {
+                    "username": user.username if user else None,
+                    "wg_ip": peer.wg_ip,
+                    "rx_bytes": 0,
+                    "tx_bytes": 0,
+                    "last_handshake": 0,
+                }
+            by_user[uid]["rx_bytes"] += d["rx"]
+            by_user[uid]["tx_bytes"] += d["tx"]
+            if d["last_handshake"] > by_user[uid]["last_handshake"]:
+                by_user[uid]["last_handshake"] = d["last_handshake"]
+
+        users_list = sorted(by_user.values(), key=lambda x: x["rx_bytes"] + x["tx_bytes"], reverse=True)
         resp = jsonify({
-            "rows": rows,
-            "by_user": [{"telegram_id": k, "username": v["username"], "rx_bytes": v["rx_bytes"], "tx_bytes": v["tx_bytes"]} for k, v in by_user.items()],
+            "users": users_list,
             "last_update": datetime.now().isoformat(),
         })
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -570,6 +528,9 @@ def api_recovery_proxy_link():
     Только актуальная ссылка tg://proxy (как /proxy в боте), без перезапуска контейнера.
     Та же проверка пользователя, что и у POST /api/recovery/telegram-proxy.
     """
+    err = _check_recovery_secret()
+    if err is not None:
+        return err
     try:
         telegram_id = request.args.get("telegram_id")
         if telegram_id is None or str(telegram_id).strip() == "":
@@ -611,6 +572,9 @@ def api_recovery_telegram_proxy():
     - Auth by telegram_id existence in bot storage (users.json)
     - Restarts telegram proxy container on the corresponding server (eu1/main)
     """
+    err = _check_recovery_secret()
+    if err is not None:
+        return err
     try:
         body = request.get_json() or {}
         telegram_id = body.get("telegram_id")
@@ -684,6 +648,9 @@ def api_recovery_vpn():
     VPN recovery: только AmneziaWG слот eu1 или eu2 (две кнопки на /recovery).
     Тело: telegram_id, server_id (eu1 | eu2), android_safe (опционально).
     """
+    err = _check_recovery_secret()
+    if err is not None:
+        return err
     try:
         body = request.get_json() or {}
         telegram_id = body.get("telegram_id")
@@ -729,6 +696,9 @@ def api_recovery_mobile_vpn():
     Возвращает VLESS+REALITY ссылку для резервного мобильного VPN.
     Авторизация по telegram_id (пользователь должен быть в базе).
     """
+    err = _check_recovery_secret()
+    if err is not None:
+        return err
     try:
         telegram_id = request.args.get("telegram_id")
         if telegram_id is None or str(telegram_id).strip() == "":
@@ -758,6 +728,125 @@ def api_recovery_mobile_vpn():
         })
     except Exception as e:
         logger.exception("Ошибка recovery/mobile-vpn: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auth/send-otp", methods=["POST"])
+def api_auth_send_otp():
+    """Отправляет OTP-код на указанный email. Создаёт пользователя если нет."""
+    try:
+        body = request.get_json() or {}
+        email = (body.get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            return jsonify({"error": "Некорректный email"}), 400
+
+        if not config or not config.resend_api_key:
+            return jsonify({"error": "Email-сервис не настроен. Обратись к администратору."}), 503
+
+        user_row = db_find_user_by_email(email)
+        if not user_row:
+            db_upsert_user({
+                "email": email,
+                "role": "user",
+                "active": True,
+                "preferred_server_id": "eu1",
+                "email_verified": False,
+            })
+
+        code = generate_otp()
+        db_create_otp(email, code)
+
+        sent = send_otp_email(
+            to_email=email,
+            code=code,
+            api_key=config.resend_api_key,
+            from_email=config.resend_from_email,
+        )
+        if not sent:
+            return jsonify({"error": "Не удалось отправить письмо. Проверь адрес или попробуй позже."}), 502
+
+        return jsonify({"ok": True, "message": f"Код отправлен на {email}"})
+    except Exception as e:
+        logger.exception("Ошибка api/auth/send-otp: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auth/verify-otp", methods=["POST"])
+def api_auth_verify_otp():
+    """Проверяет OTP. При успехе возвращает session token (60 мин)."""
+    try:
+        body = request.get_json() or {}
+        email = (body.get("email") or "").strip().lower()
+        code = (body.get("code") or "").strip().replace(" ", "")
+
+        if not email or not code:
+            return jsonify({"error": "email и code обязательны"}), 400
+
+        if not db_verify_otp(email, code):
+            return jsonify({"error": "Неверный или просроченный код"}), 401
+
+        db_upsert_user({"email": email, "email_verified": True, "active": True})
+        token = db_create_session(email, ttl_minutes=60)
+        return jsonify({"ok": True, "token": token})
+    except Exception as e:
+        logger.exception("Ошибка api/auth/verify-otp: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/vpn-by-email", methods=["POST"])
+def api_recovery_vpn_by_email():
+    """
+    Выдаёт или регенерирует VPN-конфиг по email-сессии и платформе.
+    Тело: {token, platform} — platform: "pc" | "ios" | "android"
+    """
+    try:
+        body = request.get_json() or {}
+        token = (body.get("token") or "").strip()
+        platform = (body.get("platform") or "pc").strip().lower()
+
+        if platform not in ("pc", "ios", "android"):
+            platform = "pc"
+        if not token:
+            return jsonify({"error": "token обязателен"}), 401
+
+        email = db_verify_session(token)
+        if not email:
+            return jsonify({"error": "Сессия недействительна или истекла. Войди заново."}), 401
+
+        user_row = db_find_user_by_email(email)
+        if not user_row or not user_row.get("active"):
+            return jsonify({"error": "Пользователь не найден или заблокирован."}), 403
+
+        if not is_amneziawg_eu1_configured():
+            return jsonify({"error": "VPN-сервер не настроен. Попробуй позже."}), 503
+
+        telegram_id = db_get_effective_telegram_id(user_row)
+        android_safe = (platform == "android")
+
+        peer = find_peer_by_telegram_id(telegram_id, server_id="eu1", platform=platform)
+        try:
+            if peer and peer.active:
+                peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
+                    telegram_id, android_safe=android_safe, server_id="eu1", platform=platform,
+                )
+            else:
+                peer, cfg = create_amneziawg_peer_and_config_for_user(
+                    telegram_id, android_safe=android_safe, server_id="eu1", platform=platform,
+                )
+        except WireGuardError as exc:
+            logger.exception("WireGuardError для %s platform=%s: %s", email, platform, exc)
+            return jsonify({"error": str(exc)}), 500
+
+        filename = f"awg_eu1_{platform}.conf"
+        response: dict = {"ok": True, "filename": filename, "platform": platform}
+        if platform == "android":
+            response["vpn_url"] = generate_vpn_url(cfg)
+        else:
+            response["config"] = cfg
+
+        return jsonify(response)
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/vpn-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
