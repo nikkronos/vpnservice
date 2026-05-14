@@ -26,9 +26,12 @@
 
 ## Xray конфигурация на VM
 
-**Протокол:** VLESS + REALITY (TCP, порт 443)  
-**SNI:** `www.yandex.ru` (трафик выглядит как обращение к Яндексу)  
+**Протокол:** VLESS + REALITY (xHTTP packet-up, порт 443)  
+**SNI:** `www.microsoft.com` (трафик выглядит как обращение к Microsoft)  
 **Конфиг:** `/usr/local/etc/xray/config.json`
+
+> **Изменено 2026-05-09:** транспорт TCP → xHTTP packet-up для обхода ТСПУ-заморозки сессий после 15–20 КБ.  
+> **Изменено 2026-05-14:** SNI `www.yandex.ru` → `www.microsoft.com`. Причина: MegaFon/Yota имеет прозрачный прокси для .ru-доменов, который перехватывал REALITY-рукопожатие. Диагностика подтвердила: TCP до YC IP с Yota проходит (HTTP 406 в браузере), но VLESS-соединение рвалось. Смена SNI на нейтральный зарубежный домен устраняет перехват.
 
 ```json
 {
@@ -37,20 +40,20 @@
     "port": 443,
     "protocol": "vless",
     "settings": {
-      "clients": [{"id": "11dd653c-944b-4320-b29e-f1a9f2d75db8", "flow": "xtls-rprx-vision"}],
+      "clients": [{"id": "11dd653c-944b-4320-b29e-f1a9f2d75db8"}],
       "decryption": "none"
     },
     "streamSettings": {
-      "network": "tcp",
+      "network": "xhttp",
       "security": "reality",
       "realitySettings": {
-        "dest": "www.yandex.ru:443",
-        "serverNames": ["www.yandex.ru"],
+        "dest": "www.microsoft.com:443",
+        "serverNames": ["www.microsoft.com"],
         "privateKey": "uAEjBbdwuIwnUAxV91gSeFfUSmZyXOVAH4t-l9HegW4",
         "shortIds": ["ad88588f88ea4246"]
-      }
-    },
-    "sniffing": {"enabled": true, "destOverride": ["http","tls","quic"]}
+      },
+      "xhttpSettings": {"mode": "packet-up", "path": "/download"}
+    }
   }],
   "outbounds": [
     {
@@ -86,14 +89,16 @@
 | **UUID** | `11dd653c-944b-4320-b29e-f1a9f2d75db8` |
 | **PublicKey** | `XKK9qJfFVdG3fegYC5vP8uF-OIzYK6YzKPz-sLVh_lE` |
 | **ShortId** | `ad88588f88ea4246` |
-| **SNI** | `www.yandex.ru` |
+| **SNI** | `www.microsoft.com` |
 | **Fingerprint** | `chrome` |
-| **Flow** | `xtls-rprx-vision` |
+| **Transport** | `xhttp` |
+| **Mode** | `packet-up` |
+| **Path** | `/download` |
 | **Port** | `443` |
 
 **VLESS-ссылка:**
 ```
-vless://11dd653c-944b-4320-b29e-f1a9f2d75db8@158.160.236.147:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.yandex.ru&fp=chrome&pbk=XKK9qJfFVdG3fegYC5vP8uF-OIzYK6YzKPz-sLVh_lE&sid=ad88588f88ea4246&type=tcp&headerType=none#YC-Reality
+vless://11dd653c-944b-4320-b29e-f1a9f2d75db8@158.160.236.147:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=XKK9qJfFVdG3fegYC5vP8uF-OIzYK6YzKPz-sLVh_lE&sid=ad88588f88ea4246&type=xhttp&mode=packet-up&path=%2Fdownload#YC-Reality
 ```
 
 **В боте:** команда `/mobile_vpn` — отправляет эту ссылку.  
@@ -139,8 +144,8 @@ journalctl -u xray -f
 
 - IP из AS Yandex (AS200350) — гарантированно в whitelist у всех российских операторов
 - Блокировка Yandex Cloud = блокировка тысяч российских сервисов (невозможно на практике)
-- REALITY с SNI `www.yandex.ru` — трафик неотличим от обращения к Яндексу
-- Работает даже при жёстком whitelist-режиме (май 2026, СПб, все операторы)
+- REALITY с SNI `www.microsoft.com` — трафик неотличим от HTTPS к Microsoft
+- ⚠️ SNI `www.yandex.ru` не использовать: MegaFon/Yota перехватывает TLS для .ru-доменов (прозрачный прокси), REALITY-рукопожатие ломается. Смена на нейтральный зарубежный SNI решает проблему.
 
 ---
 
