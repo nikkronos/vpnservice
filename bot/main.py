@@ -299,12 +299,7 @@ def main() -> None:
         """Отправляет vless:// ссылку пользователю: сначала сообщение, потом ссылка в code-блоке."""
         chat_id = message.chat.id
         bot.send_message(chat_id, success_text, parse_mode="HTML")
-        bot.send_message(
-            chat_id,
-            "👇 Скопируй ссылку и импортируй в <b>Hiddify</b>, <b>FoXray</b> или <b>V2Box</b>:\n"
-            f"<code>{vless_link}</code>",
-            parse_mode="HTML",
-        )
+        bot.send_message(chat_id, f"<code>{vless_link}</code>", parse_mode="HTML")
 
     def _show_platform_keyboard(chat_id: int, action: str) -> None:
         """Отправляет клавиатуру выбора платформы перед выдачей конфига."""
