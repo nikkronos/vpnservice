@@ -1,13 +1,13 @@
 🤖 <b>Android</b>
 
 <b>Шаги подключения:</b>
-1. Скачай <b>AmneziaVPN</b> или <b>AmneziaWG</b>: <a href="https://amnezia.org/en/downloads">amnezia.org/en/downloads</a>
-2. В боте нажми <b>Получить конфиг</b> — бот пришлёт файл <code>.conf</code>.
-3. В приложении: нажми <b>+</b> → <b>Импорт из файла</b> → выбери скачанный файл.
+1. Скачай <b>AmneziaVPN</b>: <a href="https://amnezia.org/en/downloads">amnezia.org/en/downloads</a>
+2. В боте нажми <b>Получить конфиг</b> → выбери <b>Android</b>.
+3. Бот пришлёт ссылку — нажми на неё, AmneziaVPN откроет и импортирует конфиг автоматически.
 4. Включи туннель — VPN работает.
 
 <b>Не подключается на LTE/5G?</b>
-Установи <b>Happ</b> (найди в Google Play) и нажми в боте кнопку <b>Мобильный VPN</b> — получишь резервную ссылку для импорта.
+Нажми в боте кнопку <b>Мобильный VPN</b> — получишь резервную ссылку для импорта в Hiddify или v2rayNG.
 
 <b>Telegram заблокирован?</b>
 Зайди на сайт восстановления: <code>http://185.21.8.91:5001/recovery</code>
