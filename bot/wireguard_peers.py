@@ -469,10 +469,10 @@ def _build_client_config(
         # Временно отключаем split tunneling - используем стандартный 0.0.0.0/0
         # SSH будет идти через VPN, но это позволит проверить стабильность VPN соединения
         # Для работы с сервером используем /server_exec в боте или другой метод доступа
-        allowed_ips = "AllowedIPs = 0.0.0.0/0\n"
+        allowed_ips = "AllowedIPs = 0.0.0.0/0, ::/0\n"
         # TODO: Реализовать правильное исключение IP через вычисление диапазонов или другой метод
     else:
-        allowed_ips = "AllowedIPs = 0.0.0.0/0\n"
+        allowed_ips = "AllowedIPs = 0.0.0.0/0, ::/0\n"
     
     return (
         "\n".join(interface_lines)
@@ -538,6 +538,7 @@ def create_peer_and_config_for_user(
     server_id: str = "rus1",
     profile_type: Optional[str] = None,
     android_safe: bool = False,
+    platform: str = "pc",
 ) -> Tuple[Peer, str]:
     """
     Создаёт нового peer для заданного Telegram ID на указанной ноде и возвращает (Peer, client_config_text).
@@ -616,6 +617,7 @@ def create_peer_and_config_for_user(
         server_id=server_id,
         active=True,
         profile_type=pt,
+        platform=platform,
     )
     upsert_peer(peer)
 
@@ -636,7 +638,10 @@ def create_peer_and_config_for_user(
 
 
 def regenerate_peer_and_config_for_user(
-    telegram_id: int, server_id: Optional[str] = None, android_safe: bool = False
+    telegram_id: int,
+    server_id: Optional[str] = None,
+    android_safe: bool = False,
+    platform: str = "pc",
 ) -> Tuple[Peer, str]:
     """
     Регенерирует ключи и конфиг для существующего peer.
@@ -659,10 +664,10 @@ def regenerate_peer_and_config_for_user(
     Raises:
         WireGuardError: если peer не найден или произошла ошибка при работе с WireGuard.
     """
-    # Находим существующий peer
-    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+    # Находим существующий peer (с учётом платформы)
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id, platform=platform)
     if not existing_peer or not existing_peer.active:
-        raise WireGuardError(f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id or 'любом'}.")
+        raise WireGuardError(f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id or 'любом'} (платформа: {platform}).")
     
     # Используем server_id существующего peer, если не был указан явно
     target_server_id = server_id or existing_peer.server_id
@@ -704,7 +709,7 @@ def regenerate_peer_and_config_for_user(
         ssh_key_path=server_config.get("ssh_key_path"),
     )
     
-    # Обновляем peer в локальном хранилище (сохраняем profile_type при регенерации)
+    # Обновляем peer в локальном хранилище (сохраняем profile_type и platform при регенерации)
     new_peer = Peer(
         telegram_id=telegram_id,
         wg_ip=wg_ip,
@@ -712,6 +717,7 @@ def regenerate_peer_and_config_for_user(
         server_id=target_server_id,
         active=True,
         profile_type=getattr(existing_peer, "profile_type", None),
+        platform=platform,
     )
     upsert_peer(new_peer)
     
@@ -743,6 +749,7 @@ def replace_peer_with_profile_type(
     server_id: str,
     new_profile_type: str,
     android_safe: bool = False,
+    platform: str = "pc",
 ) -> Tuple[Peer, str]:
     """
     Удаляет существующий peer на сервере и создаёт новый с указанным типом профиля
@@ -750,10 +757,10 @@ def replace_peer_with_profile_type(
     с VPN+GPT на Универсальный) по выбору пользователя в /server.
     android_safe: один DNS в конфиге для совместимости с Android.
     """
-    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id, platform=platform)
     if not existing_peer or not existing_peer.active:
         raise WireGuardError(
-            f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id}."
+            f"Не найден активный peer для пользователя {telegram_id} на сервере {server_id} (платформа: {platform})."
         )
 
     env = _load_env()
@@ -775,6 +782,7 @@ def replace_peer_with_profile_type(
         server_id=server_id,
         profile_type=new_profile_type,
         android_safe=android_safe,
+        platform=platform,
     )
     logger.info(
         "Сменён тип профиля для пользователя %s на сервере %s: новый profile_type=%s, wg_ip=%s",
@@ -822,6 +830,7 @@ def create_amneziawg_peer_and_config_for_user(
     reuse_ip: Optional[str] = None,
     android_safe: bool = False,
     server_id: str = "eu1",
+    platform: str = "pc",
 ) -> Tuple[Peer, str]:
     """Создаёт peer AmneziaWG на eu1 через скрипт по SSH."""
     if server_id != "eu1":
@@ -893,25 +902,30 @@ def create_amneziawg_peer_and_config_for_user(
         server_id=server_id,
         active=True,
         profile_type=None,
+        platform=platform,
     )
     upsert_peer(peer)
     logger.info(
-        "Создан AmneziaWG peer для telegram_id=%s на %s, wg_ip=%s",
-        telegram_id, server_id, wg_ip,
+        "Создан AmneziaWG peer для telegram_id=%s на %s, wg_ip=%s, platform=%s",
+        telegram_id, server_id, wg_ip, platform,
     )
     return peer, client_config
 
 
 def regenerate_amneziawg_peer_and_config_for_user(
-    telegram_id: int, android_safe: bool = False, server_id: str = "eu1"
+    telegram_id: int,
+    android_safe: bool = False,
+    server_id: str = "eu1",
+    platform: str = "pc",
 ) -> Tuple[Peer, str]:
     """Регенерирует AmneziaWG peer для eu1 (тот же IP, новые ключи)."""
     if server_id != "eu1":
         raise WireGuardError("Регенерация AmneziaWG только для eu1.")
-    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id, platform=platform)
     if not existing_peer or not existing_peer.active:
         raise WireGuardError(
-            f"Не найден активный peer для Европы ({server_id}). Сначала используй /get_config для этого слота."
+            f"Не найден активный peer для Европы ({server_id}, платформа: {platform}). "
+            "Сначала используй /get_config для этого слота."
         )
 
     try:
@@ -924,9 +938,29 @@ def regenerate_amneziawg_peer_and_config_for_user(
         reuse_ip=existing_peer.wg_ip,
         android_safe=android_safe,
         server_id=server_id,
+        platform=platform,
     )
-    logger.info("Регенерирован AmneziaWG peer для telegram_id=%s на %s", telegram_id, server_id)
+    logger.info(
+        "Регенерирован AmneziaWG peer для telegram_id=%s на %s, platform=%s",
+        telegram_id, server_id, platform,
+    )
     return peer, client_config
+
+
+def generate_vpn_url(config_text: str) -> str:
+    """
+    Генерирует vpn:// deep link для импорта конфига в AmneziaVPN (Android).
+    Формат: vpn://<base64url(qCompress(config_text))>
+    qCompress = 4-байтный big-endian размер оригинала + zlib.compress(data, level=9).
+    AmneziaVPN декодирует это на клиенте и импортирует конфиг автоматически.
+    """
+    import struct
+    import zlib
+    import base64
+    data = config_text.encode("utf-8")
+    compressed = struct.pack(">I", len(data)) + zlib.compress(data, level=9)
+    b64 = base64.urlsafe_b64encode(compressed).rstrip(b"=").decode()
+    return f"vpn://{b64}"
 
 
 def get_available_servers() -> Dict[str, Dict[str, str]]:
