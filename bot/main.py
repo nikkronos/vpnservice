@@ -13,6 +13,22 @@ from .config import (
     get_effective_mtproto_proxy_link,
     load_config,
 )
+from .database import (
+    db_add_to_whitelist,
+    db_get_whitelist,
+    db_is_whitelisted,
+    db_remove_from_whitelist,
+    db_create_otp,
+    db_verify_otp,
+    db_get_vless_creds,
+    init_db,
+)
+from .vless_peers import (
+    create_vless_client_for_user,
+    regenerate_vless_client_for_user,
+    remove_vless_client_for_user,
+)
+from .email_otp import generate_otp, send_otp_email
 from .storage import (
     User,
     find_peer_by_telegram_id,
@@ -28,6 +44,7 @@ from .wireguard_peers import (
     create_amneziawg_peer_and_config_for_user,
     create_peer_and_config_for_user,
     execute_server_command,
+    generate_vpn_url,
     get_available_servers,
     is_amneziawg_eu1_configured,
     regenerate_amneziawg_peer_and_config_for_user,
@@ -134,6 +151,9 @@ def _send_eu1_amneziawg_instruction(
 
 def main() -> None:
     config = load_config()
+    # Инициализируем SQLite DB и мигрируем users.json
+    init_db(whitelist_seed=config.telegram_id_whitelist or [])
+
     bot = telebot.TeleBot(config.bot_token, parse_mode="HTML")
     admin_id = config.admin_id
 
@@ -158,32 +178,71 @@ def main() -> None:
     # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
     _pending_add_user: set[int] = set()
 
+    # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
+    _email_link_state: dict[int, dict] = {}
+
+    def _is_authorized(telegram_id: int) -> bool:
+        """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
+        if db_is_whitelisted(telegram_id):
+            return True
+        user = find_user(telegram_id)
+        return user is not None and user.active
+
+    def _needs_email_link(telegram_id: int) -> bool:
+        """True если пользователь авторизован, но email ещё не привязан."""
+        user = find_user(telegram_id)
+        return user is not None and not user.email_verified and not db_is_whitelisted(telegram_id)
+
+    def _send_main_menu(chat_id: int, from_user, *, new_message: bool = True) -> None:
+        """Отправляет или редактирует главное меню."""
+        if not from_user:
+            return
+        uid = from_user.id
+        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
+        authorized = _is_authorized(uid)
+
+        if not authorized:
+            text = (
+                "Привет! Это VPN-бот. 🔐\n\n"
+                "Доступ открыт для всех — зарегистрируйся через email.\n\n"
+                f"🌐 Также можно получить конфиг на сайте: {recovery_url}"
+            )
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("📧 Войти по email", callback_data="email_register")
+            )
+        else:
+            text = (
+                "Привет! Это VPN-бот. 🔐\n\n"
+                f"🌐 Сайт (если Telegram не работает): {recovery_url}"
+            )
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_config"),
+                types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
+                types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+                types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
+                types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
+                types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
+            )
+            if is_owner(uid, admin_id):
+                markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
+            elif _needs_email_link(uid):
+                markup.add(types.InlineKeyboardButton("🔗 Привязать email", callback_data="email_link"))
+
+        if new_message:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+
     @bot.message_handler(commands=["start"])
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        text = (
-            "Привет! Это VPN бот. 🔐\n\n"
-            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
-            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
-        )
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
-            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
-            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
-            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
-            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
-            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
-        )
-        if message.from_user and is_owner(message.from_user.id, admin_id):
-            markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
-        bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+        _send_main_menu(message.chat.id, message.from_user)
 
-        # Автоматически регистрируем владельца как пользователя (owner),
-        # чтобы в списке /users он тоже отображался.
-        if message.from_user and message.from_user.id == admin_id:
+        # Автоматически регистрируем владельца как пользователя (owner)
+        if message.from_user.id == admin_id:
             owner = User(
                 telegram_id=message.from_user.id,
                 username=message.from_user.username,
@@ -200,21 +259,84 @@ def main() -> None:
         file_obj.name = filename
         bot.send_document(chat_id, file_obj, visible_file_name=filename)
 
-    def _do_get_config(message: types.Message, android_safe: bool) -> None:
+    def _deliver_config(
+        message: types.Message,
+        config_text: str,
+        filename: str,
+        platform: str,
+        success_text: str,
+    ) -> None:
         """
-        Self-service: выдача конфига. android_safe=True — один DNS для Android (обход ErrorCode 1000).
+        Доставляет конфиг в зависимости от платформы.
+        pc    → .conf файл (стандартный импорт в AmneziaVPN/AmneziaWG)
+        ios   → конфиг текстом в <code> блоке (копировать → AmneziaWG → Импорт из буфера)
+        android → vpn:// deep link (тап → AmneziaVPN импортирует автоматически)
+        """
+        import html as _html
+        chat_id = message.chat.id
+        if platform == "android":
+            vpn_link = generate_vpn_url(config_text)
+            bot.send_message(chat_id, success_text, parse_mode="HTML")
+            bot.send_message(
+                chat_id,
+                "👇 Нажми на ссылку — <b>AmneziaVPN</b> откроет и импортирует конфиг:",
+                parse_mode="HTML",
+            )
+            bot.send_message(chat_id, vpn_link, parse_mode=None)
+        elif platform == "ios":
+            _send_config_file(chat_id, config_text, filename)
+            bot.send_message(
+                chat_id,
+                success_text + "\n\n"
+                "📂 Нажми на файл → иконка «Поделиться» → выбери <b>AmneziaWG</b> → «Создать из файла».",
+                parse_mode="HTML",
+            )
+        else:  # pc
+            _send_config_file(chat_id, config_text, filename)
+            bot.send_message(chat_id, success_text, parse_mode="HTML")
+
+    def _deliver_vless_link(message: types.Message, vless_link: str, success_text: str) -> None:
+        """Отправляет vless:// ссылку пользователю: сначала сообщение, потом ссылка в code-блоке."""
+        chat_id = message.chat.id
+        bot.send_message(chat_id, success_text, parse_mode="HTML")
+        bot.send_message(
+            chat_id,
+            "👇 Скопируй ссылку и импортируй в <b>Hiddify</b>, <b>FoXray</b> или <b>V2Box</b>:\n"
+            f"<code>{vless_link}</code>",
+            parse_mode="HTML",
+        )
+
+    def _show_platform_keyboard(chat_id: int, action: str) -> None:
+        """Отправляет клавиатуру выбора платформы перед выдачей конфига."""
+        label = "получения" if action == "get_config" else "обновления"
+        markup = types.InlineKeyboardMarkup(row_width=3)
+        markup.add(
+            types.InlineKeyboardButton("💻 ПК", callback_data=f"{action}_pc"),
+            types.InlineKeyboardButton("🍎 iOS", callback_data=f"{action}_ios"),
+            types.InlineKeyboardButton("🤖 Android", callback_data=f"{action}_android"),
+        )
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        bot.send_message(
+            chat_id,
+            f"📲 Выбери устройство для {label} VPN:",
+            reply_markup=markup,
+        )
+
+    def _do_get_config(message: types.Message, android_safe: bool, platform: str = "pc") -> None:
+        """
+        Self-service: выдача конфига.
+        platform: "pc" | "ios" | "android" — способ доставки.
+        android_safe=True — один DNS (обход ErrorCode 1000 на Android).
         """
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
-        user = find_user(message.from_user.id)
-        if not user or not user.active:
-            safe_reply(
-                message,
-                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
-                "Попроси владельца добавить тебя командой /add_user.",
-            )
+        if not _is_authorized(message.from_user.id):
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("📧 Войти по email", callback_data="email_register"))
+            safe_reply(message, "У тебя пока нет доступа.\nЗарегистрируйся по email:", reply_markup=markup)
             return
+        user = find_user(message.from_user.id)
 
         chat_id = message.chat.id
         telegram_id = message.from_user.id
@@ -234,10 +356,12 @@ def main() -> None:
         preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
 
         try:
-            # Ищем peer на выбранном слоте
-            peer_on_preferred = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
-            
-            # Также проверяем, есть ли peer на любом другом сервере
+            # Ищем peer на выбранном слоте и платформе
+            peer_on_preferred = find_peer_by_telegram_id(
+                telegram_id, server_id=preferred_server_id, platform=platform
+            )
+
+            # Также проверяем, есть ли peer на любом другом сервере (для информации при переключении)
             peer_any = find_peer_by_telegram_id(telegram_id, server_id=None)
             
             if peer_on_preferred and peer_on_preferred.active:
@@ -247,7 +371,8 @@ def main() -> None:
                 if preferred_server_id == "eu1" and preferred_pt and current_pt != preferred_pt:
                     # Пользователь выбрал другой тип профиля — пересоздаём peer с новым типом
                     peer, client_config = replace_peer_with_profile_type(
-                        telegram_id, preferred_server_id, preferred_pt, android_safe=android_safe
+                        telegram_id, preferred_server_id, preferred_pt,
+                        android_safe=android_safe, platform=platform,
                     )
                     pt = getattr(peer, "profile_type", None)
                     if pt == "vpn_gpt":
@@ -256,46 +381,47 @@ def main() -> None:
                         filename = f"wg_{peer.server_id}_uni.conf"
                     else:
                         filename = f"wg_{peer.server_id}.conf"
-                    _send_config_file(chat_id, client_config, filename)
                     servers_info = get_available_servers()
                     server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                     profile_note = (
                         "\n\n🟣 <b>Профиль: Универсальный</b>\n"
                         "Один профиль для всего: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks.\n"
-                        "Как у крупных VPN‑провайдеров.\n"
                     ) if pt == "unified" else (
                         "\n\n🟢 <b>Профиль: VPN+GPT</b>\n"
                         "HTTP/HTTPS трафик идёт через Shadowsocks для обхода блокировок.\n"
                     ) if pt == "vpn_gpt" else "\n\n🔵 <b>Профиль: Обычный VPN</b>\n"
-                    safe_reply(
-                        message,
+                    _deliver_config(
+                        message, client_config, filename, platform,
                         f"✅ Профиль переключён на сервере <b>{server_name}</b>.\n"
                         f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
-                        f"{profile_note}\n"
-                        "📥 Импортируй новый конфиг в WireGuard. Старый конфиг больше не будет работать.\n"
-                        f"\n💡 Инструкция — /instruction.",
+                        f"{profile_note}",
                     )
                     return
                 # Peer уже существует, тип профиля совпадает — просто сообщаем
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
                 # Европа (eu1/eu2) — AmneziaWG
+                platform_label = {"pc": "ПК", "ios": "iOS", "android": "Android"}.get(platform, platform)
                 if preferred_server_id == "eu1":
-                    if is_amneziawg_eu1_configured():
-                        safe_reply(
-                            message,
-                            f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> (AmneziaWG).\n"
-                            "Если нужен новый конфиг — используй /regen для регенерации.",
+                    # Пользователь уже имеет VLESS-доступ — отдаём существующую ссылку
+                    try:
+                        vless_link = create_vless_client_for_user(telegram_id)
+                        _deliver_vless_link(
+                            message, vless_link,
+                            f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> (VLESS+REALITY).\n"
+                            "Вот твоя ссылка — импортируй в Hiddify / FoXray / V2Box / v2rayNG.\n"
+                            "Если хочешь новую — используй /regen.",
                         )
-                    else:
-                        _send_eu1_amneziawg_instruction(message, has_existing_peer=True)
+                    except WireGuardError as exc:
+                        logger.exception("Ошибка получения VLESS для %s: %s", telegram_id, exc)
+                        safe_reply(message, "Не удалось получить ссылку. Попробуй /regen или напиши владельцу.")
                 else:
                     safe_reply(
                         message,
-                        f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}).\n"
-                        "Если у тебя уже импортирован конфиг в приложении WireGuard и всё работает — "
-                        "ничего делать не нужно.\n"
-                        "Если ты потерял конфиг или нужно его обновить, используй /regen для регенерации.",
+                        f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}) "
+                        f"для <b>{platform_label}</b>.\n"
+                        "Если у тебя уже импортирован конфиг и всё работает — ничего делать не нужно.\n"
+                        "Если потерял конфиг или нужно обновить, используй /regen.",
                     )
                 return
             
@@ -311,38 +437,21 @@ def main() -> None:
                     preferred_server_id,
                 )
 
-            # Европа (eu1/eu2): AmneziaWG
+            # Европа (eu1): VLESS+REALITY
             if preferred_server_id == "eu1":
-                if is_amneziawg_eu1_configured():
-                    try:
-                        peer, client_config = create_amneziawg_peer_and_config_for_user(
-                            telegram_id,
-                            android_safe=android_safe,
-                            server_id=preferred_server_id,
-                        )
-                        filename = f"awg_{peer.server_id}.conf"
-                        _send_config_file(chat_id, client_config, filename)
-                        servers_info = get_available_servers()
-                        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                        safe_reply(
-                            message,
-                            f"✅ Создан VPN‑доступ на сервере <b>{server_name}</b> (AmneziaWG)\n"
-                            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n\n"
-                            "📥 Импортируй файл в <b>AmneziaVPN</b> или <b>AmneziaWG</b>.\n"
-                            "iPhone/iPad: Файлы → долгое нажатие на .conf → Поделиться → AmneziaWG.\n"
-                            "Android: AmneziaVPN → Импорт из файла или буфера обмена.\n"
-                            + ("\n📱 Конфиг в формате для Android (один DNS)." if android_safe else "")
-                            + f"\n\n💡 Подробно: /instruction.",
-                        )
-                    except WireGuardError as exc:
-                        logger.exception("Ошибка AmneziaWG для %s: %s", telegram_id, exc)
-                        safe_reply(
-                            message,
-                            "Не удалось создать конфиг AmneziaWG. Попробуй позже или напиши владельцу.\n"
-                            "Инструкция по ручной настройке — /instruction.",
-                        )
-                else:
-                    _send_eu1_amneziawg_instruction(message, peer_on_preferred is not None)
+                try:
+                    vless_link = create_vless_client_for_user(telegram_id)
+                    _deliver_vless_link(
+                        message, vless_link,
+                        "✅ Создан VPN‑доступ на сервере <b>Европа</b> (VLESS+REALITY)\n"
+                        "Работает на всех платформах: iOS, Android, ПК.",
+                    )
+                except WireGuardError as exc:
+                    logger.exception("Ошибка VLESS для %s: %s", telegram_id, exc)
+                    safe_reply(
+                        message,
+                        "Не удалось создать VPN‑доступ. Попробуй позже или напиши владельцу.",
+                    )
                 return
 
             # WireGuard: rus1/rus2 (eu1/eu2 обработаны выше как AmneziaWG)
@@ -354,6 +463,7 @@ def main() -> None:
                 server_id=preferred_server_id,
                 profile_type=profile_type,
                 android_safe=android_safe,
+                platform=platform,
             )
 
         except WireGuardError as exc:
@@ -365,7 +475,6 @@ def main() -> None:
             )
             return
 
-        # Имя файла: для VPN+GPT — _gpt.conf, для Unified — _unified.conf
         pt = getattr(peer, "profile_type", None)
         if pt == "vpn_gpt":
             filename = f"wg_{peer.server_id}_gpt.conf"
@@ -373,62 +482,34 @@ def main() -> None:
             filename = f"wg_{peer.server_id}_uni.conf"
         else:
             filename = f"wg_{peer.server_id}.conf"
-        _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()
         server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-        profile_note = ""
-        if pt == "vpn_gpt":
-            profile_note = (
-                "\n\n🟢 <b>Профиль: VPN+GPT</b>\n"
-                "HTTP/HTTPS трафик идёт через Shadowsocks для обхода блокировок.\n"
-                "Подходит для: ChatGPT, заблокированные сайты, все сервисы.\n"
-                "⚠️ Может быть немного медленнее из-за двойного туннелирования.\n"
-            )
-        elif pt == "unified":
-            profile_note = (
-                "\n\n🟣 <b>Профиль: Универсальный</b>\n"
-                "Один профиль для всего: обычные сайты напрямую, ChatGPT и заблокированные — через Shadowsocks.\n"
-                "Как у крупных VPN‑провайдеров.\n"
-            )
-        else:
-            profile_note = (
-                "\n\n🔵 <b>Профиль: Обычный VPN</b>\n"
-                "Весь трафик идёт через VPN-сервер напрямую.\n"
-                "Подходит для: YouTube, Instagram, обычные сайты.\n"
-            )
-        
-        safe_reply(
-            message,
+        _deliver_config(
+            message, client_config, filename, platform,
             f"✅ Создан новый VPN‑доступ на сервере <b>{server_name}</b>\n"
-            f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
-            f"{profile_note}\n"
-            "📥 Импортируй файл в WireGuard и включи туннель.\n"
-            f"\n💡 Другой сервер/профиль — /server. Инструкция по подключению — /instruction.",
+            f"IP в VPN-сети: <code>{peer.wg_ip}</code>",
         )
 
     @bot.message_handler(commands=["get_config"])
     def cmd_get_config(message: types.Message) -> None:  # type: ignore[override]
-        _do_get_config(message, False)
+        _show_platform_keyboard(message.chat.id, "get_config")
 
-    def _do_regen(message: types.Message, android_safe: bool) -> None:
-        """Регенерация конфига. android_safe=True — формат для Android (один DNS)."""
+    def _do_regen(message: types.Message, android_safe: bool, platform: str = "pc") -> None:
+        """Регенерация конфига. platform: "pc" | "ios" | "android"."""
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
-        
-        user = find_user(message.from_user.id)
-        if not user or not user.active:
-            safe_reply(
-                message,
-                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
-                "Попроси владельца добавить тебя командой /add_user.",
-            )
+        if not _is_authorized(message.from_user.id):
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("📧 Войти по email", callback_data="email_register"))
+            safe_reply(message, "У тебя пока нет доступа.\nЗарегистрируйся по email:", reply_markup=markup)
             return
-        
+        user = find_user(message.from_user.id)
+
         chat_id = message.chat.id
         telegram_id = message.from_user.id
-        
+
         # Владелец использует client1 вручную, для него регенерация не нужна
         if telegram_id == admin_id:
             safe_reply(
@@ -441,43 +522,28 @@ def main() -> None:
         try:
             preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
 
-            # Европа (eu1/eu2): AmneziaWG
+            # Европа (eu1): VLESS+REALITY
             if preferred_server_id == "eu1":
-                if is_amneziawg_eu1_configured():
-                    try:
-                        peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
-                            telegram_id,
-                            android_safe=android_safe,
-                            server_id=preferred_server_id,
-                        )
-                        filename = f"awg_{peer.server_id}.conf"
-                        _send_config_file(chat_id, client_config, filename)
-                        servers_info = get_available_servers()
-                        server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                        safe_reply(
-                            message,
-                            f"✅ Конфиг AmneziaWG регенерирован на сервере <b>{server_name}</b>.\n"
-                            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
-                            "Новые ключи сгенерированы, старый peer удалён.\n\n"
-                            "⚠️ <b>Важно:</b> Обнови конфиг в AmneziaVPN/AmneziaWG на всех устройствах. Старый конфиг больше не будет работать.",
-                        )
-                    except WireGuardError as exc:
-                        logger.exception("Ошибка регенерации AmneziaWG для %s: %s", telegram_id, exc)
-                        safe_reply(
-                            message,
-                            f"Не удалось регенерировать конфиг AmneziaWG: {exc}\n"
-                            "Убедись, что у тебя уже создан доступ на Европе (/get_config). Или напиши владельцу.",
-                        )
-                else:
+                try:
+                    vless_link = regenerate_vless_client_for_user(telegram_id)
+                    _deliver_vless_link(
+                        message, vless_link,
+                        "✅ VPN‑доступ обновлён на сервере <b>Европа</b> (VLESS+REALITY)\n"
+                        "⚠️ Старая ссылка больше не работает — импортируй новую.",
+                    )
+                except WireGuardError as exc:
+                    logger.exception("Ошибка регенерации VLESS для %s: %s", telegram_id, exc)
                     safe_reply(
                         message,
-                        "Для сервера <b>Европа</b> (AmneziaWG) регенерация конфига пока вручную.\n"
-                        "Напиши владельцу бота — он выдаст новый конфиг.",
+                        f"Не удалось обновить VPN‑доступ: {exc}\n"
+                        "Попробуй позже или напиши владельцу.",
                     )
                 return
 
             preferred_pt = getattr(user, "preferred_profile_type", None) if preferred_server_id == "eu1" else None
-            existing_peer = find_peer_by_telegram_id(telegram_id, server_id=preferred_server_id)
+            existing_peer = find_peer_by_telegram_id(
+                telegram_id, server_id=preferred_server_id, platform=platform
+            )
             # Если на eu1 пользователь выбрал другой тип профиля — пересоздаём peer с новым типом и IP из нужного пула
             if (
                 preferred_server_id == "eu1"
@@ -486,12 +552,14 @@ def main() -> None:
                 and getattr(existing_peer, "profile_type", None) != preferred_pt
             ):
                 peer, client_config = replace_peer_with_profile_type(
-                    telegram_id, preferred_server_id, preferred_pt, android_safe=android_safe
+                    telegram_id, preferred_server_id, preferred_pt,
+                    android_safe=android_safe, platform=platform,
                 )
             else:
-                # Регенерируем peer (те же ключи/тот же тип профиля)
+                # Регенерируем peer (тот же IP/профиль, новые ключи)
                 peer, client_config = regenerate_peer_and_config_for_user(
-                    telegram_id, server_id=preferred_server_id, android_safe=android_safe
+                    telegram_id, server_id=preferred_server_id,
+                    android_safe=android_safe, platform=platform,
                 )
             
         except WireGuardError as exc:
@@ -503,7 +571,6 @@ def main() -> None:
             )
             return
         
-        # Отправляем новый конфиг (имя файла по типу профиля)
         pt = getattr(peer, "profile_type", None)
         if pt == "vpn_gpt":
             filename = f"wg_{peer.server_id}_gpt.conf"
@@ -511,23 +578,19 @@ def main() -> None:
             filename = f"wg_{peer.server_id}_uni.conf"
         else:
             filename = f"wg_{peer.server_id}.conf"
-        _send_config_file(chat_id, client_config, filename)
 
         servers_info = get_available_servers()
         server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
-
-        safe_reply(
-            message,
+        _deliver_config(
+            message, client_config, filename, platform,
             f"✅ Конфиг регенерирован на сервере <b>{server_name}</b>.\n"
-            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
-            f"Новые ключи сгенерированы, старый peer удалён.\n\n"
-            f"⚠️ <b>Важно:</b> Обнови конфиг в приложении WireGuard на всех своих устройствах!\n"
-            f"Старый конфиг больше не будет работать.",
+            f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n\n"
+            "⚠️ Старый конфиг больше не работает — импортируй новый.",
         )
 
     @bot.message_handler(commands=["regen"])
     def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
-        _do_regen(message, False)
+        _show_platform_keyboard(message.chat.id, "regen")
 
     @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt", "profile_eu1_unified"))
     def callback_profile_eu1(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -591,9 +654,9 @@ def main() -> None:
         call.message._back_markup = _back_to_menu_markup()
         action = call.data
         if action == "menu_get_config":
-            cmd_get_config(call.message)
+            _show_platform_keyboard(call.message.chat.id, "get_config")
         elif action == "menu_regen":
-            cmd_regen(call.message)
+            _show_platform_keyboard(call.message.chat.id, "regen")
         elif action == "menu_instruction":
             cmd_instruction(call.message)
         elif action == "menu_proxy":
@@ -602,6 +665,148 @@ def main() -> None:
             cmd_mobile_vpn(call.message)
         elif action == "menu_status":
             cmd_status(call.message)
+
+    # ──────────────────────────────────────────────────────────────
+    # Callbacks: выбор платформы для получения / обновления конфига
+    # ──────────────────────────────────────────────────────────────
+
+    @bot.callback_query_handler(func=lambda call: call.data in (
+        "get_config_pc", "get_config_ios", "get_config_android",
+        "regen_pc", "regen_ios", "regen_android",
+    ))
+    def callback_platform_select(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        call.message.from_user = call.from_user
+        action, platform = call.data.rsplit("_", 1)
+        android_safe = (platform == "android")
+        if action == "get_config":
+            _do_get_config(call.message, android_safe=android_safe, platform=platform)
+        else:
+            _do_regen(call.message, android_safe=android_safe, platform=platform)
+
+    # ──────────────────────────────────────────────────────────────
+    # Email-авторизация и привязка
+    # ──────────────────────────────────────────────────────────────
+
+    def _start_email_flow(chat_id: int, uid: int, mode: str) -> None:
+        """Запускает email-flow (register или link). mode: 'register' | 'link'."""
+        _email_link_state[uid] = {"state": "email", "mode": mode}
+        text = (
+            "Введи свой email — отправим код подтверждения:"
+            if mode == "register"
+            else "Введи email, который хочешь привязать к аккаунту:"
+        )
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✕ Отмена", callback_data="email_cancel"))
+        bot.send_message(chat_id, text, reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda call: call.data in ("email_register", "email_link"))
+    def callback_email_start(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        mode = "link" if call.data == "email_link" else "register"
+        _start_email_flow(call.message.chat.id, call.from_user.id, mode)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "email_cancel")
+    def callback_email_cancel(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            _email_link_state.pop(call.from_user.id, None)
+        bot.send_message(call.message.chat.id, "Отменено.")
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _email_link_state
+    )
+    def handle_email_flow(message: types.Message) -> None:  # type: ignore[override]
+        """Обрабатывает ввод email и OTP-кода в рамках email-flow."""
+        if not message.from_user:
+            return
+        uid = message.from_user.id
+        state_data = _email_link_state.get(uid)
+        if not state_data:
+            return
+
+        state = state_data.get("state")
+        text = (message.text or "").strip()
+
+        if state == "email":
+            # Проверяем минимальный формат email
+            if "@" not in text or "." not in text.split("@")[-1]:
+                bot.reply_to(message, "Похоже, это не email. Попробуй ещё раз:")
+                return
+
+            email = text.lower()
+            if not config.resend_api_key:
+                bot.reply_to(
+                    message,
+                    "Email-авторизация не настроена на сервере. Обратись к владельцу.",
+                )
+                _email_link_state.pop(uid, None)
+                return
+
+            code = generate_otp()
+            db_create_otp(email, code)
+
+            sent = send_otp_email(
+                to_email=email,
+                code=code,
+                api_key=config.resend_api_key,
+                from_email=config.resend_from_email,
+            )
+            if not sent:
+                bot.reply_to(
+                    message,
+                    "Не удалось отправить письмо. Проверь адрес или попробуй позже.",
+                )
+                return
+
+            _email_link_state[uid] = {"state": "otp", "mode": state_data["mode"], "email": email}
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✕ Отмена", callback_data="email_cancel"))
+            bot.reply_to(
+                message,
+                f"Код отправлен на <b>{email}</b>.\nВведи 6-значный код из письма:",
+                reply_markup=markup,
+            )
+
+        elif state == "otp":
+            email = state_data.get("email", "")
+            mode = state_data.get("mode", "register")
+            code = text.replace(" ", "")
+
+            if not db_verify_otp(email, code):
+                bot.reply_to(message, "Неверный или просроченный код. Попробуй ещё раз:")
+                return
+
+            _email_link_state.pop(uid, None)
+
+            # Создаём или обновляем пользователя в БД
+            from .database import db_upsert_user
+            existing = find_user(uid)
+            if existing:
+                existing.email = email
+                existing.email_verified = True
+                upsert_user(existing)
+            else:
+                # Новый пользователь через email
+                db_upsert_user({
+                    "telegram_id": uid,
+                    "email": email,
+                    "username": message.from_user.username,
+                    "role": "user",
+                    "active": True,
+                    "preferred_server_id": "eu1",
+                    "email_verified": True,
+                })
+
+            action_text = "Email привязан" if mode == "link" else "Регистрация завершена"
+            bot.reply_to(
+                message,
+                f"✅ {action_text}!\n<b>{email}</b> подтверждён.\n\nТеперь ты можешь пользоваться VPN.",
+            )
+            # Показываем главное меню
+            _send_main_menu(message.chat.id, message.from_user)
 
     # ──────────────────────────────────────────────────────────────
     # Callbacks: админ-панель
@@ -679,6 +884,7 @@ def main() -> None:
             types.InlineKeyboardButton("👥 Пользователи", callback_data="admin_users"),
             types.InlineKeyboardButton("🔄 Ротация прокси", callback_data="admin_proxy_rotate"),
             types.InlineKeyboardButton("➕ Добавить пользователя", callback_data="admin_add_user"),
+            types.InlineKeyboardButton("🔓 Whitelist ID", callback_data="admin_whitelist"),
             types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
         )
         markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_back"))
@@ -703,52 +909,13 @@ def main() -> None:
     def callback_admin_back(call: types.CallbackQuery) -> None:  # type: ignore[override]
         """Возврат из админ-панели в главное меню."""
         bot.answer_callback_query(call.id)
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        text = (
-            "Привет! Это VPN бот. 🔐\n\n"
-            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
-            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
-        )
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
-            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
-            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
-            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
-            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
-            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
-        )
-        markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
-        bot.edit_message_text(
-            text,
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
+        _send_main_menu(call.message.chat.id, call.from_user)
 
     @bot.callback_query_handler(func=lambda call: call.data == "go_main_menu")
     def callback_go_main_menu(call: types.CallbackQuery) -> None:  # type: ignore[override]
         """Отправляет главное меню новым сообщением (возврат из любого экрана)."""
         bot.answer_callback_query(call.id)
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        text = (
-            "Привет! Это VPN бот. 🔐\n\n"
-            "Владелец добавляет пользователей, бот выдаёт персональные конфиги.\n\n"
-            f"🌐 Сайт (если Telegram не работает): {recovery_url}"
-        )
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("📥 Получить конфиг", callback_data="menu_get_config"),
-            types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
-            types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
-            types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
-            types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
-            types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
-        )
-        if call.from_user and is_owner(call.from_user.id, admin_id):
-            markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
-        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+        _send_main_menu(call.message.chat.id, call.from_user)
 
     @bot.callback_query_handler(func=lambda call: call.data == "admin_stats")
     def callback_admin_stats(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -815,6 +982,80 @@ def main() -> None:
             "➕ Напиши Telegram ID или @username пользователя, которого хочешь добавить:",
             parse_mode="HTML",
         )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_whitelist")
+    def callback_admin_whitelist(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Показывает текущий whitelist и кнопки управления."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        ids = db_get_whitelist()
+        if ids:
+            lines = [f"<code>{tid}</code>" for tid in ids]
+            text = "🔓 <b>Whitelist (без email-авторизации):</b>\n\n" + "\n".join(lines)
+        else:
+            text = "🔓 <b>Whitelist пуст.</b>\n\nID в этом списке могут пользоваться ботом без email."
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("➕ Добавить ID", callback_data="admin_whitelist_add"),
+            types.InlineKeyboardButton("➖ Удалить ID", callback_data="admin_whitelist_remove"),
+        )
+        markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_panel"))
+        bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+
+    _pending_whitelist_add: set[int] = set()
+    _pending_whitelist_remove: set[int] = set()
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_whitelist_add")
+    def callback_whitelist_add_start(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        _pending_whitelist_add.add(call.from_user.id)
+        bot.send_message(call.message.chat.id, "Введи Telegram ID для добавления в whitelist:")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_whitelist_remove")
+    def callback_whitelist_remove_start(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        _pending_whitelist_remove.add(call.from_user.id)
+        bot.send_message(call.message.chat.id, "Введи Telegram ID для удаления из whitelist:")
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_whitelist_add
+    )
+    def handle_whitelist_add(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        _pending_whitelist_add.discard(message.from_user.id)
+        text = (message.text or "").strip()
+        try:
+            tid = int(text)
+        except ValueError:
+            bot.reply_to(message, "Некорректный ID. Должно быть число.")
+            return
+        db_add_to_whitelist(tid, note=f"added by owner")
+        bot.reply_to(message, f"✅ <code>{tid}</code> добавлен в whitelist.")
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_whitelist_remove
+    )
+    def handle_whitelist_remove(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        _pending_whitelist_remove.discard(message.from_user.id)
+        text = (message.text or "").strip()
+        try:
+            tid = int(text)
+        except ValueError:
+            bot.reply_to(message, "Некорректный ID. Должно быть число.")
+            return
+        db_remove_from_whitelist(tid)
+        bot.reply_to(message, f"✅ <code>{tid}</code> удалён из whitelist.")
 
     @bot.callback_query_handler(func=lambda call: call.data == "admin_broadcast")
     def callback_admin_broadcast(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -898,15 +1139,10 @@ def main() -> None:
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
-        
-        user = find_user(message.from_user.id)
-        if not user or not user.active:
-            safe_reply(
-                message,
-                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
-                "Попроси владельца добавить тебя командой /add_user.",
-            )
+        if not _is_authorized(message.from_user.id):
+            safe_reply(message, "Нет доступа. Войди по email через /start.")
             return
+        user = find_user(message.from_user.id)
         
         preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
         servers_info = get_available_servers()
@@ -1090,13 +1326,8 @@ def main() -> None:
             safe_reply(message, "Не удалось определить пользователя.")
             return
 
-        user = find_user(message.from_user.id)
-        if not user or not user.active:
-            safe_reply(
-                message,
-                "Ты ещё не зарегистрирован в VPN‑сервисе.\n"
-                "Попроси владельца добавить тебя командой /add_user.",
-            )
+        if not _is_authorized(message.from_user.id):
+            safe_reply(message, "Нет доступа. Войди по email через /start.")
             return
 
         url = config.vless_reality_share_url

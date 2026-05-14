@@ -26,6 +26,10 @@ class BotConfig:
     admin_secret: str | None = None
     # Секрет для legacy telegram_id-based recovery endpoints
     recovery_secret: str | None = None
+    # VLESS+REALITY на eu1: параметры для генерации vless:// ссылок пользователям
+    vless_eu1_pubkey: str | None = None
+    vless_eu1_short_id: str = "04d9b6c0"
+    vless_eu1_sni: str = "www.microsoft.com"
 
 
 def _parse_env_file(path: pathlib.Path) -> Dict[str, str]:
@@ -97,6 +101,10 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
     admin_secret = (data.get("ADMIN_SECRET") or "").strip() or None
     recovery_secret = (data.get("RECOVERY_SECRET") or "").strip() or None
 
+    vless_eu1_pubkey = (data.get("VLESS_EU1_PUBKEY") or "").strip() or None
+    vless_eu1_short_id = (data.get("VLESS_EU1_SHORT_ID") or "").strip() or "04d9b6c0"
+    vless_eu1_sni = (data.get("VLESS_EU1_SNI") or "").strip() or "www.microsoft.com"
+
     return BotConfig(
         bot_token=token,
         admin_id=admin_id,
@@ -110,6 +118,9 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         telegram_id_whitelist=telegram_id_whitelist or None,
         admin_secret=admin_secret,
         recovery_secret=recovery_secret,
+        vless_eu1_pubkey=vless_eu1_pubkey,
+        vless_eu1_short_id=vless_eu1_short_id,
+        vless_eu1_sni=vless_eu1_sni,
     )
 
 
