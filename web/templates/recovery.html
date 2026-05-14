@@ -9,9 +9,59 @@
 <body>
   <div class="container">
     <header>
-      <h1>🔁 Восстановление</h1>
-      <p class="subtitle">Telegram и VPN без участия Telegram клиента</p>
+      <h1>🔐 VPN Доступ</h1>
+      <p class="subtitle">Введи email — получи ссылку для подключения к VPN</p>
     </header>
+
+    <!-- ── Email-авторизация ──────────────────────────────────── -->
+    <section class="recovery" id="emailSection">
+      <h2>📧 Получить VPN-ссылку по email</h2>
+
+      <!-- Шаг 1: Email -->
+      <div id="stepEmail">
+        <p class="section-hint">Введи email — отправим одноразовый код для входа.</p>
+        <div class="recovery-form">
+          <label for="authEmail">Email</label>
+          <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
+          <button type="button" id="btnSendOtp" class="btn-recovery">Получить код</button>
+        </div>
+        <div id="sendOtpResult" class="recovery-result" aria-live="polite"></div>
+      </div>
+
+      <!-- Шаг 2: OTP -->
+      <div id="stepOtp" hidden>
+        <p class="section-hint">Код отправлен. Введи 6 цифр из письма.</p>
+        <div class="recovery-form">
+          <label for="authCode">Код</label>
+          <input type="text" id="authCode" placeholder="123456" maxlength="6"
+                 inputmode="numeric" autocomplete="one-time-code" />
+          <button type="button" id="btnVerifyOtp" class="btn-recovery">Войти</button>
+          <button type="button" id="btnResendOtp" class="btn-recovery btn-recovery-secondary"
+                  style="margin-top:8px;">Отправить повторно</button>
+        </div>
+        <div id="verifyOtpResult" class="recovery-result" aria-live="polite"></div>
+      </div>
+
+      <!-- Шаг 3: VLESS-ссылка -->
+      <div id="stepPlatform" hidden>
+        <p class="section-hint">Твоя VPN-ссылка готова. Скопируй и импортируй в приложение.</p>
+        <div id="platformResult" class="recovery-result" aria-live="polite"></div>
+        <div id="vlessLinkWrap" hidden style="margin-top:12px;">
+          <code id="vlessLinkCode" style="word-break:break-all;display:block;margin-bottom:8px;font-size:13px;"></code>
+          <button type="button" id="btnCopyVlessLink" class="btn-recovery btn-recovery-secondary">📋 Копировать ссылку</button>
+          <p class="section-hint" style="margin-top:10px;">
+            <b>Windows / Android:</b> <a href="https://hiddify.com" target="_blank">Hiddify</a> или v2rayNG — «+» → «Импорт из буфера».<br>
+            <b>iOS:</b> <a href="https://apps.apple.com/app/foxray/id6448898396" target="_blank">FoXray</a>, <a href="https://apps.apple.com/app/v2box/id6446814690" target="_blank">V2Box</a> или Hiddify — «+» → «Вставить из буфера».
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Разделитель ────────────────────────────────────────── -->
+    <details style="margin:8px 0 4px;">
+      <summary style="cursor:pointer;color:#555;font-size:14px;padding:8px 0;">
+        ▸ Восстановление Telegram-прокси и другие инструменты
+      </summary>
 
     <section class="recovery">
       <h2>🛠️ Восстановление Telegram</h2>
@@ -58,12 +108,10 @@
     <section class="recovery">
       <h2>🛠️ Восстановление VPN (Европа, AmneziaWG)</h2>
       <p class="section-hint">
-        Два слота: <b>EU1</b> и <b>EU2</b> — разные ключи и IP в одном пуле на EU-сервере.
-        Генерирует конфиг для выбранного слота, чтобы подключиться без Telegram.
+        Генерирует новый конфиг для EU-сервера, чтобы подключиться без Telegram.
       </p>
 
       <div class="recovery-form recovery-vpn-slot">
-        <h3 class="recovery-slot-title">Слот EU1</h3>
         <label for="vpnRecoveryTelegramIdEu1">Ваш Telegram ID</label>
         <input
           type="number"
@@ -73,40 +121,12 @@
           autocomplete="off"
         />
 
-        <label class="checkbox-row">
-          <input type="checkbox" id="vpnRecoveryAndroidSafeEu1" />
-          Android-safe (один DNS, обход ErrorCode 1000)
-        </label>
-
         <button type="button" id="btnRecoverVpnEu1" class="btn-recovery">
-          Восстановить VPN EU1
+          Восстановить VPN
         </button>
       </div>
 
       <div id="vpn-recovery-result-eu1" class="recovery-result" aria-live="polite"></div>
-
-      <div class="recovery-form recovery-vpn-slot">
-        <h3 class="recovery-slot-title">Слот EU2</h3>
-        <label for="vpnRecoveryTelegramIdEu2">Ваш Telegram ID</label>
-        <input
-          type="number"
-          id="vpnRecoveryTelegramIdEu2"
-          inputmode="numeric"
-          placeholder="Например, 123456789"
-          autocomplete="off"
-        />
-
-        <label class="checkbox-row">
-          <input type="checkbox" id="vpnRecoveryAndroidSafeEu2" />
-          Android-safe (один DNS, обход ErrorCode 1000)
-        </label>
-
-        <button type="button" id="btnRecoverVpnEu2" class="btn-recovery">
-          Восстановить VPN EU2
-        </button>
-      </div>
-
-      <div id="vpn-recovery-result-eu2" class="recovery-result" aria-live="polite"></div>
     </section>
 
     <section class="recovery">
@@ -134,6 +154,8 @@
 
       <div id="mobile-vpn-result" class="recovery-result" aria-live="polite"></div>
     </section>
+
+    </details><!-- конец блока с Telegram/legacy форами -->
 
     <footer>
       <p>Последнее обновление: <span id="last-update"></span></p>

@@ -178,6 +178,9 @@ def main() -> None:
     # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
     _pending_add_user: set[int] = set()
 
+    # Состояние ожидания ввода ID для генерации AmneziaWG конфига (через кнопку в админке)
+    _pending_awg_conf: set[int] = set()
+
     # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
     _email_link_state: dict[int, dict] = {}
 
@@ -881,6 +884,7 @@ def main() -> None:
             types.InlineKeyboardButton("➕ Добавить пользователя", callback_data="admin_add_user"),
             types.InlineKeyboardButton("🔓 Whitelist ID", callback_data="admin_whitelist"),
             types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+            types.InlineKeyboardButton("🔧 AmneziaWG конфиг", callback_data="admin_awg_conf"),
         )
         markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_back"))
         return markup
@@ -1109,6 +1113,56 @@ def main() -> None:
         bot.send_message(
             call.message.chat.id,
             f"✅ Рассылка завершена: отправлено <b>{sent}</b>, не доставлено <b>{failed}</b>.",
+            parse_mode="HTML",
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_awg_conf")
+    def callback_admin_awg_conf(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Запрашивает Telegram ID, затем генерирует и отправляет AmneziaWG .conf файл."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        _pending_awg_conf.add(call.from_user.id)
+        bot.send_message(
+            call.message.chat.id,
+            "🔧 <b>AmneziaWG конфиг</b>\n\nВведи Telegram ID пользователя:",
+            parse_mode="HTML",
+        )
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_awg_conf
+    )
+    def handle_pending_awg_conf(message: types.Message) -> None:  # type: ignore[override]
+        """Получает Telegram ID от владельца и генерирует AmneziaWG конфиг."""
+        if not message.from_user:
+            return
+        _pending_awg_conf.discard(message.from_user.id)
+        text = (message.text or "").strip()
+        try:
+            target_tid = int(text)
+        except ValueError:
+            bot.reply_to(message, "❌ Некорректный ID. Должно быть число.")
+            return
+        bot.send_message(message.chat.id, f"⏳ Генерирую конфиг для <code>{target_tid}</code>…", parse_mode="HTML")
+        try:
+            peer = find_peer_by_telegram_id(target_tid, server_id="eu1")
+            if peer and peer.active:
+                _, cfg = regenerate_amneziawg_peer_and_config_for_user(target_tid, android_safe=False, server_id="eu1")
+            else:
+                _, cfg = create_amneziawg_peer_and_config_for_user(target_tid, android_safe=False, server_id="eu1")
+        except WireGuardError as e:
+            bot.send_message(message.chat.id, f"❌ Ошибка WireGuard: {e}", parse_mode="HTML")
+            return
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(message.chat.id, f"❌ Ошибка: {e!r}", parse_mode="HTML")
+            return
+        filename = f"awg_eu1_{target_tid}.conf"
+        bot.send_document(
+            message.chat.id,
+            io.BytesIO(cfg.encode()),
+            visible_file_name=filename,
+            caption=f"✅ AmneziaWG конфиг для <code>{target_tid}</code>",
             parse_mode="HTML",
         )
 

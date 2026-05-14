@@ -1,4 +1,150 @@
 document.addEventListener('DOMContentLoaded', () => {
+  // ── Email OTP flow ─────────────────────────────────────────────────────────
+  (function initEmailFlow() {
+    const stepEmail    = document.getElementById('stepEmail');
+    const stepOtp      = document.getElementById('stepOtp');
+    const stepPlatform = document.getElementById('stepPlatform');
+    if (!stepEmail) return;
+
+    const emailInput     = document.getElementById('authEmail');
+    const btnSendOtp     = document.getElementById('btnSendOtp');
+    const sendOtpResult  = document.getElementById('sendOtpResult');
+    const codeInput      = document.getElementById('authCode');
+    const btnVerifyOtp   = document.getElementById('btnVerifyOtp');
+    const btnResendOtp   = document.getElementById('btnResendOtp');
+    const verifyResult   = document.getElementById('verifyOtpResult');
+    const platformResult = document.getElementById('platformResult');
+
+    let sessionToken = '';
+    let currentEmail = '';
+    const vlessLinkWrap = document.getElementById('vlessLinkWrap');
+    const vlessLinkCode = document.getElementById('vlessLinkCode');
+    const btnCopyVlessLink = document.getElementById('btnCopyVlessLink');
+
+    function setMsg(el, text, isError) {
+      if (!el) return;
+      el.textContent = text || '';
+      el.style.color = isError ? '#b00020' : '#1b5e20';
+    }
+
+    function showStep(step) {
+      [stepEmail, stepOtp, stepPlatform].forEach(s => { if (s) s.hidden = true; });
+      if (step) step.hidden = false;
+    }
+
+    // Шаг 1 → Отправить OTP
+    async function sendOtp() {
+      currentEmail = (emailInput.value || '').trim().toLowerCase();
+      if (!currentEmail || !currentEmail.includes('@')) {
+        setMsg(sendOtpResult, 'Введи корректный email.', true);
+        return;
+      }
+      btnSendOtp.disabled = true;
+      setMsg(sendOtpResult, 'Отправляем код…', false);
+      try {
+        const resp = await fetch('/api/auth/send-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentEmail }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setMsg(sendOtpResult, 'Ошибка: ' + (data.error || resp.statusText), true);
+          return;
+        }
+        showStep(stepOtp);
+        setMsg(verifyResult, '', false);
+        setTimeout(() => codeInput && codeInput.focus(), 100);
+      } catch (err) {
+        setMsg(sendOtpResult, 'Сетевая ошибка: ' + (err.message || err), true);
+      } finally {
+        btnSendOtp.disabled = false;
+      }
+    }
+
+    btnSendOtp && btnSendOtp.addEventListener('click', sendOtp);
+    emailInput && emailInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendOtp(); });
+    btnResendOtp && btnResendOtp.addEventListener('click', () => {
+      showStep(stepEmail);
+      setMsg(sendOtpResult, '', false);
+    });
+
+    // Шаг 2 → Проверить OTP
+    async function verifyOtp() {
+      const code = (codeInput.value || '').trim().replace(/\s/g, '');
+      if (!code || code.length < 4) {
+        setMsg(verifyResult, 'Введи код из письма.', true);
+        return;
+      }
+      btnVerifyOtp.disabled = true;
+      setMsg(verifyResult, 'Проверяем код…', false);
+      try {
+        const resp = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentEmail, code }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setMsg(verifyResult, 'Ошибка: ' + (data.error || resp.statusText), true);
+          return;
+        }
+        sessionToken = data.token || '';
+        showStep(stepPlatform);
+        if (vlessLinkWrap) vlessLinkWrap.hidden = true;
+        setMsg(platformResult, 'Загружаем ссылку…', false);
+        fetchVlessLink();
+      } catch (err) {
+        setMsg(verifyResult, 'Сетевая ошибка: ' + (err.message || err), true);
+      } finally {
+        btnVerifyOtp.disabled = false;
+      }
+    }
+
+    btnVerifyOtp && btnVerifyOtp.addEventListener('click', verifyOtp);
+    codeInput && codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') verifyOtp(); });
+
+    // Шаг 3 → Получение VLESS-ссылки (автоматически после OTP)
+    async function fetchVlessLink() {
+      try {
+        const resp = await fetch('/api/recovery/vpn-by-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setMsg(platformResult, 'Ошибка: ' + (data.error || resp.statusText), true);
+          return;
+        }
+        const link = data.vless_link || '';
+        if (!link) {
+          setMsg(platformResult, 'Сервер не вернул ссылку.', true);
+          return;
+        }
+        setMsg(platformResult, '', false);
+        if (vlessLinkCode) vlessLinkCode.textContent = link;
+        if (vlessLinkWrap) vlessLinkWrap.hidden = false;
+
+        if (btnCopyVlessLink) {
+          btnCopyVlessLink.onclick = async () => {
+            try {
+              await navigator.clipboard.writeText(link);
+              const prev = btnCopyVlessLink.textContent;
+              btnCopyVlessLink.textContent = '✅ Скопировано!';
+              setTimeout(() => { btnCopyVlessLink.textContent = prev; }, 2000);
+            } catch {
+              if (vlessLinkCode) vlessLinkCode.focus();
+            }
+          };
+        }
+      } catch (err) {
+        setMsg(platformResult, 'Сетевая ошибка: ' + (err.message || err), true);
+      }
+    }
+  })();
+
+
   const tgInput = document.getElementById('recoveryTelegramId');
   const tgResult = document.getElementById('recovery-result');
   const tgBtn = document.getElementById('btnRecoverTelegram');
@@ -10,12 +156,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const vpnEu1Input = document.getElementById('vpnRecoveryTelegramIdEu1');
   const vpnEu1Result = document.getElementById('vpn-recovery-result-eu1');
   const vpnEu1Btn = document.getElementById('btnRecoverVpnEu1');
-  const vpnEu1AndroidSafe = document.getElementById('vpnRecoveryAndroidSafeEu1');
 
   const vpnEu2Input = document.getElementById('vpnRecoveryTelegramIdEu2');
   const vpnEu2Result = document.getElementById('vpn-recovery-result-eu2');
   const vpnEu2Btn = document.getElementById('btnRecoverVpnEu2');
-  const vpnEu2AndroidSafe = document.getElementById('vpnRecoveryAndroidSafeEu2');
 
   const hasAnyRecovery =
     !!(tgInput && tgBtn) ||
@@ -181,12 +325,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function bindVpnRecovery(serverId, inputEl, btnEl, resultEl, androidSafeEl) {
-    if (!inputEl || !btnEl || !resultEl || !androidSafeEl) return;
+  function bindVpnRecovery(serverId, inputEl, btnEl, resultEl) {
+    if (!inputEl || !btnEl || !resultEl) return;
 
     btnEl.addEventListener('click', async () => {
       const telegramId = (inputEl.value || '').trim();
-      const androidSafe = !!androidSafeEl.checked;
+      const androidSafe = true; // один DNS — безопасно для всех платформ
 
       if (!telegramId) {
         setResult(resultEl, 'Введите Telegram ID.', true);
@@ -241,8 +385,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  bindVpnRecovery('eu1', vpnEu1Input, vpnEu1Btn, vpnEu1Result, vpnEu1AndroidSafe);
-  bindVpnRecovery('eu2', vpnEu2Input, vpnEu2Btn, vpnEu2Result, vpnEu2AndroidSafe);
+  bindVpnRecovery('eu1', vpnEu1Input, vpnEu1Btn, vpnEu1Result);
+  bindVpnRecovery('eu2', vpnEu2Input, vpnEu2Btn, vpnEu2Result);
 
   // ── Мобильный VPN (VLESS+REALITY) ─────────────────────────────────────────
   const mobileVpnInput = document.getElementById('mobileVpnTelegramId');

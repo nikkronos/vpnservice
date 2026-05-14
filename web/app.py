@@ -47,6 +47,7 @@ from bot.wireguard_peers import (
     find_peer_by_telegram_id,
     is_amneziawg_eu1_configured,
 )
+from bot.vless_peers import create_vless_client_for_user
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -796,16 +797,13 @@ def api_auth_verify_otp():
 @app.route("/api/recovery/vpn-by-email", methods=["POST"])
 def api_recovery_vpn_by_email():
     """
-    Выдаёт или регенерирует VPN-конфиг по email-сессии и платформе.
-    Тело: {token, platform} — platform: "pc" | "ios" | "android"
+    Выдаёт VLESS-ссылку по email-сессии.
+    Тело: {token}
     """
     try:
         body = request.get_json() or {}
         token = (body.get("token") or "").strip()
-        platform = (body.get("platform") or "pc").strip().lower()
 
-        if platform not in ("pc", "ios", "android"):
-            platform = "pc"
         if not token:
             return jsonify({"error": "token обязателен"}), 401
 
@@ -817,34 +815,17 @@ def api_recovery_vpn_by_email():
         if not user_row or not user_row.get("active"):
             return jsonify({"error": "Пользователь не найден или заблокирован."}), 403
 
-        if not is_amneziawg_eu1_configured():
-            return jsonify({"error": "VPN-сервер не настроен. Попробуй позже."}), 503
+        telegram_id = user_row.get("telegram_id")
+        if not telegram_id:
+            return jsonify({"error": "Учётная запись не привязана к Telegram. Обратись к владельцу бота."}), 403
 
-        telegram_id = db_get_effective_telegram_id(user_row)
-        android_safe = (platform == "android")
-
-        peer = find_peer_by_telegram_id(telegram_id, server_id="eu1", platform=platform)
         try:
-            if peer and peer.active:
-                peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
-                    telegram_id, android_safe=android_safe, server_id="eu1", platform=platform,
-                )
-            else:
-                peer, cfg = create_amneziawg_peer_and_config_for_user(
-                    telegram_id, android_safe=android_safe, server_id="eu1", platform=platform,
-                )
+            vless_link = create_vless_client_for_user(int(telegram_id))
         except WireGuardError as exc:
-            logger.exception("WireGuardError для %s platform=%s: %s", email, platform, exc)
+            logger.exception("VLESS ошибка для %s: %s", email, exc)
             return jsonify({"error": str(exc)}), 500
 
-        filename = f"awg_eu1_{platform}.conf"
-        response: dict = {"ok": True, "filename": filename, "platform": platform}
-        if platform == "android":
-            response["vpn_url"] = generate_vpn_url(cfg)
-        else:
-            response["config"] = cfg
-
-        return jsonify(response)
+        return jsonify({"ok": True, "vless_link": vless_link})
     except Exception as e:
         logger.exception("Ошибка api/recovery/vpn-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
