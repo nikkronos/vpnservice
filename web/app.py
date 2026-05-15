@@ -9,6 +9,7 @@
 """
 
 import csv
+import functools
 import io
 import json
 import logging
@@ -67,6 +68,23 @@ except Exception as e:
     ADMIN_ID = None
 
 _recovery_lock = threading.Lock()
+
+
+def _require_admin_auth(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        admin_secret = getattr(config, "admin_secret", None) if config else None
+        if not admin_secret:
+            return Response("Admin secret not configured", 503)
+        auth = request.authorization
+        if not auth or auth.username != "admin" or auth.password != admin_secret:
+            return Response(
+                "Access denied",
+                401,
+                {"WWW-Authenticate": 'Basic realm="VPN Admin Panel"'},
+            )
+        return f(*args, **kwargs)
+    return decorated
 
 
 def _check_recovery_secret() -> Optional[tuple]:
@@ -297,6 +315,7 @@ def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 @app.route("/")
+@_require_admin_auth
 def index():
     """Главная страница с общей статистикой."""
     try:
@@ -356,6 +375,7 @@ def recovery_page():
 
 
 @app.route("/api/servers")
+@_require_admin_auth
 def api_servers():
     """API: статус серверов."""
     try:
@@ -388,6 +408,7 @@ def api_servers():
 
 
 @app.route("/api/services")
+@_require_admin_auth
 def api_services():
     """API: статус сервисов eu1 (AmneziaWG локально + VLESS порт)."""
     try:
@@ -458,6 +479,7 @@ def api_users():
 
 
 @app.route("/api/traffic")
+@_require_admin_auth
 def api_traffic():
     """API: трафик по пользователям с last_handshake."""
     try:
@@ -503,6 +525,7 @@ def api_traffic():
 
 
 @app.route("/api/stats")
+@_require_admin_auth
 def api_stats():
     """API: статистика использования."""
     try:
