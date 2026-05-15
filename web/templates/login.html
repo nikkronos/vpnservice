@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Admin — Вход</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0f1117;
+            color: #e2e8f0;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .login-box {
+            background: #1a1d27;
+            border: 1px solid #2d3148;
+            border-radius: 12px;
+            padding: 40px 36px;
+            width: 100%;
+            max-width: 360px;
+        }
+        .login-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #7c83fd;
+            margin-bottom: 6px;
+        }
+        .login-sub {
+            font-size: 0.75rem;
+            color: #4a5080;
+            margin-bottom: 28px;
+        }
+        label {
+            display: block;
+            font-size: 0.72rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+        }
+        input {
+            width: 100%;
+            background: #0f1117;
+            border: 1px solid #2d3148;
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 0.9rem;
+            padding: 10px 12px;
+            margin-bottom: 18px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        input:focus { border-color: #7c83fd; }
+        button {
+            width: 100%;
+            background: #7c83fd;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 11px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        button:hover { background: #6166e0; }
+        .error {
+            background: #2d1a1a;
+            border: 1px solid #7c2d2d;
+            border-radius: 6px;
+            color: #f87171;
+            font-size: 0.82rem;
+            padding: 10px 12px;
+            margin-bottom: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <div class="login-title">🔐 VPN Admin</div>
+        <div class="login-sub">eu1 · Fornex · Германия</div>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/login">
+            <label>Логин</label>
+            <input type="text" name="username" autocomplete="username" autofocus>
+            <label>Пароль</label>
+            <input type="password" name="password" autocomplete="current-password">
+            <button type="submit">Войти</button>
+        </form>
+    </div>
+</body>
+</html>

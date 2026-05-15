@@ -22,7 +22,7 @@ import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 
 # Добавляем путь к модулям бота
 import sys
@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Загружаем конфиг
+import os
 try:
     config = load_config()
     ADMIN_ID = config.admin_id
@@ -66,6 +67,9 @@ try:
 except Exception as e:
     logger.error(f"Ошибка загрузки конфига/БД: {e}")
     ADMIN_ID = None
+    config = None
+
+app.secret_key = (getattr(config, "admin_secret", None) or os.urandom(32).hex())
 
 _recovery_lock = threading.Lock()
 
@@ -73,18 +77,32 @@ _recovery_lock = threading.Lock()
 def _require_admin_auth(f):
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        admin_secret = getattr(config, "admin_secret", None) if config else None
-        if not admin_secret:
-            return Response("Admin secret not configured", 503)
-        auth = request.authorization
-        if not auth or auth.username != "admin" or auth.password != admin_secret:
-            return Response(
-                "Access denied",
-                401,
-                {"WWW-Authenticate": 'Basic realm="VPN Admin Panel"'},
-            )
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("index"))
+    error = None
+    if request.method == "POST":
+        admin_secret = getattr(config, "admin_secret", None) if config else None
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == "admin" and admin_secret and password == admin_secret:
+            session["logged_in"] = True
+            return redirect(url_for("index"))
+        error = "Неверный логин или пароль"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def _check_recovery_secret() -> Optional[tuple]:
