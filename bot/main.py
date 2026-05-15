@@ -21,6 +21,7 @@ from .database import (
     db_create_otp,
     db_verify_otp,
     db_get_vless_creds,
+    db_update_proxy_requested_at,
     init_db,
 )
 from .vless_peers import (
@@ -1318,6 +1319,10 @@ def main() -> None:
         fresh = load_config()
         link = get_effective_mtproto_proxy_link(fresh)
         if link:
+            try:
+                db_update_proxy_requested_at(message.chat.id)
+            except Exception:
+                pass
             instr = _load_instruction_text(fresh.base_dir, "mtproto")
             safe_reply(
                 message,

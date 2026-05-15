@@ -101,6 +101,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_from_json()
     _migrate_add_vless_columns()
     _migrate_add_servers_table()
+    _migrate_add_proxy_column()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -125,6 +126,15 @@ def _migrate_add_servers_table() -> None:
                 """
             )
             logger.info("Migration: seeded servers table with eu1 (vless + awg)")
+
+
+def _migrate_add_proxy_column() -> None:
+    """Добавляет proxy_requested_at в таблицу users (идемпотентно)."""
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "proxy_requested_at" not in existing:
+            con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
+            logger.info("Migration: added proxy_requested_at column to users")
 
 
 def _migrate_add_vless_columns() -> None:
@@ -327,6 +337,16 @@ def db_get_all_users() -> List[Dict]:
     with _conn() as con:
         rows = con.execute("SELECT * FROM users ORDER BY id").fetchall()
         return [dict(r) for r in rows]
+
+
+def db_update_proxy_requested_at(telegram_id: int) -> None:
+    """Записывает время последнего запроса MTProxy-ссылки пользователем."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET proxy_requested_at = datetime('now') WHERE telegram_id = ?",
+            (telegram_id,),
+        )
 
 
 def db_get_effective_telegram_id(user_row: Dict) -> int:

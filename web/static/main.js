@@ -6,6 +6,16 @@ function fmt(bytes) {
     return bytes + ' Б';
 }
 
+function relDate(isoStr) {
+    if (!isoStr) return '—';
+    const d = new Date(isoStr.replace(' ', 'T') + 'Z');
+    const now = new Date();
+    const diffDays = Math.floor((now - d) / 86400000);
+    if (diffDays === 0) return 'сегодня';
+    if (diffDays === 1) return 'вчера';
+    return `${diffDays} дн назад`;
+}
+
 function relTime(ts) {
     if (!ts) return '<span class="hs-never">никогда</span>';
     const diff = Math.floor(Date.now() / 1000) - ts;
@@ -75,16 +85,20 @@ async function loadTraffic() {
             const rowClass = total > 0 ? '' : ' class="row-idle"';
             const traffic = total > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
             const platform = u.platform ? `${platformIcon(u.platform)} ${u.platform}` : '—';
+            const proxy = u.proxy_requested_at
+                ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
+                : '<span class="hs-never">—</span>';
             return `<tr${rowClass}>
                 <td class="td-name">${name}</td>
                 <td class="td-ip">${ip || '—'}</td>
                 <td class="td-traffic">${traffic}</td>
                 <td class="td-platform">${platform}</td>
                 <td class="td-hs">${relTime(u.last_handshake)}</td>
+                <td class="td-proxy">${proxy}</td>
             </tr>`;
         }).join('');
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="5" class="err">Ошибка загрузки</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="err">Ошибка загрузки</td></tr>`;
     }
 }
 

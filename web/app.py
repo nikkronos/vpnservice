@@ -38,6 +38,7 @@ from bot.database import (
     db_find_user_by_email,
     db_upsert_user,
     db_get_effective_telegram_id,
+    db_get_all_users,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -502,6 +503,12 @@ def api_traffic():
         dump_stdout = _get_awg_dump_eu1()
         full_data = _parse_wg_dump_full(dump_stdout) if dump_stdout else {}
 
+        proxy_ts: Dict[int, Optional[str]] = {
+            u["telegram_id"]: u.get("proxy_requested_at")
+            for u in db_get_all_users()
+            if u.get("telegram_id")
+        }
+
         by_user: Dict[int, Dict] = {}
         for peer in peers:
             if peer.server_id != "eu1" or not peer.active:
@@ -519,6 +526,7 @@ def api_traffic():
                     "tx_bytes": 0,
                     "last_handshake": 0,
                     "platform": peer.platform or "pc",
+                    "proxy_requested_at": proxy_ts.get(uid),
                 }
             by_user[uid]["rx_bytes"] += d["rx"]
             by_user[uid]["tx_bytes"] += d["tx"]
