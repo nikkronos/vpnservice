@@ -375,7 +375,6 @@ def recovery_page():
 
 
 @app.route("/api/servers")
-@_require_admin_auth
 def api_servers():
     """API: статус серверов."""
     try:
@@ -408,7 +407,6 @@ def api_servers():
 
 
 @app.route("/api/services")
-@_require_admin_auth
 def api_services():
     """API: статус сервисов eu1 (AmneziaWG локально + VLESS порт)."""
     try:
@@ -479,7 +477,6 @@ def api_users():
 
 
 @app.route("/api/traffic")
-@_require_admin_auth
 def api_traffic():
     """API: трафик по пользователям с last_handshake."""
     try:
@@ -525,7 +522,6 @@ def api_traffic():
 
 
 @app.route("/api/stats")
-@_require_admin_auth
 def api_stats():
     """API: статистика использования."""
     try:
