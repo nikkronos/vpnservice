@@ -481,11 +481,14 @@ def api_traffic():
                     "rx_bytes": 0,
                     "tx_bytes": 0,
                     "last_handshake": 0,
+                    "platform": peer.platform or "pc",
                 }
             by_user[uid]["rx_bytes"] += d["rx"]
             by_user[uid]["tx_bytes"] += d["tx"]
+            # Платформа — та, у которой самый свежий last_handshake
             if d["last_handshake"] > by_user[uid]["last_handshake"]:
                 by_user[uid]["last_handshake"] = d["last_handshake"]
+                by_user[uid]["platform"] = peer.platform or "pc"
 
         users_list = sorted(by_user.values(), key=lambda x: x["rx_bytes"] + x["tx_bytes"], reverse=True)
         resp = jsonify({

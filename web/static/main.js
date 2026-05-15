@@ -67,16 +67,19 @@ async function loadTraffic() {
             tbody.innerHTML = '<tr><td colspan="5" class="loading">Нет данных</td></tr>';
             return;
         }
+        const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');
         tbody.innerHTML = users.map(u => {
             const name = u.username ? `@${u.username}` : `ID ${u.telegram_id}`;
             const ip = (u.wg_ip || '').replace('/32', '').replace('/24', '');
             const total = u.rx_bytes + u.tx_bytes;
             const rowClass = total > 0 ? '' : ' class="row-idle"';
+            const traffic = total > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
+            const platform = u.platform ? `${platformIcon(u.platform)} ${u.platform}` : '—';
             return `<tr${rowClass}>
                 <td class="td-name">${name}</td>
                 <td class="td-ip">${ip || '—'}</td>
-                <td class="td-rx">${fmt(u.rx_bytes)}</td>
-                <td class="td-tx">${fmt(u.tx_bytes)}</td>
+                <td class="td-traffic">${traffic}</td>
+                <td class="td-platform">${platform}</td>
                 <td class="td-hs">${relTime(u.last_handshake)}</td>
             </tr>`;
         }).join('');
