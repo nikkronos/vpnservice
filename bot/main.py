@@ -181,6 +181,9 @@ def main() -> None:
     # Состояние ожидания ввода ID для генерации AmneziaWG конфига (через кнопку в админке)
     _pending_awg_conf: set[int] = set()
 
+    # Состояние ожидания текста для рассылки
+    _pending_broadcast: set[int] = set()
+
     # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
     _email_link_state: dict[int, dict] = {}
 
@@ -1063,47 +1066,49 @@ def main() -> None:
             bot.answer_callback_query(call.id, "Только для владельца.")
             return
         bot.answer_callback_query(call.id)
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            types.InlineKeyboardButton("✅ Да, разослать", callback_data="admin_broadcast_confirm"),
-            types.InlineKeyboardButton("❌ Отмена", callback_data="admin_panel"),
-        )
+        _pending_broadcast.add(call.from_user.id)
+        try:
+            users = get_all_users()
+            active = [u for u in users if u.active and u.telegram_id > 0]
+            count = len(active)
+        except Exception:  # noqa: BLE001
+            count = "?"
         bot.edit_message_text(
-            "⚠️ <b>Разослать уведомление всем активным пользователям?</b>\n\n"
-            "Это отправит сообщение о проблемах с VPN каждому пользователю в базе.",
+            f"📢 <b>Рассылка</b>\n\n"
+            f"Получателей: <b>{count}</b> активных пользователей.\n\n"
+            "Напиши текст сообщения — отправлю его всем.\n"
+            "<i>Поддерживается HTML-разметка: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
             call.message.chat.id,
             call.message.message_id,
             parse_mode="HTML",
-            reply_markup=markup,
         )
 
-    @bot.callback_query_handler(func=lambda call: call.data == "admin_broadcast_confirm")
-    def callback_admin_broadcast_confirm(call: types.CallbackQuery) -> None:  # type: ignore[override]
-        if not call.from_user or not is_owner(call.from_user.id, admin_id):
-            bot.answer_callback_query(call.id, "Только для владельца.")
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_broadcast
+    )
+    def handle_pending_broadcast(message: types.Message) -> None:  # type: ignore[override]
+        """Получает текст рассылки от владельца и рассылает всем активным пользователям."""
+        if not message.from_user:
             return
-        bot.answer_callback_query(call.id, "Рассылка запущена...")
-        bot.edit_message_text(
-            "📢 Рассылка запущена...",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-        )
+        _pending_broadcast.discard(message.from_user.id)
+        broadcast_text = (message.text or "").strip()
+        if not broadcast_text:
+            bot.reply_to(message, "❌ Пустое сообщение. Рассылка отменена.")
+            return
+
+        # Превью и подтверждение через inline-кнопки не делаем — просто рассылаем сразу.
+        # Если передумал — просто не отправляй текст.
         try:
             users = get_all_users()
         except Exception as e:  # noqa: BLE001
-            bot.send_message(call.message.chat.id, f"Ошибка при чтении пользователей: {e!r}")
+            bot.reply_to(message, f"❌ Ошибка чтения пользователей: {e!r}")
             return
-        recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
-        broadcast_text = (
-            BROADCAST_VPN_ISSUE_TEXT
-            + "\n\nЕсли Telegram снова не отвечает — восстановление доступно на сайте.\n"
-            + f"Ссылка: {recovery_url}\n"
-            + "На странице введите свой Telegram ID и нажмите «Восстановить VPN (конфиг)»."
-        )
+
+        active_users = [u for u in users if u.active and u.telegram_id > 0]
+        status_msg = bot.reply_to(message, f"⏳ Рассылаю {len(active_users)} пользователям…")
         sent = 0
         failed = 0
-        for u in users:
+        for u in active_users:
             try:
                 bot.send_message(u.telegram_id, broadcast_text, parse_mode="HTML")
                 sent += 1
@@ -1111,9 +1116,10 @@ def main() -> None:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Broadcast: не отправлено %s: %s", u.telegram_id, e)
                 failed += 1
-        bot.send_message(
-            call.message.chat.id,
+        bot.edit_message_text(
             f"✅ Рассылка завершена: отправлено <b>{sent}</b>, не доставлено <b>{failed}</b>.",
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
             parse_mode="HTML",
         )
 
