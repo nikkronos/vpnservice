@@ -185,7 +185,7 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 |-------|-------|
 | Открытые задачи | `ROADMAP_VPN.md` |
 | История изменений | `DONE_LIST_VPN.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-15.md` |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-15_p4.md` |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
 | Yandex Cloud REALITY | `docs/yandex-cloud-reality-setup.md` |

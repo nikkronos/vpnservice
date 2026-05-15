@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-15 — Авторизация веб-панели + трекинг прокси
+
+- **Закрыта веб-панель `/`** от публичного доступа: HTML login-форма с Flask session (`session["logged_in"]`). Логин: `admin`, пароль: `ADMIN_SECRET`. `/recovery` остался публичным.
+- **`web/templates/login.html`** создан и добавлен в git (тёмная тема, в стиле панели).
+- **Убран Basic Auth** (не работал в Chrome без HTTPS, не передавался в fetch-запросах JS).
+- **Колонка «Прокси»** в таблице пользователей: показывает когда пользователь последний раз запрашивал MTProxy-ссылку.
+  - `bot/database.py`: миграция поля `proxy_requested_at`, функция `db_update_proxy_requested_at()`
+  - `bot/main.py`: запись при нажатии кнопки «📎 Прокси Telegram» и команде `/proxy`
+  - `web/app.py` + `web/static/main.js`: отображение в панели
+
 ## 2026-05-14 — Аудит безопасности веб-панели
 
 - **`/api/users`**: убрана авторизация по telegram_id (легко угадать). Теперь требует `ADMIN_SECRET` — случайная 64-char hex строка из `env_vars.txt`.
