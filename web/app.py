@@ -319,7 +319,14 @@ def index():
             if not user_peers:
                 continue
             servers = list({p.server_id for p in user_peers if p.active})
-            display_name = user.username or f"Пользователь {i + 1}"
+            if user.username:
+                display_name = f"@{user.username}"
+            elif user.telegram_id:
+                display_name = f"ID {user.telegram_id}"
+            elif user.email:
+                display_name = user.email
+            else:
+                display_name = f"Пользователь {i + 1}"
             users_summary.append({
                 "display_name": display_name,
                 "servers": sorted(servers),
@@ -468,6 +475,7 @@ def api_traffic():
             if uid not in by_user:
                 user = find_user(uid)
                 by_user[uid] = {
+                    "telegram_id": uid,
                     "username": user.username if user else None,
                     "wg_ip": peer.wg_ip,
                     "rx_bytes": 0,
