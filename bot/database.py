@@ -231,6 +231,21 @@ def db_find_user_by_email(email: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def db_delete_email_only_user(email: str) -> bool:
+    """
+    Удаляет запись пользователя, у которой есть email, но нет telegram_id.
+    Используется при слиянии email-only записи с telegram-записью.
+    Возвращает True если запись была удалена.
+    """
+    _ensure_init()
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM users WHERE email = ? AND (telegram_id IS NULL OR telegram_id = 0)",
+            (email.lower().strip(),),
+        )
+        return cur.rowcount > 0
+
+
 def db_upsert_user(data: Dict) -> int:
     """
     Вставляет или обновляет пользователя. Возвращает DB id.

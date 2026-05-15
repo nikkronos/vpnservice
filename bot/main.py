@@ -783,23 +783,32 @@ def main() -> None:
             _email_link_state.pop(uid, None)
 
             # Создаём или обновляем пользователя в БД
-            from .database import db_upsert_user
+            from .database import db_upsert_user, db_delete_email_only_user
+            # Удаляем email-only дубль (если был создан через recovery-сайт без Telegram).
+            # Иначе UNIQUE constraint на email заблокирует обновление telegram-записи.
+            db_delete_email_only_user(email)
+
             existing = find_user(uid)
-            if existing:
-                existing.email = email
-                existing.email_verified = True
-                upsert_user(existing)
-            else:
-                # Новый пользователь через email
-                db_upsert_user({
-                    "telegram_id": uid,
-                    "email": email,
-                    "username": message.from_user.username,
-                    "role": "user",
-                    "active": True,
-                    "preferred_server_id": "eu1",
-                    "email_verified": True,
-                })
+            try:
+                if existing:
+                    existing.email = email
+                    existing.email_verified = True
+                    upsert_user(existing)
+                else:
+                    # Новый пользователь через email
+                    db_upsert_user({
+                        "telegram_id": uid,
+                        "email": email,
+                        "username": message.from_user.username,
+                        "role": "user",
+                        "active": True,
+                        "preferred_server_id": "eu1",
+                        "email_verified": True,
+                    })
+            except Exception as exc:
+                logger.error("Ошибка сохранения email для %s: %s", uid, exc)
+                bot.reply_to(message, "❌ Не удалось сохранить email. Обратись к администратору.")
+                return
 
             action_text = "Email привязан" if mode == "link" else "Регистрация завершена"
             bot.reply_to(
