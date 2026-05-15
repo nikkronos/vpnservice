@@ -344,7 +344,8 @@ def index():
 @app.route("/recovery")
 def recovery_page():
     """Отдельная страница для восстановления (Telegram proxy / VPN конфиг)."""
-    return render_template("recovery.html", stats={})
+    recovery_secret = getattr(config, "recovery_secret", "") if config else ""
+    return render_template("recovery.html", stats={}, recovery_secret=recovery_secret)
 
 
 @app.route("/api/servers")

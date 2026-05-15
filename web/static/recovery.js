@@ -183,7 +183,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       const resp = await fetch(
-        '/api/recovery/proxy-link?telegram_id=' + encodeURIComponent(telegramId),
+        '/api/recovery/proxy-link?telegram_id=' + encodeURIComponent(telegramId) +
+        '&recovery_secret=' + encodeURIComponent(typeof RECOVERY_SECRET !== 'undefined' ? RECOVERY_SECRET : ''),
         { method: 'GET' }
       );
       const data = await resp.json().catch(() => ({}));
@@ -290,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const resp = await fetch('/api/recovery/telegram-proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id: telegramId }),
+          body: JSON.stringify({ telegram_id: telegramId, recovery_secret: typeof RECOVERY_SECRET !== 'undefined' ? RECOVERY_SECRET : '' }),
         });
 
         const data = await resp.json().catch(() => ({}));
@@ -350,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
             telegram_id: telegramId,
             android_safe: androidSafe,
             server_id: serverId,
+            recovery_secret: typeof RECOVERY_SECRET !== 'undefined' ? RECOVERY_SECRET : '',
           }),
         });
 
@@ -415,7 +417,8 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('vpn_recovery_telegram_id', telegramId);
 
         const resp = await fetch(
-          '/api/recovery/mobile-vpn?telegram_id=' + encodeURIComponent(telegramId),
+          '/api/recovery/mobile-vpn?telegram_id=' + encodeURIComponent(telegramId) +
+          '&recovery_secret=' + encodeURIComponent(typeof RECOVERY_SECRET !== 'undefined' ? RECOVERY_SECRET : ''),
           { method: 'GET' }
         );
 
