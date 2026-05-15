@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS users (
     created_at           TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS servers (
+    id          TEXT PRIMARY KEY,                  -- 'eu1', 'eu2', ...
+    name        TEXT NOT NULL DEFAULT '',          -- human-readable label
+    protocol    TEXT NOT NULL DEFAULT 'vless',     -- 'vless' | 'awg'
+    capacity    INTEGER NOT NULL DEFAULT 100,      -- max users on this server
+    active      INTEGER NOT NULL DEFAULT 1         -- 0 = offline / maintenance
+);
+
 CREATE TABLE IF NOT EXISTS otp_codes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     email       TEXT NOT NULL,
@@ -92,9 +100,31 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
         con.executescript(_SCHEMA)
     _migrate_from_json()
     _migrate_add_vless_columns()
+    _migrate_add_servers_table()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
+
+
+def _migrate_add_servers_table() -> None:
+    """
+    Идемпотентная миграция: создаёт таблицу servers (если нет) и засевает
+    eu1 — единственный активный сервер на текущем этапе.
+    Вызывается из init_db() после создания основных таблиц.
+    """
+    with _conn() as con:
+        # Таблица уже создана через _SCHEMA — просто сеем начальные данные.
+        count = con.execute("SELECT COUNT(*) FROM servers").fetchone()[0]
+        if count == 0:
+            con.execute(
+                """
+                INSERT OR IGNORE INTO servers (id, name, protocol, capacity, active)
+                VALUES
+                    ('eu1', 'Fornex eu1 (Germany)', 'vless', 500, 1),
+                    ('eu1-awg', 'Fornex eu1 — AmneziaWG', 'awg', 500, 1)
+                """
+            )
+            logger.info("Migration: seeded servers table with eu1 (vless + awg)")
 
 
 def _migrate_add_vless_columns() -> None:
@@ -435,4 +465,97 @@ def db_clear_vless_creds(telegram_id: int) -> None:
         con.execute(
             "UPDATE users SET vless_uuid = NULL, vless_short_id = NULL WHERE telegram_id = ?",
             (telegram_id,),
+        )
+
+
+# ─── Servers ──────────────────────────────────────────────────────────────────
+
+def db_get_server(server_id: str) -> Optional[Dict]:
+    """Возвращает строку сервера из таблицы servers или None."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute("SELECT * FROM servers WHERE id = ?", (server_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def db_get_active_servers(protocol: Optional[str] = None) -> List[Dict]:
+    """
+    Возвращает все активные серверы (active=1).
+    Если задан protocol — фильтрует по нему.
+    """
+    _ensure_init()
+    with _conn() as con:
+        if protocol:
+            rows = con.execute(
+                "SELECT * FROM servers WHERE active = 1 AND protocol = ? ORDER BY id",
+                (protocol,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM servers WHERE active = 1 ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def db_pick_server(protocol: str = "vless") -> str:
+    """
+    Выбирает наименее загруженный активный сервер для протокола.
+
+    Для protocol='vless'  нагрузка = кол-во пользователей с vless_uuid IS NOT NULL.
+    Для protocol='awg'    нагрузка = кол-во пользователей с preferred_server_id = server.id.
+
+    Возвращает server_id (str). Если активных серверов нет — возвращает 'eu1' как fallback.
+    """
+    _ensure_init()
+    servers = db_get_active_servers(protocol=protocol)
+    if not servers:
+        logger.warning("db_pick_server: нет активных серверов protocol=%s, fallback eu1", protocol)
+        return "eu1"
+
+    if len(servers) == 1:
+        return servers[0]["id"]
+
+    # Считаем нагрузку для каждого сервера
+    with _conn() as con:
+        load: Dict[str, int] = {}
+        for srv in servers:
+            sid = srv["id"]
+            if protocol == "vless":
+                # VLESS: пользователи с vless_uuid != NULL
+                # Все VLESS-пользователи пока на eu1, поэтому считаем общий счётчик
+                cnt = con.execute(
+                    "SELECT COUNT(*) FROM users WHERE vless_uuid IS NOT NULL AND active = 1"
+                ).fetchone()[0]
+            else:
+                # AWG / WG: пользователи с preferred_server_id = sid
+                cnt = con.execute(
+                    "SELECT COUNT(*) FROM users WHERE preferred_server_id = ? AND active = 1",
+                    (sid,),
+                ).fetchone()[0]
+            load[sid] = cnt
+
+    # Выбираем сервер с наибольшим остатком: capacity - load
+    best = min(servers, key=lambda s: load.get(s["id"], 0) / max(s["capacity"], 1))
+    logger.info(
+        "db_pick_server(protocol=%s): выбран %s (load=%d/%d)",
+        protocol, best["id"], load.get(best["id"], 0), best["capacity"],
+    )
+    return best["id"]
+
+
+def db_upsert_server(server_id: str, name: str, protocol: str, capacity: int, active: bool = True) -> None:
+    """Создаёт или обновляет запись сервера."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO servers (id, name, protocol, capacity, active)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name     = excluded.name,
+                protocol = excluded.protocol,
+                capacity = excluded.capacity,
+                active   = excluded.active
+            """,
+            (server_id, name, protocol, capacity, 1 if active else 0),
         )

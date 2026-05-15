@@ -8,6 +8,8 @@
 - Список пользователей (для админа)
 """
 
+import csv
+import io
 import json
 import logging
 import pathlib
@@ -19,7 +21,7 @@ import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 # Добавляем путь к модулям бота
 import sys
@@ -829,6 +831,104 @@ def api_recovery_vpn_by_email():
     except Exception as e:
         logger.exception("Ошибка api/recovery/vpn-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+def _check_admin_secret() -> Optional[tuple]:
+    """
+    Проверяет ADMIN_SECRET из query-параметра admin_key или заголовка X-Admin-Key.
+    Возвращает None если ок, иначе (jsonify(error), status_code).
+    """
+    admin_secret = getattr(config, "admin_secret", None) if config else None
+    if not admin_secret:
+        return jsonify({"error": "Admin secret not configured on server"}), 503
+    provided = (
+        request.headers.get("X-Admin-Key")
+        or request.args.get("admin_key")
+        or (request.get_json(silent=True) or {}).get("admin_key")
+    )
+    if not provided or provided != admin_secret:
+        return jsonify({"error": "Unauthorized"}), 403
+    return None
+
+
+@app.route("/api/admin/users.csv")
+def api_admin_users_csv():
+    """
+    Экспортирует всех пользователей в CSV.
+    Защищено admin_key (query-параметр или X-Admin-Key header).
+
+    Поля: id, telegram_id, username, email, role, active, preferred_server_id,
+          email_verified, has_vless, peers_count, created_at
+    """
+    err = _check_admin_secret()
+    if err is not None:
+        return err
+    try:
+        from bot.database import db_get_all_users
+        users = db_get_all_users()
+        peers = get_all_peers()
+
+        # Индекс: telegram_id → кол-во активных пиров
+        peer_count: Dict[int, int] = {}
+        for p in peers:
+            if p.active:
+                peer_count[p.telegram_id] = peer_count.get(p.telegram_id, 0) + 1
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "id", "telegram_id", "username", "email", "role",
+            "active", "preferred_server_id", "email_verified",
+            "has_vless", "peers_count", "created_at",
+        ])
+        for u in users:
+            tid = u.get("telegram_id")
+            writer.writerow([
+                u.get("id", ""),
+                tid or "",
+                u.get("username", ""),
+                u.get("email", ""),
+                u.get("role", "user"),
+                "1" if u.get("active") else "0",
+                u.get("preferred_server_id", ""),
+                "1" if u.get("email_verified") else "0",
+                "1" if u.get("vless_uuid") else "0",
+                peer_count.get(tid, 0) if tid else 0,
+                u.get("created_at", ""),
+            ])
+
+        csv_data = output.getvalue()
+        filename = f"vpn_users_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(
+            csv_data,
+            mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except Exception as e:
+        logger.exception("Ошибка /api/admin/users.csv: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/sync-sheets", methods=["POST"])
+def api_admin_sync_sheets():
+    """
+    Запускает синхронизацию пользователей в Google Sheets.
+    Защищено admin_key.
+    Возвращает {ok, updated, message} или {ok: false, error}.
+    """
+    err = _check_admin_secret()
+    if err is not None:
+        return err
+    try:
+        from bot.google_sheets import sync_users_to_sheets
+        result = sync_users_to_sheets()
+        status = 200 if result.get("ok") else 502
+        return jsonify(result), status
+    except ImportError:
+        return jsonify({"ok": False, "error": "bot.google_sheets модуль не найден"}), 500
+    except Exception as e:
+        logger.exception("Ошибка /api/admin/sync-sheets: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 if __name__ == "__main__":

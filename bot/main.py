@@ -885,6 +885,7 @@ def main() -> None:
             types.InlineKeyboardButton("🔓 Whitelist ID", callback_data="admin_whitelist"),
             types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
             types.InlineKeyboardButton("🔧 AmneziaWG конфиг", callback_data="admin_awg_conf"),
+            types.InlineKeyboardButton("📊 Sync Google Sheets", callback_data="admin_sync_sheets"),
         )
         markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_back"))
         return markup
@@ -1163,6 +1164,38 @@ def main() -> None:
             io.BytesIO(cfg.encode()),
             visible_file_name=filename,
             caption=f"✅ AmneziaWG конфиг для <code>{target_tid}</code>",
+            parse_mode="HTML",
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_sync_sheets")
+    def callback_admin_sync_sheets(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Запускает синхронизацию пользователей в Google Sheets."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        status_msg = bot.send_message(
+            call.message.chat.id,
+            "⏳ Синхронизирую пользователей в Google Sheets…",
+        )
+        try:
+            from bot.google_sheets import sync_users_to_sheets
+            result = sync_users_to_sheets()
+        except Exception as exc:  # noqa: BLE001
+            bot.edit_message_text(
+                f"❌ Ошибка: {exc!r}",
+                chat_id=call.message.chat.id,
+                message_id=status_msg.message_id,
+            )
+            return
+        if result.get("ok"):
+            text = f"✅ {result.get('message', 'Готово')}"
+        else:
+            text = f"❌ Ошибка синхронизации:\n<code>{result.get('error', '?')}</code>"
+        bot.edit_message_text(
+            text,
+            chat_id=call.message.chat.id,
+            message_id=status_msg.message_id,
             parse_mode="HTML",
         )
 
