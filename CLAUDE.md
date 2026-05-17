@@ -47,7 +47,7 @@ git log --oneline -3
 | WireGuard | ✅ Работает | main (Timeweb) — Россия |
 | AmneziaWG | ✅ Работает | eu1 Docker `amnezia-awg2` — Европа |
 | VLESS+WS+Cloudflare CDN | ✅ Обычные блокировки | `sub.vpnnkrns.ru:443` |
-| VLESS+REALITY xHTTP | ✅ LTE whitelist-режим | Yandex Cloud `158.160.236.147:443` |
+| VLESS+REALITY xHTTP | ⚠️ Частично — T2 работает, Yota/Мегафон при БС ❌ | Yandex Cloud `158.160.236.147:443` |
 | MTProxy Fake TLS | ✅ Telegram | eu1 порт `8444` |
 | WireGuard UDP к Fornex | ❌ Заблокирован РФ | — |
 | Голый MTProto на eu1 | ❌ Блок по сигнатуре | — |
