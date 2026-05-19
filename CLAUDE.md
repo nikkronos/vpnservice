@@ -47,6 +47,7 @@ git log --oneline -3
 | WireGuard | ✅ Работает | main (Timeweb) — Россия |
 | AmneziaWG | ✅ Работает | eu1 Docker `amnezia-awg2` — Европа |
 | VLESS+WS+Cloudflare CDN | ✅ Обычные блокировки | `sub.vpnnkrns.ru:443` |
+| VLESS+XHTTP+Yandex CDN | ⏳ Настроен, тест при БС — ждём | `cdn.vpnnkrns.ru:80` → Fornex |
 | VLESS+REALITY xHTTP | ⚠️ Частично — T2 работает, Yota/Мегафон при БС ❌ | Yandex Cloud `158.160.236.147:443` |
 | MTProxy Fake TLS | ✅ Telegram | eu1 порт `8444` |
 | WireGuard UDP к Fornex | ❌ Заблокирован РФ | — |
@@ -185,7 +186,7 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 |-------|-------|
 | Открытые задачи | `ROADMAP_VPN.md` |
 | История изменений | `DONE_LIST_VPN.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-15_p4.md` |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-19.md` |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
 | Yandex Cloud REALITY | `docs/yandex-cloud-reality-setup.md` |
