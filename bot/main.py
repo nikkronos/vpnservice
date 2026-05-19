@@ -1436,6 +1436,7 @@ def main() -> None:
             types.InlineKeyboardButton("МТС", callback_data="mobile_op_mts"),
             types.InlineKeyboardButton("Т-Мобайл", callback_data="mobile_op_tmobile"),
             types.InlineKeyboardButton("Т2", callback_data="mobile_op_t2"),
+            types.InlineKeyboardButton("Другой", callback_data="mobile_op_other"),
         )
         markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         safe_reply(
@@ -1470,6 +1471,9 @@ def main() -> None:
         if op == "mobile_op_megafon":
             url = config.vless_cdn_share_url or config.vless_reality_share_url
             instruction_key = "vless_cdn" if config.vless_cdn_share_url else "vless_reality"
+        elif op == "mobile_op_other":
+            url = config.vless_reality_share_url
+            instruction_key = "vless_reality_other"
         else:
             url = config.vless_reality_share_url
             instruction_key = "vless_reality"
