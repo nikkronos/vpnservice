@@ -1420,10 +1420,7 @@ def main() -> None:
 
     @bot.message_handler(commands=["mobile_vpn"])
     def cmd_mobile_vpn(message: types.Message) -> None:  # type: ignore[override]
-        """
-        Резервный доступ через VLESS+REALITY (TCP) для мобильных сетей.
-        Ссылка отправляется вторым сообщением без HTML, чтобы сохранить символы & в query string.
-        """
+        """Показывает клавиатуру выбора оператора для мобильного VPN."""
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
@@ -1432,27 +1429,60 @@ def main() -> None:
             safe_reply(message, "Нет доступа. Войди по email через /start.")
             return
 
-        url = config.vless_reality_share_url
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("Билайн", callback_data="mobile_op_beeline"),
+            types.InlineKeyboardButton("Мегафон/Yota", callback_data="mobile_op_megafon"),
+            types.InlineKeyboardButton("МТС", callback_data="mobile_op_mts"),
+            types.InlineKeyboardButton("Т-Мобайл", callback_data="mobile_op_tmobile"),
+            types.InlineKeyboardButton("Т2", callback_data="mobile_op_t2"),
+        )
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        safe_reply(
+            message,
+            "📱 <b>Мобильный VPN</b>\n\nВыбери своего оператора:",
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+
+    def _send_mobile_vless(chat_id: int, url: str, instruction_key: str) -> None:
+        """Отправляет инструкцию и VLESS ссылку для мобильного VPN."""
+        import html as _html
+        instr = _load_instruction_text(config.base_dir, instruction_key)
+        bot.send_message(chat_id, instr)
+        try:
+            safe_url = _html.escape(url)
+            bot.send_message(chat_id, f"<code>{safe_url}</code>", parse_mode="HTML")
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Не удалось отправить VLESS ссылку: %s", e)
+            bot.send_message(chat_id, "Не удалось отправить ссылку. Напиши владельцу.")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("mobile_op_"))
+    def callback_mobile_operator(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        if not _is_authorized(call.from_user.id):
+            bot.send_message(call.message.chat.id, "Нет доступа.")
+            return
+
+        op = call.data  # mobile_op_beeline / mobile_op_megafon / etc.
+
+        if op == "mobile_op_megafon":
+            url = config.vless_cdn_share_url or config.vless_reality_share_url
+            instruction_key = "vless_cdn" if config.vless_cdn_share_url else "vless_reality"
+        else:
+            url = config.vless_reality_share_url
+            instruction_key = "vless_reality"
+
         if not url:
-            safe_reply(
-                message,
-                "Резервный мобильный профиль (VLESS+REALITY) пока не настроен на сервере бота.\n"
-                "Напиши владельцу или используй AmneziaWG по Wi‑Fi: /get_config после выбора Европы в /server.",
+            bot.send_message(
+                call.message.chat.id,
+                "Мобильный профиль пока не настроен. Напиши владельцу.",
             )
             return
 
-        instr = _load_instruction_text(config.base_dir, "vless_reality")
-        safe_reply(message, instr)
-        try:
-            import html as _html
-            safe_url = _html.escape(url)
-            bot.send_message(message.chat.id, f"<code>{safe_url}</code>", parse_mode="HTML")
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Не удалось отправить VLESS ссылку: %s", e)
-            safe_reply(
-                message,
-                "Не удалось отправить ссылку. Напиши владельцу.",
-            )
+        _send_mobile_vless(call.message.chat.id, url, instruction_key)
 
     @bot.message_handler(commands=["server_exec"])
     def cmd_server_exec(message: types.Message) -> None:  # type: ignore[override]
