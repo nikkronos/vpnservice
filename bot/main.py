@@ -1441,7 +1441,6 @@ def main() -> None:
         safe_reply(
             message,
             "📱 <b>Мобильный VPN</b>\n\nВыбери своего оператора:",
-            parse_mode="HTML",
             reply_markup=markup,
         )
 
