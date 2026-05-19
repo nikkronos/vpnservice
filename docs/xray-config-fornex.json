@@ -1,0 +1,64 @@
+{
+  "log": { "loglevel": "info" },
+  "dns": { "servers": ["8.8.8.8", "1.1.1.1"] },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 8080,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "359e23cc-f90c-4e43-97af-bd1b662ff043", "flow": ""}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {"path": "/vpn"}
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"]}
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 8081,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "359e23cc-f90c-4e43-97af-bd1b662ff043", "flow": ""}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "none",
+        "xhttpSettings": {"path": "/vpn"}
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"]}
+    },
+    {
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {"id": "44af9414-81d5-4baa-ac54-689f2c896c0d", "flow": "xtls-rprx-vision"},
+          {"id": "ccaa7bc8-6be6-4443-bafa-97c2aec74d53", "flow": "xtls-rprx-vision"},
+          {"id": "6883deed-5d05-4aff-947b-b28cfd3442dd", "flow": "xtls-rprx-vision"},
+          {"id": "d07c6a58-cc3a-4c5e-aee9-7f59e8ad7738", "flow": "xtls-rprx-vision"},
+          {"id": "3da04dd5-1628-40ed-8abc-851d6752adc8", "flow": "xtls-rprx-vision"},
+          {"id": "f6fc0ae2-ae6f-4170-89be-1a3acc8d9f03", "flow": "xtls-rprx-vision"},
+          {"id": "2816307e-92f7-4619-b037-6b62ca23cced", "flow": "xtls-rprx-vision"}
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "www.microsoft.com:443",
+          "serverNames": ["www.microsoft.com"],
+          "privateKey": "AHTtsR3ntxxAuSMhA2Iztlo_nE8uEBL56fpO3ZZrQ3g",
+          "shortIds": ["04d9b6c0"]
+        }
+      }
+    }
+  ],
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+}
