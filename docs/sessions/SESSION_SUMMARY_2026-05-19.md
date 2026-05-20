@@ -64,11 +64,31 @@ vless://359e23cc-f90c-4e43-97af-bd1b662ff043@cdn.vpnnkrns.ru:80?encryption=none&
 - `97da13b` — `feat: mobile VPN operator selection + Yandex CDN relay (XHTTP)`
 - `959814f` — `fix: remove invalid parse_mode kwarg from safe_reply in cmd_mobile_vpn`
 
-## Статус задач
+## Статус задач (обновлено 2026-05-20)
 
 | Задача | Статус |
 |--------|--------|
-| CDN relay (XHTTP) настроен | ✅ Готово |
-| Бот: выбор оператора | ✅ Готово |
-| Тест CDN на Мегафон/Yota при БС | ⏳ Ждём события |
-| WebSocket в CDN через поддержку YC | 🔁 Резерв |
+| CDN relay (XHTTP) настроен | ✅ Технически готово |
+| Бот: выбор оператора (+ кнопка "Другой") | ✅ Готово |
+| nginx на Fornex (роутер WS/XHTTP) | ✅ Работает |
+| Yandex CDN WebSocket | ❌ Закрыто — поддержка YC отказала |
+| YC VM IP в whitelist | ❌ Подтверждено — не в whitelist (тест на Yota) |
+| **Следующий шаг: Yandex API Gateway** | ⏳ Проверить при активном БС (сейчас активен!) |
+
+## Что передать следующему агенту
+
+**Активный БС прямо сейчас.** Главная задача — проверить Yandex API Gateway:
+
+1. Создать API Gateway в YC Console (`*.apigw.yandexcloud.net`)
+2. Настроить HTTP proxy → `185.21.8.91:80` с WebSocket
+3. Проверить с Yota/Мегафон без VPN: открывается ли `https://<id>.apigw.yandexcloud.net`
+4. Если да — настроить VLESS+WS через этот endpoint
+
+**Текущая инфраструктура Fornex порт 80:**
+- nginx роутит по Host + Upgrade заголовку
+- `Host: sub.vpnnkrns.ru` → Xray WS `127.0.0.1:8080`
+- `Host: 185.21.8.91` + `Upgrade: websocket` → Xray WS `127.0.0.1:8080`
+- `Host: 185.21.8.91` + plain HTTP → Xray XHTTP `127.0.0.1:8081`
+- Xray REALITY на порту 443 без изменений
+
+**UUID для новых ссылок:** `359e23cc-f90c-4e43-97af-bd1b662ff043` (WS/XHTTP на Fornex)
