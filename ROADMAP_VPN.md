@@ -46,9 +46,10 @@
   - ❌ YC VM IP `158.160.236.147` — не в whitelist (подтверждено тестом на Yota 2026-05-20)
   - ❌ Yandex CDN — WebSocket невозможен (подтверждено поддержкой YC 2026-05-20), POST не поддерживается
   - ❌ Fornex/Timeweb IP — не в whitelist
-  - ❌ **Текущее решение (подтверждённо не работает на Мегафон/Yota при БС):** VLESS+XHTTP через Yandex CDN → Fornex. Серверная часть валидна (логи nginx показывают валидный XHTTP-трафик 19.05). Клиент с другом на Yota/Мегафон при БС не подключается; на Wi-Fi и других операторах — работает. Точная точка обрыва (DNS / TCP / TLS / прозрачный прокси) не диагностирована.
-  - 🔍 **Шаг 1 (повторная диагностика с другом):** при следующем БС с устройства на Yota/Мегафон без VPN: `nslookup cdn.vpnnkrns.ru 8.8.8.8` → `nslookup cdn.vpnnkrns.ru` (системный DNS) → `ping` IP → `curl -v http://cdn.vpnnkrns.ru/vpn` или через браузер → логи VPN-клиента при попытке подключения. По результатам — конкретная гипотеза вместо гадания.
-  - ❓ **Шаг 2 (запасной кандидат): Yandex API Gateway** (`*.apigw.yandexcloud.net`) — поддерживает WebSocket proxy, домены могут быть в whitelist. Создать API Gateway → HTTP/WS proxy на `185.21.8.91:80` → проверить доступность endpoint при БС на Yota без VPN → если открывается, настроить VLESS+WS через этот endpoint. **Подробный план:** `docs/yandex-api-gateway-plan.md`
+  - ❌ **Текущее решение (подтверждённо не работает на Мегафон/Yota при БС):** VLESS+XHTTP через Yandex CDN → Fornex, на HTTP/80 без TLS. Тест с другом (Streisand, iPhone) на Yota подтвердил неработоспособность.
+  - ✅ **Диагностика 20.05.2026:** друг открыл `http://cdn.vpnnkrns.ru/vpn` в браузере на Yota без VPN — CDN endpoint **доступен** (страница загружается). Значит проблема не в недоступности CDN, а **на уровне HTTP-протокола в VPN-туннеле** — гипотеза: прозрачный прокси Мегафон/Yota перехватывает HTTP-трафик. На том же операторе VLESS+WS через Cloudflare CDN (HTTPS:443) — работает.
+  - 🎯 **Шаг 1 (главный кандидат): TLS на Yandex CDN.** Выпустить Let's Encrypt сертификат через YC Certificate Manager → привязать к CDN ресурсу → переключить VLESS-ссылку на `:443+security=tls`. Серверная часть Fornex не меняется. **Подробный план:** `docs/cdn-tls-upgrade-plan.md`
+  - ❓ **Шаг 2 (если TLS не помог): Yandex API Gateway** (`*.apigw.yandexcloud.net`) — другой relay-endpoint в YC. **Подробный план:** `docs/yandex-api-gateway-plan.md`
   - Текущее состояние бота: кнопка Мегафон/Yota отдаёт VLESS+XHTTP CDN ссылку
 - [ ] **Аудит инструкций и документации на соответствие реальности** — пройти и сверить с фактической инфраструктурой/UX:
   - Тексты в боте: все `instruction_*.txt` в `/opt/vpnservice/docs/bot-instruction-texts/` (соответствие текущему UX, кнопкам, операторам, протоколам)
