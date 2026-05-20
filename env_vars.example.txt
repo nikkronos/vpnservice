@@ -26,6 +26,13 @@ RECOVERY_SECRET=replace_with_random_secret
 # Генерируется на eu1 после развёртывания Xray (см. docs/xray-vless-reality-eu1-deploy.md). Одна строка, без кавычек.
 # VLESS_REALITY_SHARE_URL=vless://uuid@host:8443?encryption=none&flow=xtls-rprx-vision&security=reality&...
 
+# VLESS+XHTTP через Yandex CDN — резерв для Мегафон/Yota при белых списках.
+# Старый вариант (HTTP/80 без TLS, не работает на Мегафон/Yota при БС, оставлен как fallback):
+# VLESS_CDN_SHARE_URL=vless://uuid@cdn.vpnnkrns.ru:80?encryption=none&type=xhttp&path=%2Fvpn&host=cdn.vpnnkrns.ru
+# Новый вариант (HTTPS/443 + TLS, основной для Мегафон/Yota — настройка через YC Certificate Manager,
+# см. docs/cdn-tls-upgrade-plan.md):
+# VLESS_CDN_TLS_SHARE_URL=vless://uuid@cdn.vpnnkrns.ru:443?encryption=none&security=tls&type=xhttp&path=%2Fvpn&host=cdn.vpnnkrns.ru&sni=cdn.vpnnkrns.ru
+
 # Server / VPN node (для автоматизации)
 # ВАЖНО: реальные значения прописываются только в env_vars.txt на сервере/локально, этот файл — пример.
 VPN_SERVER_HOST=81.200.146.32

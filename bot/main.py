@@ -1469,8 +1469,19 @@ def main() -> None:
         op = call.data  # mobile_op_beeline / mobile_op_megafon / etc.
 
         if op == "mobile_op_megafon":
-            url = config.vless_cdn_share_url or config.vless_reality_share_url
-            instruction_key = "vless_cdn" if config.vless_cdn_share_url else "vless_reality"
+            # Порядок предпочтения для Мегафон/Yota при белых списках:
+            # 1) CDN+TLS (HTTPS:443) — гипотеза, что прозрачный прокси операторов не ломает TLS
+            # 2) CDN без TLS (HTTP:80) — fallback на старый вариант
+            # 3) VLESS+REALITY (YC) — крайний fallback
+            if config.vless_cdn_tls_share_url:
+                url = config.vless_cdn_tls_share_url
+                instruction_key = "vless_cdn"
+            elif config.vless_cdn_share_url:
+                url = config.vless_cdn_share_url
+                instruction_key = "vless_cdn"
+            else:
+                url = config.vless_reality_share_url
+                instruction_key = "vless_reality"
         elif op == "mobile_op_other":
             url = config.vless_reality_share_url
             instruction_key = "vless_reality_other"

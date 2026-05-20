@@ -16,8 +16,11 @@ class BotConfig:
     vpn_recovery_url: str = "http://185.21.8.91:5001/recovery"
     # Share-ссылка vless:// для мобильного интернета (Xray REALITY), из VLESS_REALITY_SHARE_URL
     vless_reality_share_url: str | None = None
-    # Share-ссылка vless:// через Yandex CDN relay (XHTTP), для Мегафон/Yota при белых списках
+    # Share-ссылка vless:// через Yandex CDN relay (XHTTP, HTTP/80), для Мегафон/Yota при белых списках
     vless_cdn_share_url: str | None = None
+    # Share-ссылка vless:// через Yandex CDN relay (XHTTP, HTTPS/443 + TLS) — приоритетный вариант
+    # для Мегафон/Yota: гипотеза, что прозрачный прокси операторов ломает HTTP, но не HTTPS.
+    vless_cdn_tls_share_url: str | None = None
     # Email: Resend API
     resend_api_key: str | None = None
     resend_from_email: str = "noreply@vpn.example.com"
@@ -96,6 +99,12 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         if not vless_cdn_share_url.lower().startswith("vless://"):
             vless_cdn_share_url = None
 
+    vless_cdn_tls_share_url = data.get("VLESS_CDN_TLS_SHARE_URL") or None
+    if vless_cdn_tls_share_url:
+        vless_cdn_tls_share_url = vless_cdn_tls_share_url.strip()
+        if not vless_cdn_tls_share_url.lower().startswith("vless://"):
+            vless_cdn_tls_share_url = None
+
     resend_api_key = (data.get("RESEND_API_KEY") or "").strip() or None
     resend_from_email = (data.get("RESEND_FROM_EMAIL") or "").strip() or "noreply@vpn.example.com"
 
@@ -122,6 +131,7 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         vpn_recovery_url=vpn_recovery_url,
         vless_reality_share_url=vless_reality_share_url,
         vless_cdn_share_url=vless_cdn_share_url,
+        vless_cdn_tls_share_url=vless_cdn_tls_share_url,
         resend_api_key=resend_api_key,
         resend_from_email=resend_from_email,
         telegram_id_whitelist=telegram_id_whitelist or None,
