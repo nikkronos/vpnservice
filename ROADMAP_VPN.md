@@ -42,14 +42,15 @@
 
 ### 🟡 Приоритет 2 — Улучшение продукта
 
-- [ ] **Yota/Мегафон при белых списках** — решения нет, исследуем.
-  - ❌ YC VM IP `158.160.236.147` — не в whitelist (подтверждено тестом на Yota 2026-05-20)
-  - ❌ Yandex CDN — WebSocket невозможен (подтверждено поддержкой YC 2026-05-20), POST не поддерживается
-  - ❌ Fornex/Timeweb IP — не в whitelist
-  - ❌ **Текущее решение (подтверждённо не работает на Мегафон/Yota при БС):** VLESS+XHTTP через Yandex CDN → Fornex, на HTTP/80 без TLS. Тест с другом (Streisand, iPhone) на Yota подтвердил неработоспособность.
-  - ✅ **Диагностика 20.05.2026:** друг открыл `http://cdn.vpnnkrns.ru/vpn` в браузере на Yota без VPN — CDN endpoint **доступен** (страница загружается). Значит проблема не в недоступности CDN, а **на уровне HTTP-протокола в VPN-туннеле** — гипотеза: прозрачный прокси Мегафон/Yota перехватывает HTTP-трафик. На том же операторе VLESS+WS через Cloudflare CDN (HTTPS:443) — работает.
-  - 🎯 **Шаг 1 (главный кандидат): TLS на Yandex CDN.** Выпустить Let's Encrypt сертификат через YC Certificate Manager → привязать к CDN ресурсу → переключить VLESS-ссылку на `:443+security=tls`. Серверная часть Fornex не меняется. **Подробный план:** `docs/cdn-tls-upgrade-plan.md`
-  - ❓ **Шаг 2 (если TLS не помог): Yandex API Gateway** (`*.apigw.yandexcloud.net`) — другой relay-endpoint в YC. **Подробный план:** `docs/yandex-api-gateway-plan.md`
+- [ ] **Yota/Мегафон при белых списках** — решения нет.
+  - 📋 **Полный отчёт о всех проверенных гипотезах:** [`docs/yandex-cdn-xhttp-postmortem.md`](docs/yandex-cdn-xhttp-postmortem.md) — **читать ОБЯЗАТЕЛЬНО перед следующими попытками**, чтобы не повторять опровергнутое.
+  - ❌ **Опровергнуто (НЕ пробовать снова):** не-TLS-цепочка, VLESS+XHTTP через Yandex CDN HTTP, VLESS+XHTTP через Yandex CDN HTTPS (`cdn-tls-upgrade-plan.md` — выполнено, не помогло), `mode=packet-up` в XHTTP, YC API Gateway с HTTP-integration (`yandex-api-gateway-plan.md` — выполнено, API Gateway режет query string, несовместим с XHTTP).
+  - ❌ **Подтверждённо вне whitelist:** YC VM IP `158.160.236.147`, Fornex/Timeweb IP.
+  - 🎯 **Реалистичные следующие шаги (по убыванию приоритета):**
+    1. **VLESS+WS+TLS через API Gateway WebSocket-extension** — `wss://*.apigw.yandexcloud.net`, событийная модель с extensions `x-yc-apigateway-websocket-connect/-message/-disconnect`. Не path-based proxy, а другая архитектура. Требует исследования: поддерживает ли HTTP-backend для WebSocket.
+    2. **Trojan / Hysteria2 / TUIC** — альтернативные VPN-протоколы. Не используют HTTP-туннелирование, могут лучше переноситься через YC.
+    3. **VPS у whitelisted-провайдера** (Selectel / VK Cloud / SberCloud) — самый прямой и дорогой путь, ~500-1000 ₽/мес.
+    4. **Yandex Cloud Functions** с HTTP-relay (последний резерв из-за timeout-ограничений).
   - Текущее состояние бота: кнопка Мегафон/Yota отдаёт VLESS+XHTTP CDN ссылку
 - [ ] **Аудит инструкций и документации на соответствие реальности** — пройти и сверить с фактической инфраструктурой/UX:
   - Тексты в боте: все `instruction_*.txt` в `/opt/vpnservice/docs/bot-instruction-texts/` (соответствие текущему UX, кнопкам, операторам, протоколам)
