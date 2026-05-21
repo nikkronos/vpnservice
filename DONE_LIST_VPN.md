@@ -1,5 +1,59 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-21 — Yota/Мегафон при БС РЕШЕНО + critical fix AmneziaWG persistent peers
+
+**Главное:** ✅ **VLESS+REALITY на main Timeweb с SNI=cloud.mail.ru — работает на Мегафон/Yota при активных белых списках.** Подтверждено реальным тестом (друг на Yota, `digitalocean.com` режется → БС активны → VPN при этом работает).
+
+### Архитектура решения
+- **Whitelist у Yota** работает по IP-подсетям (whitelisted: Timeweb, VK Cloud, Mail.ru Cloud, Cloud.ru, Selectel) + SNI inspection (whitelisted: cloud.mail.ru, cloud.vk.com, и т.д.). Наш `81.200.146.32` (Timeweb) подтверждённо в whitelist.
+- **REALITY** делает TLS Client Hello с SNI=`cloud.mail.ru` (whitelisted) → DPI пропускает → наш Xray расшифровывает VLESS-туннель внутри.
+- **Dest = cloud.mail.ru** — Xray делает реальный TLS-handshake к cloud.mail.ru для fronting. Снаружи наш сервер выглядит как mirror Mail.ru Cloud (отдаёт настоящий cert от VK LLC).
+- `cloud.vk.com` как dest не подошёл — нестандартный TLS, ломает REALITY-fronting (`target sent incorrect server hello`). Перебрали 6 кандидатов через openssl: cloud.mail.ru / yandex.ru / timeweb.cloud отдают чистый TLS 1.3.
+
+### Серверная инфраструктура
+- **main Timeweb** (`81.200.146.32`) — новая VPN-нода:
+  - Установлен Xray VLESS+REALITY на :443 (private key + public key generated через `xray x25519`, shortid=04d9b6c0)
+  - nginx на :80 для ACME (server_name=ru.vpnnkrns.ru, location /.well-known/acme-challenge/)
+  - Let's Encrypt cert для `ru.vpnnkrns.ru` через certbot (auto-renew enabled)
+  - WireGuard на UDP/51820 для 1 legacy user — оставлено без изменений
+- **DNS:** Cloudflare → `ru.vpnnkrns.ru` (A) → `81.200.146.32`, **DNS only (grey cloud)**
+- **Бот:** `VLESS_CDN_TLS_SHARE_URL` обновлён на новую REALITY-ссылку с main. Для оператора Мегафон/Yota приоритет: TLS-ссылка → HTTP-CDN → REALITY.
+
+### VLESS-ссылка (текущая в боте для Мегафон/Yota)
+```
+vless://359e23cc-f90c-4e43-97af-bd1b662ff043@81.200.146.32:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=cloud.mail.ru&fp=chrome&pbk=QlzHHy5Z1QXBpSK8wtyrjPfFkGHnAoNorhflEyFkcFg&sid=04d9b6c0&type=tcp&headerType=none#RU-REALITY
+```
+
+### Critical fix: AmneziaWG потерял peers после reboot Fornex
+- **Симптом:** после reboot Fornex 28 из 30 peers пропали из `awg show`. Пользователи получили `.conf` от бота, но не могли подключиться (handshake fail).
+- **Причина:** скрипт `/opt/amnezia-add-client.sh` использовал `awg-quick save awg0 2>/dev/null || true` — команда fail-silent в нашем AmneziaWG-контейнере. Peers сохранялись только в running-state ядра, не в `/opt/amnezia/awg/awg0.conf`. После рестарта контейнера (от apt upgrade docker-ce + reboot) — потерялись.
+- **Восстановление:** Python-скрипт проходом по `peers.json`, для каждого active eu1-peer'a → `docker exec amnezia-awg2 awg set awg0 peer <pubkey> preshared-key /tmp/psk.key allowed-ips <wg_ip>/32`. Восстановлено 21 peer (3 изначальных + 21 новых = 24 в awg).
+- **Persistent fix:**
+  - Создан `/opt/amnezia-save-conf.sh` — общий helper: `awg showconf awg0` + ручная вставка `Address = 10.8.1.0/24` → запись в `/opt/amnezia/awg/awg0.conf`.
+  - `/opt/amnezia-add-client.sh` и `/opt/amnezia-remove-client.sh` пропатчены: вместо нерабочей `awg-quick save` вызывают `/opt/amnezia-save-conf.sh`.
+  - Cron `*/5 * * * * /opt/amnezia-save-conf.sh` — safety net.
+
+### Что НЕ сделали в этой сессии (пробовали и закрыли)
+- WS-extension в YC API Gateway — поддерживает только Cloud Functions backend, не HTTP-passthrough (Path 1 из postmortem).
+- VLESS+XHTTP через API Gateway с `'*': '*'` query passthrough — серверная сторона теперь работала (HTTP 200), но клиент Streisand iOS всё равно не устанавливал тоннель. Подтвердили окончательный вердикт postmortem'а: **XHTTP через любые Yandex HTTP/2-edge не работает у клиентов**. API Gateway удалён.
+- VLESS+WS+TLS на main `ru.vpnnkrns.ru` — работает на Wi-Fi и других операторах. На Yota не работает: DPI режет TLS Client Hello с не-whitelisted SNI (симптом «сетевое подключение прервано» = RST после TCP-handshake). Этот промежуточный setup стёрт переводом на REALITY.
+
+### apt upgrades (попутно)
+- **YC vrprnt:** apt upgrade + reboot, kernel `6.8.0-117-generic`. Xray REALITY поднялся автоматически.
+- **main Timeweb:** apt upgrade (без kernel update в этой партии). Reboot не понадобился.
+- **Fornex eu1:** apt upgrade (docker-ce + libgnutls + rsync) + reboot, kernel `6.8.0-117-generic`. Простой ~3 мин. Все сервисы поднялись автоматом — именно этот reboot выявил скрытый баг AmneziaWG persistent peers.
+
+### Коммиты
+(будут после этой записи)
+
+### Что нового в репозитории
+- `docs/sessions/SESSION_SUMMARY_2026-05-21.md` — полная хронология
+- `docs/scripts/nginx-ru-vpnnkrns.conf.example` — текущий nginx-конфиг на main (только :80 для ACME)
+- `docs/scripts/xray-main-reality.json.example` — текущий Xray REALITY-конфиг на main
+- `docs/scripts/amnezia-save-conf.sh.example` — helper-скрипт для persistent awg0.conf
+
+---
+
 ## 2026-05-20 — Финальный тест CDN relay при активных БС
 
 - **YC VM IP `158.160.236.147`** — протестирован на Yota при активном БС → "не смог подключиться к серверу". IP не в whitelist. Подтверждено окончательно.

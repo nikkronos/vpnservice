@@ -1,0 +1,10 @@
+server {
+    listen 80;
+    server_name ru.vpnnkrns.ru;
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    location / {
+        return 444;
+    }
+}

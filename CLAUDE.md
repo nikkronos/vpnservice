@@ -22,9 +22,9 @@ git log --oneline -3
 
 | Сервер | IP | Что на нём |
 |--------|-----|-----------|
-| **Fornex eu1** (основной) | `185.21.8.91` | Бот, веб-панель, AmneziaWG Docker, MTProxy Fake TLS, Xray VLESS+WS |
-| **Timeweb main** (RU) | `81.200.146.32` | WireGuard сервер (wg0, порт 51820/UDP) |
-| **Yandex Cloud** (LTE резерв) | `158.160.236.147` | Xray VLESS+REALITY xHTTP (порт 443, SNI: www.yandex.ru) |
+| **Fornex eu1** (основной) | `185.21.8.91` | Бот, веб-панель, AmneziaWG Docker, MTProxy Fake TLS, Xray VLESS+WS+XHTTP+REALITY (443) |
+| **Timeweb main** (RU + Мегафон/Yota) | `81.200.146.32` | **Xray VLESS+REALITY на 443** (SNI=cloud.mail.ru, для Мегафон/Yota при БС, см. SESSION_SUMMARY_2026-05-21). Также WireGuard wg0 на UDP/51820 для 1 legacy user. SSH: `ssh -i ~/.ssh/id_ed25519_main root@81.200.146.32` (или через Fornex jump) |
+| **Yandex Cloud vrprnt** (T2/МТС/Билайн) | `158.160.236.147` | Xray VLESS+REALITY xHTTP (порт 443, SNI: www.microsoft.com) |
 
 **SSH:** `ssh fornex` (алиас) или `ssh -i ~/.ssh/id_ed25519_fornex root@185.21.8.91`
 
@@ -48,7 +48,8 @@ git log --oneline -3
 | AmneziaWG | ✅ Работает | eu1 Docker `amnezia-awg2` — Европа |
 | VLESS+WS+Cloudflare CDN | ✅ Обычные блокировки | `sub.vpnnkrns.ru:443` |
 | VLESS+XHTTP+Yandex CDN | ⏳ Настроен, тест при БС — ждём | `cdn.vpnnkrns.ru:80` → Fornex |
-| VLESS+REALITY xHTTP | ⚠️ Частично — T2 работает, Yota/Мегафон при БС ❌ | Yandex Cloud `158.160.236.147:443` |
+| VLESS+REALITY xHTTP (yc) | ✅ T2/МТС/Билайн/Т-Мобайл (SNI=www.microsoft.com) | Yandex Cloud `158.160.236.147:443` |
+| **VLESS+REALITY (main)** | ✅ **Мегафон/Yota при БС** (SNI=cloud.mail.ru, dest=cloud.mail.ru:443) | Timeweb `81.200.146.32:443` |
 | MTProxy Fake TLS | ✅ Telegram | eu1 порт `8444` |
 | WireGuard UDP к Fornex | ❌ Заблокирован РФ | — |
 | Голый MTProto на eu1 | ❌ Блок по сигнатуре | — |
@@ -170,13 +171,15 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 
 ## Важные правила
 
-1. **Timeweb (main) не трогать** — там всё работает, прямой доступ аккуратно
+1. **Timeweb (main)** — там теперь крутится Xray VLESS+REALITY для Мегафон/Yota (см. SESSION_SUMMARY_2026-05-21). Старый WG (wg0/UDP/51820) тоже остался для 1 legacy user. SSH-ключ к main: `id_ed25519_main` на Fornex.
 2. **eu1 = Docker** — AmneziaWG в `amnezia-awg2`, команды через `docker exec`
 3. **Подсеть eu1 = 10.8.1.0/24**, порт = 39580 (не 51820, не 10.1.0.0/24)
 4. **MTProxy на eu1 — только Fake TLS** (порт 8444). Голый MTProto не использовать
-5. **Не пушить сломанный код** — проверь diff перед commit
-6. **env_vars.txt не коммитить никогда**
-7. **После изменений:** `git add` → `git commit` → `git push` (push обязателен)
+5. **AmneziaWG persistent-сохранение peers:** `/opt/amnezia-add-client.sh` и `/opt/amnezia-remove-client.sh` после `awg set` вызывают `/opt/amnezia-save-conf.sh`. Cron `*/5 * * * * /opt/amnezia-save-conf.sh` — safety net. **НЕ возвращать `awg-quick save awg0`** — она fail-silent в этом контейнере.
+6. **Не пушить сломанный код** — проверь diff перед commit
+7. **env_vars.txt не коммитить никогда**
+8. **После изменений:** `git add` → `git commit` → `git push` (push обязателен)
+9. **Reboot любого сервера** — проверь после: `systemctl is-active <services>`, `docker ps`, наличие всех peers (особенно AmneziaWG на Fornex: `docker exec amnezia-awg2 awg show awg0 | grep -c '^peer'` должно совпадать с количеством active eu1-peer'ов в peers.json).
 
 ---
 
@@ -186,7 +189,8 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 |-------|-------|
 | Открытые задачи | `ROADMAP_VPN.md` |
 | История изменений | `DONE_LIST_VPN.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-20.md` |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` |
+| Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
 | Yandex Cloud REALITY | `docs/yandex-cloud-reality-setup.md` |

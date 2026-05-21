@@ -1,21 +1,21 @@
 # ROADMAP_VPN
 
-> Последнее обновление: 2026-05-20
-> Текущее состояние: рабочий MVP, ~25 пользователей, готовимся к коммерциализации
+> Последнее обновление: 2026-05-21
+> Текущее состояние: рабочий MVP, ~30 пользователей, все каналы покрыты (включая Yota/Мегафон при БС), готовимся к коммерциализации
 
 ---
 
 ## Текущая архитектура (факт)
 
 **Серверы:**
-- `eu1` — Fornex `185.21.8.91`: бот + панель + AmneziaWG Docker + MTProxy Fake TLS + Xray
-- `main` — Timeweb `81.200.146.32`: WireGuard (Россия)
-- `yc` — Yandex Cloud `158.160.236.147`: Xray VLESS+REALITY xHTTP (LTE резерв)
+- `eu1` — Fornex `185.21.8.91`: бот + панель + AmneziaWG Docker + MTProxy Fake TLS + Xray (VLESS+REALITY на 443 для T2/МТС/Билайн)
+- `main` — Timeweb `81.200.146.32`: **Xray VLESS+REALITY на 443** (для Мегафон/Yota при БС, SNI=cloud.mail.ru) + старый WireGuard на UDP/51820 (1 legacy user)
+- `yc` — Yandex Cloud `158.160.236.147`: Xray VLESS+REALITY xHTTP (legacy, такой же SNI=www.microsoft.com как у eu1)
 
 **Протоколы для пользователей:**
 - AmneziaWG (eu1) — основной, Европа
-- WireGuard (main) — Россия
-- VLESS+REALITY xHTTP (YC) — `/mobile_vpn`, LTE whitelist
+- VLESS+REALITY (eu1/yc, SNI=www.microsoft.com) — для T2/МТС/Билайн/Т-Мобайл
+- **VLESS+REALITY (main, SNI=cloud.mail.ru) — для Мегафон/Yota при БС** (новое 2026-05-21)
 - VLESS+WS+Cloudflare CDN — резерв при обычных блокировках
 - MTProxy Fake TLS (порт 8444) — Telegram прокси
 
@@ -42,15 +42,12 @@
 
 ### 🟡 Приоритет 2 — Улучшение продукта
 
-- [ ] **Yota/Мегафон при белых списках** — решения нет.
-  - 📋 **Полный отчёт о всех проверенных гипотезах:** [`docs/yandex-cdn-xhttp-postmortem.md`](docs/yandex-cdn-xhttp-postmortem.md) — **читать ОБЯЗАТЕЛЬНО перед следующими попытками**, чтобы не повторять опровергнутое.
-  - ❌ **Опровергнуто (НЕ пробовать снова):** не-TLS-цепочка, VLESS+XHTTP через Yandex CDN HTTP, VLESS+XHTTP через Yandex CDN HTTPS (`cdn-tls-upgrade-plan.md` — выполнено, не помогло), `mode=packet-up` в XHTTP, YC API Gateway с HTTP-integration (`yandex-api-gateway-plan.md` — выполнено, API Gateway режет query string, несовместим с XHTTP).
-  - ❌ **Подтверждённо вне whitelist:** YC VM IP `158.160.236.147`, Fornex/Timeweb IP.
-  - 🎯 **Реалистичные следующие шаги (по убыванию приоритета):**
-    1. **VLESS+WS+TLS через API Gateway WebSocket-extension** — `wss://*.apigw.yandexcloud.net`, событийная модель с extensions `x-yc-apigateway-websocket-connect/-message/-disconnect`. Не path-based proxy, а другая архитектура. Требует исследования: поддерживает ли HTTP-backend для WebSocket.
-    2. **Trojan / Hysteria2 / TUIC** — альтернативные VPN-протоколы. Не используют HTTP-туннелирование, могут лучше переноситься через YC.
-    3. **VPS у whitelisted-провайдера** (Selectel / VK Cloud / SberCloud) — самый прямой и дорогой путь, ~500-1000 ₽/мес.
-    4. **Yandex Cloud Functions** с HTTP-relay (последний резерв из-за timeout-ограничений).
+- [x] ~~**Yota/Мегафон при белых списках**~~ — **РЕШЕНО 2026-05-21** ✅
+  - **Решение:** VLESS+REALITY на main Timeweb (`81.200.146.32:443`), SNI=`cloud.mail.ru`, dest=`cloud.mail.ru:443`.
+  - **Подтверждено:** друг на Yota при активных БС (проверено через `digitalocean.com` контроль) → VPN работает.
+  - **Почему работает:** наш IP в whitelist подсети Timeweb + SNI `cloud.mail.ru` whitelisted у Мегафон/Yota → DPI пропускает TLS Client Hello → REALITY-сервер расшифровывает VLESS-туннель внутри.
+  - **Детальный разбор:** `docs/sessions/SESSION_SUMMARY_2026-05-21.md`.
+  - **Архив гипотез про XHTTP:** `docs/yandex-cdn-xhttp-postmortem.md` (XHTTP через любые YC HTTP/2-edge не работает — не возвращаться).
   - Текущее состояние бота: кнопка Мегафон/Yota отдаёт VLESS+XHTTP CDN ссылку
 - [ ] **Аудит инструкций и документации на соответствие реальности** — пройти и сверить с фактической инфраструктурой/UX:
   - Тексты в боте: все `instruction_*.txt` в `/opt/vpnservice/docs/bot-instruction-texts/` (соответствие текущему UX, кнопкам, операторам, протоколам)

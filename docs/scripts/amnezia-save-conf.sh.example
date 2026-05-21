@@ -1,0 +1,19 @@
+#!/bin/bash
+# Сохранение running config AmneziaWG → /opt/amnezia/awg/awg0.conf внутри контейнера.
+# Вызывается из amnezia-add-client.sh, amnezia-remove-client.sh и из cron каждые 5 минут.
+# Причина: AmneziaWG-installer кладёт `awg-quick save awg0` в свои скрипты, но в этом
+# контейнере она fail-silent. Без этого peers, добавленные через `awg set`, теряются
+# при рестарте контейнера. См. SESSION_SUMMARY_2026-05-21 + DONE_LIST_VPN.
+
+set -e
+CONTAINER="amnezia-awg2"
+
+docker exec "$CONTAINER" sh -c '
+    set -e
+    awg showconf awg0 > /tmp/awg0.new.conf
+    # awg showconf не выводит Address — добавляем вручную
+    if ! grep -q "^Address" /tmp/awg0.new.conf; then
+        sed -i "/^ListenPort/a Address = 10.8.1.0/24" /tmp/awg0.new.conf
+    fi
+    mv /tmp/awg0.new.conf /opt/amnezia/awg/awg0.conf
+'

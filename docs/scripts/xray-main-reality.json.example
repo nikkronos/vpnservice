@@ -1,0 +1,28 @@
+{
+  "log": {"loglevel": "info"},
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {"id": "359e23cc-f90c-4e43-97af-bd1b662ff043", "flow": "xtls-rprx-vision"}
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "cloud.vk.com:443",
+          "serverNames": ["cloud.vk.com"],
+          "privateKey": "MCJuxBOg6hxmTSUDPq_1sg6tf09ba-uYGmagAtK_VG8",
+          "shortIds": ["04d9b6c0"]
+        }
+      },
+      "sniffing": {"enabled": true, "destOverride": ["http", "tls", "quic"]}
+    }
+  ],
+  "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+}
