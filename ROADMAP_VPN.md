@@ -55,21 +55,20 @@
   - `CLAUDE.md`, `ROADMAP_VPN.md`, `DONE_LIST_VPN.md` — фактическое состояние
   - Цель: устранить расхождения между тем, что говорит бот/доки, и тем, как сервис реально устроен. Особенно перед началом продаж.
 
-- [ ] **Recovery-сайт: полный передел UX** (предложено 2026-05-21, не сделано):
-  - Удалить legacy секции по Telegram ID полностью (3 секции в `<details>` блоке `recovery.html`)
-  - Также удалить соответствующие legacy endpoint'ы в `web/app.py`: `/api/recovery/vpn`, `/api/recovery/mobile-vpn`, `/api/recovery/telegram-proxy` (но **сохранить** `/api/recovery/proxy-link` для показа MTProxy без ID, и `/api/recovery/vpn-by-email` для email-флоу)
-  - Email/OTP → главное меню с вариантами:
-    1. **Основной VPN (AmneziaWG)** → выбор платформы (ПК / iOS / Android) → конфиг
-    2. **Мобильный резерв (VLESS+REALITY)** → выбор оператора:
-       - Мегафон / Yota → main REALITY (`81.200.146.32:443`, SNI=cloud.mail.ru) — текущий рабочий канал
-       - Билайн / МТС / Т2 / Т-Мобайл / Другой → eu1 REALITY (`185.21.8.91:443`, SNI=www.microsoft.com)
-    3. **MTProxy для Telegram** → актуальная ссылка (то же что по `/proxy` в боте, без ID)
-  - Backend: новые endpoint'ы для AmneziaWG конфига по платформе и mobile-vpn по оператору (логика уже есть в боте, нужно скопировать в web/app.py с email-auth).
-  - Объём: ~2.5–3 часа.
+- [x] ~~**Recovery-сайт: полный передел UX**~~ — **СДЕЛАНО 2026-05-21**
+  - Удалены 3 legacy секции по Telegram ID + 5 legacy endpoint'ов в `web/app.py`
+  - Email/OTP → главное меню с 3 каналами: Основной VPN (выбор ПК/iOS/Android), Мобильный резерв (выбор оператора), MTProxy для Telegram
+  - Маршрутизация мобильного резерва: Мегафон/Yota → `VLESS_CDN_TLS_SHARE_URL` (main REALITY cloud.mail.ru), остальные → `VLESS_REALITY_SHARE_URL` (eu1 REALITY www.microsoft.com)
+  - Android получает и .conf файл, и `vpn://` deep link для AmneziaVPN
+  - В UI после генерации AWG-конфига есть Error-103 fallback с инструкцией
 
-- [ ] **Бот: упомянуть в инструкции про AmneziaVPN Error 103** (предложено 2026-05-21):
-  - В каком-то из `instruction_*.txt` (или в инструкциях платформ) добавить fallback-блок: «Если AmneziaVPN на ПК упал с Error 103 «Фоновая служба не запущена» — запусти от имени администратора или используй Hiddify/v2rayNG с этой же ссылкой».
-  - Применимо после переделки recovery (тот же текст пойдёт туда).
+- [x] ~~**Бот: Error-103 fallback**~~ — **СДЕЛАНО 2026-05-21**
+  - Добавлен блок в `docs/bot-instruction-texts/instruction_windows_short.txt`: задиспетчерь Amnezia*, запуск от админа, переустановка либо Hiddify.
+
+- [ ] **Персональные UUIDs для main REALITY (Мегафон/Yota)** (предложено 2026-05-21):
+  - Сейчас на main REALITY один универсальный UUID для всех Мегафон/Yota юзеров. Для биллинга/трекинга — нужно перейти на per-user UUID (как сейчас на eu1 REALITY).
+  - Нужно: при выдаче ссылки через `/api/recovery/mobile-link-by-email` для оператора megafon/yota — генерировать персональный UUID, добавлять в Xray на main через `xray api inbounduser` (или через config reload), хранить в `users.vless_uuid_main` (новая колонка).
+  - Объём: ~1–1.5 часа.
 
 ### 🟢 Приоритет 3 — Масштабирование (после ~100 платных пользователей)
 

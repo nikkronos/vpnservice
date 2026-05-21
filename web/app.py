@@ -582,27 +582,42 @@ def api_stats():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/recovery/proxy-link", methods=["GET"])
-def api_recovery_proxy_link():
+def _verify_email_session(body: dict) -> tuple:
     """
-    Только актуальная ссылка tg://proxy (как /proxy в боте), без перезапуска контейнера.
-    Та же проверка пользователя, что и у POST /api/recovery/telegram-proxy.
+    Универсальный auth по email-token (для всех recovery endpoints с email-flow).
+    Возвращает (user_row, telegram_id) при успехе или (None, error_response) при отказе.
     """
-    err = _check_recovery_secret()
-    if err is not None:
-        return err
-    try:
-        telegram_id = request.args.get("telegram_id")
-        if telegram_id is None or str(telegram_id).strip() == "":
-            return jsonify({"error": "telegram_id query parameter is required"}), 400
-        try:
-            telegram_id = int(telegram_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "telegram_id must be integer"}), 400
+    token = (body.get("token") or "").strip()
+    if not token:
+        return None, (jsonify({"error": "token обязателен"}), 401)
 
-        user = find_user(telegram_id)
-        if not user or not user.active:
-            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+    email = db_verify_session(token)
+    if not email:
+        return None, (jsonify({"error": "Сессия недействительна или истекла. Войди заново."}), 401)
+
+    user_row = db_find_user_by_email(email)
+    if not user_row or not user_row.get("active"):
+        return None, (jsonify({"error": "Пользователь не найден или заблокирован."}), 403)
+
+    telegram_id = user_row.get("telegram_id")
+    if not telegram_id:
+        return None, (jsonify({"error": "Учётная запись не привязана к Telegram. Обратись к владельцу бота."}), 403)
+
+    return (user_row, int(telegram_id)), None
+
+
+@app.route("/api/recovery/proxy-link-by-email", methods=["POST"])
+def api_recovery_proxy_link_by_email():
+    """
+    Возвращает актуальную tg://proxy ссылку (как /proxy в боте), без перезапуска контейнера.
+    Auth: email-token из активной OTP-сессии.
+    Тело: {token}
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
 
         fresh_cfg = load_config()
         effective_link = get_effective_mtproto_proxy_link(fresh_cfg) or ""
@@ -610,184 +625,122 @@ def api_recovery_proxy_link():
         if not effective_link.startswith("tg://proxy"):
             return jsonify({"error": "MTPROTO proxy link is not configured"}), 503
 
-        return jsonify(
-            {
-                "ok": True,
-                "mtproto_proxy_link": effective_link,
-                "hint": (
-                    "Та же ссылка, что по команде /proxy в боте. "
-                    "Перезапуск контейнера прокси не выполнялся — используйте «Восстановить Telegram», если нужен рестарт."
-                ),
-            }
-        )
+        return jsonify({
+            "ok": True,
+            "mtproto_proxy_link": effective_link,
+            "hint": (
+                "Та же ссылка, что по команде /proxy в боте. "
+                "Нажми кнопку, чтобы открыть её прямо в Telegram, или скопируй вручную."
+            ),
+        })
     except Exception as e:
-        logger.exception("Ошибка recovery/proxy-link: %s", e)
+        logger.exception("Ошибка api/recovery/proxy-link-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/recovery/telegram-proxy", methods=["POST"])
-def api_recovery_telegram_proxy():
+@app.route("/api/recovery/awg-config-by-email", methods=["POST"])
+def api_recovery_awg_config_by_email():
     """
-    Recovery endpoint:
-    - Auth by telegram_id existence in bot storage (users.json)
-    - Restarts telegram proxy container on the corresponding server (eu1/main)
+    Основной VPN (AmneziaWG eu1) с выбором платформы. Auth: email-token.
+    Тело: {token, platform: "pc" | "ios" | "android"}
+    Ответ: {ok, filename, config, vpn_url?}
+        - config: текст .conf файла
+        - vpn_url: vpn:// deep link (только для platform=android — для удобного импорта в AmneziaVPN)
+        - filename: рекомендуемое имя файла (awg_eu1.conf)
     """
-    err = _check_recovery_secret()
-    if err is not None:
-        return err
     try:
         body = request.get_json() or {}
-        telegram_id = body.get("telegram_id")
-        if telegram_id is None:
-            return jsonify({"error": "telegram_id is required"}), 400
-        try:
-            telegram_id = int(telegram_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "telegram_id must be integer"}), 400
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _user_row, telegram_id = auth
 
-        user = find_user(telegram_id)
-        if not user or not user.active:
-            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
-
-        # Avoid concurrent restarts
-        if not _recovery_lock.acquire(blocking=False):
-            return jsonify({"error": "Recovery already running"}), 409
-
-        try:
-            fresh_cfg = load_config()
-            effective_link = get_effective_mtproto_proxy_link(fresh_cfg)
-            proxy_parts = _parse_tg_proxy_link(effective_link)
-            proxy_server_ip = proxy_parts.get("server", "")
-            if not proxy_server_ip:
-                return jsonify({"error": "MTPROTO_PROXY_LINK is not configured (tg://proxy... missing server)"}), 500
-
-            candidates = ["mtproto-proxy", "mtproxy-faketls"]
-
-            preferred = _determine_target_server_id_from_env(proxy_server_ip)
-            servers_to_try: List[str] = []
-            if preferred:
-                servers_to_try.append(preferred)
-            # Always try both, because proxy server IP mapping may be incomplete.
-            for sid in ["main", "eu1"]:
-                if sid not in servers_to_try:
-                    servers_to_try.append(sid)
-
-            last_r: Dict[str, str] = {}
-            for sid in servers_to_try:
-                try:
-                    r = _restart_proxy_container_on_server(sid, candidates)
-                    last_r = r
-                    if r.get("ok") == "true":
-                        r["mtproto_proxy_link"] = effective_link or ""
-                        r["hint"] = (
-                            "Скопируйте ссылку и откройте в Telegram (или вставьте в Настройки → Прокси). "
-                            "Это та же ссылка, что по команде /proxy в боте."
-                        )
-                        return jsonify(r), 200
-                except Exception as e:
-                    last_r = {"ok": "false", "server_id": sid, "error": str(e)}
-                    # Continue fallback to other server.
-
-            # Nothing worked — всё равно отдаём актуальную ссылку (как /proxy), чтобы пользователь мог сменить прокси вручную
-            last_r["mtproto_proxy_link"] = effective_link or ""
-            last_r["hint"] = (
-                "Перезапуск контейнера не удался; ниже актуальная ссылка на прокси (как в боте /proxy). "
-                "Попробуйте добавить её в Telegram вручную."
-            )
-            return jsonify(last_r), 502
-        finally:
-            _recovery_lock.release()
-    except Exception as e:
-        logger.exception("Ошибка recovery/telegram-proxy: %s", e)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/recovery/vpn", methods=["POST"])
-def api_recovery_vpn():
-    """
-    VPN recovery: только AmneziaWG слот eu1 или eu2 (две кнопки на /recovery).
-    Тело: telegram_id, server_id (eu1 | eu2), android_safe (опционально).
-    """
-    err = _check_recovery_secret()
-    if err is not None:
-        return err
-    try:
-        body = request.get_json() or {}
-        telegram_id = body.get("telegram_id")
-        android_safe = bool(body.get("android_safe", False))
-        server_id = str(body.get("server_id") or "eu1").strip().lower()
-
-        if server_id not in ("eu1", "eu2"):
-            return jsonify({"error": "server_id must be eu1 or eu2"}), 400
-
-        if telegram_id is None:
-            return jsonify({"error": "telegram_id is required"}), 400
-        try:
-            telegram_id = int(telegram_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "telegram_id must be integer"}), 400
-
-        user = find_user(telegram_id)
-        if not user or not user.active:
-            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+        platform = str(body.get("platform") or "pc").strip().lower()
+        if platform not in ("pc", "ios", "android"):
+            return jsonify({"error": "platform must be one of: pc, ios, android"}), 400
 
         if not is_amneziawg_eu1_configured():
             return jsonify({"error": "AmneziaWG is not configured on server. Try later or ask owner."}), 503
 
-        peer = find_peer_by_telegram_id(telegram_id, server_id=server_id)
+        android_safe = (platform == "android")
+        peer = find_peer_by_telegram_id(telegram_id, server_id="eu1")
         if peer and peer.active:
             peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
-                telegram_id, android_safe=android_safe, server_id=server_id
+                telegram_id, android_safe=android_safe, server_id="eu1"
             )
         else:
             peer, cfg = create_amneziawg_peer_and_config_for_user(
-                telegram_id, android_safe=android_safe, server_id=server_id
+                telegram_id, android_safe=android_safe, server_id="eu1"
             )
-        filename = f"awg_{peer.server_id}.conf"
-        return jsonify({"ok": True, "filename": filename, "config": cfg})
+
+        response = {
+            "ok": True,
+            "filename": f"awg_{peer.server_id}.conf",
+            "config": cfg,
+            "platform": platform,
+        }
+        if platform == "android":
+            try:
+                response["vpn_url"] = generate_vpn_url(cfg)
+            except Exception as e:
+                logger.warning("Не удалось сгенерировать vpn:// deep link: %s", e)
+        return jsonify(response)
     except Exception as e:
-        logger.exception("Ошибка recovery/vpn: %s", e)
+        logger.exception("Ошибка api/recovery/awg-config-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/recovery/mobile-vpn", methods=["GET"])
-def api_recovery_mobile_vpn():
+@app.route("/api/recovery/mobile-link-by-email", methods=["POST"])
+def api_recovery_mobile_link_by_email():
     """
-    Возвращает VLESS+REALITY ссылку для резервного мобильного VPN.
-    Авторизация по telegram_id (пользователь должен быть в базе).
-    """
-    err = _check_recovery_secret()
-    if err is not None:
-        return err
-    try:
-        telegram_id = request.args.get("telegram_id")
-        if telegram_id is None or str(telegram_id).strip() == "":
-            return jsonify({"error": "telegram_id query parameter is required"}), 400
-        try:
-            telegram_id = int(telegram_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "telegram_id must be integer"}), 400
+    Мобильный резерв (VLESS+REALITY) с выбором оператора. Auth: email-token.
+    Тело: {token, operator: "megafon" | "yota" | "beeline" | "mts" | "tele2" | "tmobile" | "other"}
+    Ответ: {ok, vless_url, operator, hint}
 
-        user = find_user(telegram_id)
-        if not user or not user.active:
-            return jsonify({"error": "Unauthorized: user not found or inactive"}), 403
+    Routing:
+        - megafon | yota → vless_cdn_tls_share_url (main REALITY, SNI=cloud.mail.ru) — работает при БС
+        - другие → vless_reality_share_url (eu1/yc REALITY, SNI=www.microsoft.com)
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+
+        operator = str(body.get("operator") or "").strip().lower()
+        if operator not in ("megafon", "yota", "beeline", "mts", "tele2", "tmobile", "other"):
+            return jsonify({"error": "operator must be one of: megafon, yota, beeline, mts, tele2, tmobile, other"}), 400
 
         fresh_cfg = load_config()
-        vless_url = getattr(fresh_cfg, "vless_reality_share_url", None)
+        if operator in ("megafon", "yota"):
+            vless_url = (
+                getattr(fresh_cfg, "vless_cdn_tls_share_url", None)
+                or getattr(fresh_cfg, "vless_cdn_share_url", None)
+                or getattr(fresh_cfg, "vless_reality_share_url", None)
+            )
+            hint = (
+                "Резервная ссылка для Мегафон/Yota — работает при активных белых списках РКН. "
+                "Скопируй vless://... целиком и импортируй в приложение."
+            )
+        else:
+            vless_url = getattr(fresh_cfg, "vless_reality_share_url", None)
+            hint = (
+                "Резервный мобильный VPN. Скопируй vless://... целиком. "
+                "Android: v2rayNG или Hiddify → «+» → «Импорт из буфера». "
+                "iOS: Streisand, FoXray, V2Box или Hiddify → импорт ссылки."
+            )
+
         if not vless_url:
-            return jsonify({"error": "VLESS_REALITY_SHARE_URL is not configured on server"}), 503
+            return jsonify({"error": "VLESS link is not configured on server"}), 503
 
         return jsonify({
             "ok": True,
             "vless_url": vless_url.strip(),
-            "hint": (
-                "Скопируй ссылку vless://... целиком. "
-                "Android: v2rayNG или Hiddify → «+» → «Импорт из буфера». "
-                "iOS: Happ, Streisand, FoXray или Hiddify → импорт ссылки."
-            ),
+            "operator": operator,
+            "hint": hint,
         })
     except Exception as e:
-        logger.exception("Ошибка recovery/mobile-vpn: %s", e)
+        logger.exception("Ошибка api/recovery/mobile-link-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -850,43 +803,6 @@ def api_auth_verify_otp():
         return jsonify({"ok": True, "token": token})
     except Exception as e:
         logger.exception("Ошибка api/auth/verify-otp: %s", e)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/recovery/vpn-by-email", methods=["POST"])
-def api_recovery_vpn_by_email():
-    """
-    Выдаёт VLESS-ссылку по email-сессии.
-    Тело: {token}
-    """
-    try:
-        body = request.get_json() or {}
-        token = (body.get("token") or "").strip()
-
-        if not token:
-            return jsonify({"error": "token обязателен"}), 401
-
-        email = db_verify_session(token)
-        if not email:
-            return jsonify({"error": "Сессия недействительна или истекла. Войди заново."}), 401
-
-        user_row = db_find_user_by_email(email)
-        if not user_row or not user_row.get("active"):
-            return jsonify({"error": "Пользователь не найден или заблокирован."}), 403
-
-        telegram_id = user_row.get("telegram_id")
-        if not telegram_id:
-            return jsonify({"error": "Учётная запись не привязана к Telegram. Обратись к владельцу бота."}), 403
-
-        try:
-            vless_link = create_vless_client_for_user(int(telegram_id))
-        except WireGuardError as exc:
-            logger.exception("VLESS ошибка для %s: %s", email, exc)
-            return jsonify({"error": str(exc)}), 500
-
-        return jsonify({"ok": True, "vless_link": vless_link})
-    except Exception as e:
-        logger.exception("Ошибка api/recovery/vpn-by-email: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

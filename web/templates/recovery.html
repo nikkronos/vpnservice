@@ -10,160 +10,107 @@
   <div class="container">
     <header>
       <h1>🔐 VPN Доступ</h1>
-      <p class="subtitle">Введи email — получи ссылку для подключения к VPN</p>
+      <p class="subtitle">Войди по email — выбери что нужно восстановить.</p>
     </header>
 
-    <!-- ── Email-авторизация ──────────────────────────────────── -->
-    <section class="recovery" id="emailSection">
-      <h2>📧 Получить VPN-ссылку по email</h2>
-
-      <!-- Шаг 1: Email -->
-      <div id="stepEmail">
-        <p class="section-hint">Введи email — отправим одноразовый код для входа.</p>
-        <div class="recovery-form">
-          <label for="authEmail">Email</label>
-          <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
-          <button type="button" id="btnSendOtp" class="btn-recovery">Получить код</button>
-        </div>
-        <div id="sendOtpResult" class="recovery-result" aria-live="polite"></div>
-      </div>
-
-      <!-- Шаг 2: OTP -->
-      <div id="stepOtp" hidden>
-        <p class="section-hint">Код отправлен. Введи 6 цифр из письма.</p>
-        <div class="recovery-form">
-          <label for="authCode">Код</label>
-          <input type="text" id="authCode" placeholder="123456" maxlength="6"
-                 inputmode="numeric" autocomplete="one-time-code" />
-          <button type="button" id="btnVerifyOtp" class="btn-recovery">Войти</button>
-          <button type="button" id="btnResendOtp" class="btn-recovery btn-recovery-secondary"
-                  style="margin-top:8px;">Отправить повторно</button>
-        </div>
-        <div id="verifyOtpResult" class="recovery-result" aria-live="polite"></div>
-      </div>
-
-      <!-- Шаг 3: VLESS-ссылка -->
-      <div id="stepPlatform" hidden>
-        <p class="section-hint">Твоя VPN-ссылка готова. Скопируй и импортируй в приложение.</p>
-        <div id="platformResult" class="recovery-result" aria-live="polite"></div>
-        <div id="vlessLinkWrap" hidden style="margin-top:12px;">
-          <code id="vlessLinkCode" style="word-break:break-all;display:block;margin-bottom:8px;font-size:13px;"></code>
-          <button type="button" id="btnCopyVlessLink" class="btn-recovery btn-recovery-secondary">📋 Копировать ссылку</button>
-          <p class="section-hint" style="margin-top:10px;">
-            <b>Windows / Android:</b> <a href="https://hiddify.com" target="_blank">Hiddify</a> или v2rayNG — «+» → «Импорт из буфера».<br>
-            <b>iOS:</b> <a href="https://apps.apple.com/app/foxray/id6448898396" target="_blank">FoXray</a>, <a href="https://apps.apple.com/app/v2box/id6446814690" target="_blank">V2Box</a> или Hiddify — «+» → «Вставить из буфера».
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ── Разделитель ────────────────────────────────────────── -->
-    <details style="margin:8px 0 4px;">
-      <summary style="cursor:pointer;color:#555;font-size:14px;padding:8px 0;">
-        ▸ Восстановление Telegram-прокси и другие инструменты
-      </summary>
-
-    <section class="recovery">
-      <h2>🛠️ Восстановление Telegram</h2>
-      <p class="section-hint">
-        Если Telegram не подключается, введите <b>Telegram ID</b> (как в боте).
-        <b>Актуальная ссылка</b> на MTProxy — та же, что по команде <code>/proxy</code> в боте (после ротации у владельца подтягивается из
-        <code>data/mtproto_proxy_link.txt</code> или <code>MTPROTO_PROXY_LINK</code> в env).
-        Можно только <b>посмотреть ссылку</b> (без рестарта Docker) или нажать «Восстановить Telegram» — тогда дополнительно перезапускается контейнер прокси.
-      </p>
-
-      <div class="proxy-link-panel" id="proxyLinkPanel">
-        <p class="proxy-link-panel-title">Текущая ссылка MTProxy</p>
-        <p class="section-hint proxy-link-panel-hint">
-          Без перезапуска контейнера — удобно, если вы уже обновили прокси и нужно просто скопировать <code>tg://</code> ссылку.
-        </p>
-        <div class="proxy-link-actions">
-          <button type="button" id="btnShowProxyLink" class="btn-recovery btn-recovery-secondary">
-            Показать актуальную ссылку
-          </button>
-          <button type="button" id="btnCopyProxyLink" class="btn-recovery btn-recovery-secondary" hidden>
-            Копировать ссылку
-          </button>
-        </div>
-        <div id="proxy-link-display" class="recovery-result proxy-link-display" aria-live="polite" hidden></div>
-      </div>
-
+    <!-- ── Шаг 1: Ввод email ───────────────────────────────────── -->
+    <section class="recovery" id="stepEmail">
+      <h2>📧 Вход по email</h2>
+      <p class="section-hint">Введи email, на который придёт одноразовый код для входа.</p>
       <div class="recovery-form">
-        <label for="recoveryTelegramId">Ваш Telegram ID</label>
-        <input
-          type="number"
-          id="recoveryTelegramId"
-          inputmode="numeric"
-          placeholder="Например, 123456789"
-          autocomplete="off"
-        />
-        <button type="button" id="btnRecoverTelegram" class="btn-recovery">
-          Восстановить Telegram
-        </button>
+        <label for="authEmail">Email</label>
+        <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
+        <button type="button" id="btnSendOtp" class="btn-recovery">Получить код</button>
       </div>
-
-      <div id="recovery-result" class="recovery-result" aria-live="polite"></div>
+      <div id="sendOtpResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
-    <section class="recovery">
-      <h2>🛠️ Восстановление VPN (Европа, AmneziaWG)</h2>
-      <p class="section-hint">
-        Генерирует новый конфиг для EU-сервера, чтобы подключиться без Telegram.
-      </p>
-
-      <div class="recovery-form recovery-vpn-slot">
-        <label for="vpnRecoveryTelegramIdEu1">Ваш Telegram ID</label>
-        <input
-          type="number"
-          id="vpnRecoveryTelegramIdEu1"
-          inputmode="numeric"
-          placeholder="Например, 123456789"
-          autocomplete="off"
-        />
-
-        <button type="button" id="btnRecoverVpnEu1" class="btn-recovery">
-          Восстановить VPN
-        </button>
-      </div>
-
-      <div id="vpn-recovery-result-eu1" class="recovery-result" aria-live="polite"></div>
-    </section>
-
-    <section class="recovery">
-      <h2>📱 Мобильный VPN (VLESS+REALITY)</h2>
-      <p class="section-hint">
-        Резервный профиль для мобильных сетей (LTE/5G) — работает когда AmneziaWG недоступен.
-        Введите Telegram ID, чтобы получить ссылку <code>vless://...</code> для импорта в приложение.
-        <br><b>Android:</b> v2rayNG или Hiddify — «+» → «Импорт из буфера».
-        <br><b>iOS:</b> Happ, Streisand, FoXray или Hiddify — импорт ссылки.
-      </p>
-
+    <!-- ── Шаг 2: OTP ──────────────────────────────────────────── -->
+    <section class="recovery" id="stepOtp" hidden>
+      <h2>🔢 Введи код</h2>
+      <p class="section-hint">Код отправлен. Введи 6 цифр из письма.</p>
       <div class="recovery-form">
-        <label for="mobileVpnTelegramId">Ваш Telegram ID</label>
-        <input
-          type="number"
-          id="mobileVpnTelegramId"
-          inputmode="numeric"
-          placeholder="Например, 123456789"
-          autocomplete="off"
-        />
-        <button type="button" id="btnGetMobileVpn" class="btn-recovery">
-          Получить ссылку
-        </button>
+        <label for="authCode">Код</label>
+        <input type="text" id="authCode" placeholder="123456" maxlength="6"
+               inputmode="numeric" autocomplete="one-time-code" />
+        <button type="button" id="btnVerifyOtp" class="btn-recovery">Войти</button>
+        <button type="button" id="btnResendOtp" class="btn-recovery btn-recovery-secondary"
+                style="margin-top:8px;">Использовать другой email</button>
       </div>
-
-      <div id="mobile-vpn-result" class="recovery-result" aria-live="polite"></div>
+      <div id="verifyOtpResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
-    </details><!-- конец блока с Telegram/legacy форами -->
+    <!-- ── Шаг 3: Главное меню (3 канала) ──────────────────────── -->
+    <section class="recovery" id="stepMenu" hidden>
+      <h2>🎯 Что нужно?</h2>
+      <p class="section-hint">Выбери, какой канал восстанавливаем.</p>
+      <div class="recovery-menu">
+        <button type="button" class="btn-recovery btn-menu" data-channel="awg">
+          📲 Основной VPN
+          <span class="btn-menu-sub">AmneziaWG для ПК / Android / iOS</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-channel="mobile">
+          📡 Мобильный резерв
+          <span class="btn-menu-sub">VLESS, работает при белых списках</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-channel="mtproxy">
+          📨 MTProxy для Telegram
+          <span class="btn-menu-sub">Прокси для самого Telegram</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Шаг 4a: Выбор платформы (для основного VPN) ─────────── -->
+    <section class="recovery" id="stepPlatform" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <h2>📲 Основной VPN — выбор устройства</h2>
+      <p class="section-hint">На какое устройство подключаешься?</p>
+      <div class="recovery-menu">
+        <button type="button" class="btn-recovery btn-menu" data-platform="pc">
+          💻 ПК (Windows / macOS / Linux)
+          <span class="btn-menu-sub">Скачается файл <code>awg_eu1.conf</code></span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-platform="ios">
+          🍎 iPhone / iPad
+          <span class="btn-menu-sub">Скачается файл, открой его в AmneziaWG</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-platform="android">
+          🤖 Android
+          <span class="btn-menu-sub">Появится ссылка <code>vpn://</code> для AmneziaVPN</span>
+        </button>
+      </div>
+      <div id="awgResult" class="recovery-result" aria-live="polite"></div>
+    </section>
+
+    <!-- ── Шаг 4b: Выбор оператора (для мобильного резерва) ───── -->
+    <section class="recovery" id="stepOperator" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <h2>📡 Мобильный резерв — выбор оператора</h2>
+      <p class="section-hint">Какой у тебя мобильный оператор? У Мегафон/Yota особый канал — он работает при белых списках РКН.</p>
+      <div class="recovery-menu">
+        <button type="button" class="btn-recovery btn-menu" data-operator="megafon">📱 Мегафон / Yota</button>
+        <button type="button" class="btn-recovery btn-menu" data-operator="mts">📱 МТС</button>
+        <button type="button" class="btn-recovery btn-menu" data-operator="beeline">📱 Билайн</button>
+        <button type="button" class="btn-recovery btn-menu" data-operator="tele2">📱 Т2 (Tele2)</button>
+        <button type="button" class="btn-recovery btn-menu" data-operator="tmobile">📱 Т-Мобайл</button>
+        <button type="button" class="btn-recovery btn-menu" data-operator="other">❓ Другой / не уверен</button>
+      </div>
+      <div id="mobileResult" class="recovery-result" aria-live="polite"></div>
+    </section>
+
+    <!-- ── Шаг 4c: MTProxy ─────────────────────────────────────── -->
+    <section class="recovery" id="stepProxy" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <h2>📨 MTProxy для Telegram</h2>
+      <p class="section-hint">Актуальная ссылка <code>tg://proxy</code>, та же что по команде <code>/proxy</code> в боте.</p>
+      <div id="proxyResult" class="recovery-result" aria-live="polite">Загружаем…</div>
+    </section>
 
     <footer>
       <p>Последнее обновление: <span id="last-update"></span></p>
     </footer>
   </div>
 
-  <script>const RECOVERY_SECRET = "{{ recovery_secret }}";</script>
   <script src="{{ url_for('static', filename='recovery.js') }}"></script>
 </body>
 </html>
-

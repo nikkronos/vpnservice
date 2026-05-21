@@ -139,6 +139,45 @@ API `/api/traffic` теперь корректно показывает handshak
 - `CLAUDE.md` — обновлена инфраструктура (main с REALITY)
 - `docs/sessions/SESSION_SUMMARY_2026-05-21.md` — этот файл
 
+## Дополнение к сессии — recovery-передел (вечер 2026-05-21)
+
+После основной работы вернулись и закрыли запаркованный пункт «полный передел recovery».
+
+**Изменения в `web/app.py`:**
+- Удалены legacy endpoint'ы по Telegram ID: `/api/recovery/vpn`, `/api/recovery/mobile-vpn`, `/api/recovery/telegram-proxy`, `/api/recovery/proxy-link`, `/api/recovery/vpn-by-email`
+- Добавлен helper `_verify_email_session(body)` — общий auth по email-token из активной OTP-сессии (DRY для всех recovery endpoints)
+- Добавлены 3 новых endpoint'a:
+  - `POST /api/recovery/awg-config-by-email` — `{token, platform}` → AmneziaWG-конфиг для eu1, для android дополнительно возвращается `vpn_url` (deep link)
+  - `POST /api/recovery/mobile-link-by-email` — `{token, operator}` → VLESS-ссылка, маршрутизация по оператору (megafon/yota → main REALITY cloud.mail.ru, остальные → eu1 REALITY www.microsoft.com)
+  - `POST /api/recovery/proxy-link-by-email` — `{token}` → текущая `tg://proxy` ссылка
+
+**Изменения в `web/templates/recovery.html`:**
+- Полная перепись. Email/OTP → главное меню с 3 кнопками (Основной VPN / Мобильный резерв / MTProxy) → подстраница выбора (платформа или оператор) → результат.
+- Кнопки «Назад» в подстраницах.
+
+**Изменения в `web/static/recovery.js`:**
+- Полная перепись под новый flow.
+- Helper'ы `showStep`, `renderLinkBlock`, `downloadFile`.
+- Android получает кликабельную кнопку «👆 Открыть в AmneziaVPN» с `vpn://` deep link.
+- Error-103 fallback показывается сразу после выдачи AWG-конфига (инструкция про админа/переустановку/Hiddify).
+
+**Изменения в `web/static/style.css`:**
+- Добавлен класс `.btn-menu` — большие многострочные кнопки с подзаголовком, для меню каналов и выбора платформы/оператора.
+- Класс `.btn-back` — компактная кнопка «Назад».
+
+**Бот:**
+- `docs/bot-instruction-texts/instruction_windows_short.txt` — добавлен блок про Error 103 (закрыть Amnezia*, запуск от админа, перезагрузка, Hiddify).
+
+**Проверки:**
+- Все 5 legacy endpoint'ов возвращают HTTP 404 (удалены).
+- Все 3 новых endpoint'a возвращают HTTP 401 без token (валидный auth-стек).
+- `/recovery` страница: HTTP 200.
+- `vpn-web.service` поднялся, в логах ошибок нет.
+
+**Что осталось открытым:** Персональные UUIDs для main REALITY (Мегафон/Yota) — добавлена задача в ROADMAP. Сейчас у всех Мегафон/Yota юзеров один общий UUID (упрощение, для биллинга позже сделаем персональные).
+
+---
+
 ## Что передать следующему агенту
 
 1. **Yota/Мегафон через REALITY работает**, используется `cloud.mail.ru` как SNI / dest. Если когда-то перестанет работать — рассмотри другие whitelisted домены с TLS 1.3 (тестированные: `cloud.mail.ru`, `www.yandex.ru`, `timeweb.cloud`). Не работают: `cloud.vk.com`, `mcs.mail.ru`, `selectel.ru` (нестандартный TLS).

@@ -1,5 +1,24 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-21 (вечер) — Recovery-сайт полный передел + Error-103 fallback
+
+**Recovery (`/recovery`):**
+- Удалены 3 legacy секции по Telegram ID + 5 legacy endpoint'ов: `/api/recovery/vpn`, `/mobile-vpn`, `/telegram-proxy`, `/proxy-link`, `/vpn-by-email`
+- Новый UX: email/OTP → главное меню с 3 каналами → подстраница выбора → результат
+  - **Основной VPN**: выбор ПК / iOS / Android → AmneziaWG-конфиг (для Android — `vpn://` deep link)
+  - **Мобильный резерв**: выбор оператора → VLESS (megafon/yota → main REALITY cloud.mail.ru, остальные → eu1 REALITY)
+  - **MTProxy**: кнопка «Открыть в Telegram» + ссылка
+- Новые backend endpoint'ы: `/api/recovery/awg-config-by-email`, `/mobile-link-by-email`, `/proxy-link-by-email` — все по email-token (helper `_verify_email_session`)
+- Стили: добавлен `.btn-menu` (большие многострочные) + `.btn-back`
+- В UI после выдачи AWG-конфига есть встроенный Error-103 fallback с инструкцией
+
+**Бот:**
+- `instruction_windows_short.txt`: добавлен блок про AmneziaVPN Error 103 (закрыть Amnezia*, запуск от админа, перезагрузка, либо Hiddify как альтернатива)
+
+**Что не сделано:** персональные UUIDs для main REALITY (запарковано в ROADMAP отдельной задачей).
+
+---
+
 ## 2026-05-21 — Yota/Мегафон при БС РЕШЕНО + critical fix AmneziaWG persistent peers
 
 **Главное:** ✅ **VLESS+REALITY на main Timeweb с SNI=cloud.mail.ru — работает на Мегафон/Yota при активных белых списках.** Подтверждено реальным тестом (друг на Yota, `digitalocean.com` режется → БС активны → VPN при этом работает).
