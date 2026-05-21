@@ -663,14 +663,14 @@ def api_recovery_awg_config_by_email():
             return jsonify({"error": "AmneziaWG is not configured on server. Try later or ask owner."}), 503
 
         android_safe = (platform == "android")
-        peer = find_peer_by_telegram_id(telegram_id, server_id="eu1")
+        peer = find_peer_by_telegram_id(telegram_id, server_id="eu1", platform=platform)
         if peer and peer.active:
             peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
-                telegram_id, android_safe=android_safe, server_id="eu1"
+                telegram_id, android_safe=android_safe, server_id="eu1", platform=platform
             )
         else:
             peer, cfg = create_amneziawg_peer_and_config_for_user(
-                telegram_id, android_safe=android_safe, server_id="eu1"
+                telegram_id, android_safe=android_safe, server_id="eu1", platform=platform
             )
 
         response = {
