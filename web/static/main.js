@@ -50,10 +50,19 @@ async function loadStats() {
     try {
         const r = await fetch('/api/stats', { cache: 'no-store' });
         const d = await r.json();
-        const u = document.getElementById('stat-users');
-        const p = document.getElementById('stat-peers');
-        if (u) u.textContent = d.active_users ?? '—';
-        if (p) p.textContent = d.active_peers ?? '—';
+        const set = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = (val === null || val === undefined) ? '—' : val;
+        };
+        set('stat-users', d.active_users);
+        set('stat-peers', d.active_peers);
+        set('act-24h', d.active_24h);
+        set('act-7d', d.active_7d);
+        set('act-30d', d.active_30d);
+        set('act-email', d.email_verified_users);
+        set('act-proxy', d.proxy_requests_30d);
+        const total = (d.total_rx_bytes || 0) + (d.total_tx_bytes || 0);
+        set('act-traffic', total > 0 ? fmt(total) : '—');
     } catch (e) {}
 }
 
@@ -65,7 +74,7 @@ async function loadTraffic() {
         const r = await fetch('/api/traffic', { cache: 'no-store' });
         const data = await r.json();
         if (data.error) {
-            tbody.innerHTML = `<tr><td colspan="5" class="err">Ошибка: ${data.error}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="err">Ошибка: ${data.error}</td></tr>`;
             return;
         }
         if (note && data.last_update) {
@@ -74,7 +83,7 @@ async function loadTraffic() {
         }
         const users = data.users || [];
         if (!users.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="loading">Нет данных</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">Нет данных</td></tr>';
             return;
         }
         const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');

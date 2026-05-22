@@ -165,8 +165,45 @@ header {
 
 /* ── Section headers ── */
 .users-section,
-.summary-section {
+.summary-section,
+.activity-section {
     margin-bottom: 28px;
+}
+
+/* ── Activity stats grid ── */
+.activity-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.activity-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.activity-num {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--accent2);
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.activity-card-traffic .activity-num {
+    color: var(--text);
+}
+
+.activity-label {
+    font-size: 0.78em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .section-header {

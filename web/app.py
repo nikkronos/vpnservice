@@ -535,7 +535,24 @@ def api_traffic():
                 by_user[uid]["last_handshake"] = d["last_handshake"]
                 by_user[uid]["platform"] = peer.platform or "pc"
 
-        users_list = sorted(by_user.values(), key=lambda x: x["rx_bytes"] + x["tx_bytes"], reverse=True)
+        # Сортировка: сначала по последней активности (handshake ИЛИ нажатие прокси),
+        # потом по трафику. Так "только-прокси-юзеры" поднимаются вверх и видны.
+        def _activity_ts(u: Dict) -> int:
+            hs = u.get("last_handshake") or 0
+            proxy_ts = u.get("proxy_requested_at") or ""
+            proxy_unix = 0
+            if proxy_ts:
+                try:
+                    proxy_unix = int(datetime.strptime(proxy_ts, "%Y-%m-%d %H:%M:%S").timestamp())
+                except (ValueError, TypeError):
+                    pass
+            return max(hs, proxy_unix)
+
+        users_list = sorted(
+            by_user.values(),
+            key=lambda x: (_activity_ts(x), x["rx_bytes"] + x["tx_bytes"]),
+            reverse=True,
+        )
         resp = jsonify({
             "users": users_list,
             "last_update": datetime.now().isoformat(),
@@ -549,33 +566,90 @@ def api_traffic():
 
 @app.route("/api/stats")
 def api_stats():
-    """API: статистика использования."""
+    """
+    API: сводная статистика активности.
+
+    Активность по handshake AmneziaWG на eu1 + использование MTProxy.
+    Метрики:
+      - total_users / active_users (флаг active в БД)
+      - email_verified_users
+      - active_24h / active_7d / active_30d (handshake свежее N часов/дней)
+      - proxy_requests_30d (пользователей, нажимавших MTProxy за 30 дней)
+      - total_rx_bytes / total_tx_bytes (агрегат за время существования peer'ов)
+    """
     try:
+        import time as _t
         peers = get_all_peers()
         users = get_all_users()
-        
+        db_users = db_get_all_users()
+
         active_peers = [p for p in peers if p.active]
         active_users = [u for u in users if u.active]
-        
-        # Группировка по серверам
+
         by_server: Dict[str, int] = {}
         for peer in active_peers:
             by_server[peer.server_id] = by_server.get(peer.server_id, 0) + 1
-        
-        # Группировка по типам профилей
-        by_profile_type: Dict[str, int] = {}
+
+        # Activity windows: handshake по живым peer'ам eu1
+        dump_stdout = _get_awg_dump_eu1()
+        full_data = _parse_wg_dump_full(dump_stdout) if dump_stdout else {}
+
+        now_ts = int(_t.time())
+        win_24h = now_ts - 86400
+        win_7d = now_ts - 7 * 86400
+        win_30d = now_ts - 30 * 86400
+
+        # tg_id → самый свежий handshake
+        latest_hs_by_user: Dict[int, int] = {}
+        total_rx = 0
+        total_tx = 0
         for peer in active_peers:
-            profile_type = getattr(peer, "profile_type", None) or "vpn"
-            by_profile_type[profile_type] = by_profile_type.get(profile_type, 0) + 1
-        
+            if peer.server_id != "eu1":
+                continue
+            d = full_data.get((peer.public_key or "").strip())
+            if not d:
+                continue
+            hs = d.get("last_handshake", 0) or 0
+            total_rx += d.get("rx", 0) or 0
+            total_tx += d.get("tx", 0) or 0
+            prev = latest_hs_by_user.get(peer.telegram_id, 0)
+            if hs > prev:
+                latest_hs_by_user[peer.telegram_id] = hs
+
+        active_24h = sum(1 for hs in latest_hs_by_user.values() if hs >= win_24h)
+        active_7d = sum(1 for hs in latest_hs_by_user.values() if hs >= win_7d)
+        active_30d = sum(1 for hs in latest_hs_by_user.values() if hs >= win_30d)
+
+        # Email-verified
+        email_verified = sum(1 for u in db_users if u.get("email_verified"))
+
+        # MTProxy: пользователей нажимавших за 30 дней
+        proxy_requests_30d = 0
+        for u in db_users:
+            proxy_ts = u.get("proxy_requested_at")
+            if not proxy_ts:
+                continue
+            try:
+                t = int(datetime.strptime(proxy_ts, "%Y-%m-%d %H:%M:%S").timestamp())
+                if t >= win_30d:
+                    proxy_requests_30d += 1
+            except (ValueError, TypeError):
+                continue
+
         return jsonify({
             "total_users": len(users),
             "active_users": len(active_users),
             "total_peers": len(peers),
             "active_peers": len(active_peers),
+            "email_verified_users": email_verified,
+            "active_24h": active_24h,
+            "active_7d": active_7d,
+            "active_30d": active_30d,
+            "proxy_requests_30d": proxy_requests_30d,
+            "total_rx_bytes": total_rx,
+            "total_tx_bytes": total_tx,
             "by_server": by_server,
-            "by_profile_type": by_profile_type,
-            "last_update": datetime.now().isoformat()
+            "last_update": datetime.now().isoformat(),
         })
     except Exception as e:
         logger.exception(f"Ошибка API статистики: {e}")

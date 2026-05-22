@@ -40,6 +40,39 @@
             </div>
         </div>
 
+        <!-- Сводная статистика активности -->
+        <section class="activity-section">
+            <div class="section-header">
+                <h2>Активность</h2>
+            </div>
+            <div class="activity-grid">
+                <div class="activity-card">
+                    <span class="activity-num" id="act-24h">—</span>
+                    <span class="activity-label">за 24 часа</span>
+                </div>
+                <div class="activity-card">
+                    <span class="activity-num" id="act-7d">—</span>
+                    <span class="activity-label">за 7 дней</span>
+                </div>
+                <div class="activity-card">
+                    <span class="activity-num" id="act-30d">—</span>
+                    <span class="activity-label">за 30 дней</span>
+                </div>
+                <div class="activity-card">
+                    <span class="activity-num" id="act-email">—</span>
+                    <span class="activity-label">с email</span>
+                </div>
+                <div class="activity-card">
+                    <span class="activity-num" id="act-proxy">—</span>
+                    <span class="activity-label">MTProxy за 30д</span>
+                </div>
+                <div class="activity-card activity-card-traffic">
+                    <span class="activity-num" id="act-traffic">—</span>
+                    <span class="activity-label">общий трафик</span>
+                </div>
+            </div>
+        </section>
+
         <!-- Таблица пользователей -->
         <section class="users-section">
             <div class="section-header">
@@ -55,35 +88,11 @@
                             <th title="↓ Принято / ↑ Отправлено">Трафик</th>
                             <th>Устройство</th>
                             <th>Последний сеанс</th>
+                            <th title="Когда последний раз запрашивал MTProxy">Прокси</th>
                         </tr>
                     </thead>
                     <tbody id="users-tbody">
-                        <tr><td colspan="5" class="loading">Загрузка...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Сводка из stats (серверная, без JS) -->
-        <section class="summary-section">
-            <h2>Все конфиги</h2>
-            <div class="table-wrap">
-                <table class="users-table">
-                    <thead>
-                        <tr>
-                            <th>Пользователь</th>
-                            <th>Серверы</th>
-                            <th>Конфигов</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for u in stats.users_summary %}
-                        <tr>
-                            <td>{{ u.display_name }}</td>
-                            <td>{{ u.servers | join(', ') }}</td>
-                            <td>{{ u.peer_count }}</td>
-                        </tr>
-                        {% endfor %}
+                        <tr><td colspan="6" class="loading">Загрузка...</td></tr>
                     </tbody>
                 </table>
             </div>
