@@ -42,12 +42,14 @@
 
 ### 🟡 Приоритет 2 — Улучшение продукта
 
-- [x] ~~**Yota/Мегафон при белых списках**~~ — **РЕШЕНО 2026-05-21** ✅
-  - **Решение:** VLESS+REALITY на main Timeweb (`81.200.146.32:443`), SNI=`cloud.mail.ru`, dest=`cloud.mail.ru:443`.
-  - **Подтверждено:** друг на Yota при активных БС (проверено через `digitalocean.com` контроль) → VPN работает.
-  - **Почему работает:** наш IP в whitelist подсети Timeweb + SNI `cloud.mail.ru` whitelisted у Мегафон/Yota → DPI пропускает TLS Client Hello → REALITY-сервер расшифровывает VLESS-туннель внутри.
-  - **Детальный разбор:** `docs/sessions/SESSION_SUMMARY_2026-05-21.md`.
-  - **Архив гипотез про XHTTP:** `docs/yandex-cdn-xhttp-postmortem.md` (XHTTP через любые YC HTTP/2-edge не работает — не возвращаться).
+- [x] ~~**Yota при белых списках**~~ — **РЕШЕНО 2026-05-21** ✅ (VLESS+REALITY на main Timeweb 81.200.146.32:443, SNI=cloud.mail.ru). Подтверждено реальным тестом друга на Yota при активных БС.
+
+- [ ] **Мегафон при белых списках — НЕ решено (выявлено 2026-05-22)**
+  - Yota и Мегафон имеют **разные whitelist** — несмотря на MVNO-связь. Наш main IP `81.200.146.32` (Timeweb) whitelisted у Yota, но **не whitelisted у Мегафон** — friend получает timeout (TCP-handshake даже не устанавливается).
+  - Текущая main REALITY с SNI=cloud.mail.ru работает на Yota, не работает на Мегафон.
+  - **Что нужно:** разведка через Мегафон-друга при активных БС (та же методика что для Yota — серия IP-проб разных провайдеров для определения whitelist-friendly подсети). Перед разведкой убедиться что БС реально активны (контроль `digitalocean.com`).
+  - **Кандидаты для VPS, если Timeweb-IP не пропускают:** Mail.ru Cloud (mcs.mail.ru), VK Cloud, Selectel, Sber Cloud — нужно сначала проверить какие IP подсети у Мегафон в whitelist.
+  - **Архив гипотез про XHTTP:** `docs/yandex-cdn-xhttp-postmortem.md`.
   - Текущее состояние бота: кнопка Мегафон/Yota отдаёт VLESS+XHTTP CDN ссылку
 - [ ] **Аудит инструкций и документации на соответствие реальности** — пройти и сверить с фактической инфраструктурой/UX:
   - Тексты в боте: все `instruction_*.txt` в `/opt/vpnservice/docs/bot-instruction-texts/` (соответствие текущему UX, кнопкам, операторам, протоколам)
