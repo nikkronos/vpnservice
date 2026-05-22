@@ -1432,8 +1432,9 @@ def main() -> None:
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
             types.InlineKeyboardButton("Билайн", callback_data="mobile_op_beeline"),
-            types.InlineKeyboardButton("Мегафон/Yota", callback_data="mobile_op_megafon"),
             types.InlineKeyboardButton("МТС", callback_data="mobile_op_mts"),
+            types.InlineKeyboardButton("Мегафон", callback_data="mobile_op_megafon"),
+            types.InlineKeyboardButton("Yota", callback_data="mobile_op_yota"),
             types.InlineKeyboardButton("Т-Мобайл", callback_data="mobile_op_tmobile"),
             types.InlineKeyboardButton("Т2", callback_data="mobile_op_t2"),
             types.InlineKeyboardButton("Другой", callback_data="mobile_op_other"),
@@ -1468,11 +1469,22 @@ def main() -> None:
 
         op = call.data  # mobile_op_beeline / mobile_op_megafon / etc.
 
-        if op == "mobile_op_megafon":
-            # Порядок предпочтения для Мегафон/Yota при белых списках:
-            # 1) CDN+TLS (HTTPS:443) — гипотеза, что прозрачный прокси операторов не ломает TLS
-            # 2) CDN без TLS (HTTP:80) — fallback на старый вариант
-            # 3) VLESS+REALITY (YC) — крайний fallback
+        if op == "mobile_op_yota":
+            # Yota подтверждённо работает через main REALITY (SNI=cloud.mail.ru) при БС.
+            # См. SESSION_SUMMARY_2026-05-21.
+            if config.vless_cdn_tls_share_url:
+                url = config.vless_cdn_tls_share_url
+                instruction_key = "vless_cdn"
+            elif config.vless_cdn_share_url:
+                url = config.vless_cdn_share_url
+                instruction_key = "vless_cdn"
+            else:
+                url = config.vless_reality_share_url
+                instruction_key = "vless_reality"
+        elif op == "mobile_op_megafon":
+            # Мегафон: 2026-05-22 выявлено что у Мегафон IP Timeweb (наш main) НЕ в whitelist
+            # (TCP-таймаут). Пока выдаём то же что Yota, как best-effort; при следующей разведке
+            # whitelist Мегафон планируется отдельный канал. См. ROADMAP_VPN.md.
             if config.vless_cdn_tls_share_url:
                 url = config.vless_cdn_tls_share_url
                 instruction_key = "vless_cdn"
