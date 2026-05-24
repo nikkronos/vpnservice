@@ -503,9 +503,15 @@ def api_traffic():
         dump_stdout = _get_awg_dump_eu1()
         full_data = _parse_wg_dump_full(dump_stdout) if dump_stdout else {}
 
+        db_users = db_get_all_users()
         proxy_ts: Dict[int, Optional[str]] = {
             u["telegram_id"]: u.get("proxy_requested_at")
-            for u in db_get_all_users()
+            for u in db_users
+            if u.get("telegram_id")
+        }
+        email_verified_map: Dict[int, bool] = {
+            u["telegram_id"]: bool(u.get("email_verified"))
+            for u in db_users
             if u.get("telegram_id")
         }
 
@@ -527,6 +533,7 @@ def api_traffic():
                     "last_handshake": 0,
                     "platform": peer.platform or "pc",
                     "proxy_requested_at": proxy_ts.get(uid),
+                    "email_verified": email_verified_map.get(uid, False),
                 }
             by_user[uid]["rx_bytes"] += d["rx"]
             by_user[uid]["tx_bytes"] += d["tx"]

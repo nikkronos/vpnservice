@@ -74,7 +74,7 @@ async function loadTraffic() {
         const r = await fetch('/api/traffic', { cache: 'no-store' });
         const data = await r.json();
         if (data.error) {
-            tbody.innerHTML = `<tr><td colspan="6" class="err">Ошибка: ${data.error}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="err">Ошибка: ${data.error}</td></tr>`;
             return;
         }
         if (note && data.last_update) {
@@ -83,7 +83,7 @@ async function loadTraffic() {
         }
         const users = data.users || [];
         if (!users.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="loading">Нет данных</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">Нет данных</td></tr>';
             return;
         }
         const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');
@@ -97,8 +97,12 @@ async function loadTraffic() {
             const proxy = u.proxy_requested_at
                 ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
                 : '<span class="hs-never">—</span>';
+            const email = u.email_verified
+                ? '<span class="hs-now" title="Авторизован по email">✓</span>'
+                : '<span class="hs-never">—</span>';
             return `<tr${rowClass}>
                 <td class="td-name">${name}</td>
+                <td class="td-email">${email}</td>
                 <td class="td-ip">${ip || '—'}</td>
                 <td class="td-traffic">${traffic}</td>
                 <td class="td-platform">${platform}</td>
@@ -107,7 +111,7 @@ async function loadTraffic() {
             </tr>`;
         }).join('');
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="6" class="err">Ошибка загрузки</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="err">Ошибка загрузки</td></tr>`;
     }
 }
 
