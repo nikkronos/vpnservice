@@ -28,6 +28,8 @@ git log --oneline -3
 
 **SSH:** `ssh fornex` (алиас) или `ssh -i ~/.ssh/id_ed25519_fornex root@185.21.8.91`
 
+**Тариф eu1:** Cloud NVMe 2 — 2 ядра / 2 ГБ RAM / 20 ГБ NVMe, 936 ₽/мес. Канал **~100 Мбит/с** (порт VPS; диагностика 2026-05-24, ждём уточнение в тикете). + swap 2 ГБ (swappiness=10). Узкое место скорости — порт, не CPU/RAM.
+
 ### Сервисы на Fornex
 
 | Сервис | Команда | Порт/адрес |
@@ -75,6 +77,8 @@ bot/data/
   vpn.db           — SQLite (основная БД)
   peers.json       — legacy JSON (ещё используется)
   mtproto_proxy_link.txt — текущая MTProxy ссылка (не в git)
+scripts/
+  traffic_accounting.py — cron-сэмплер lifetime-трафика (*/5)
 ```
 
 ### Ключевые концепции
@@ -84,6 +88,7 @@ bot/data/
 - **Платформы:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
 - **Recovery auth:** `RECOVERY_SECRET` — для legacy recovery endpoints
+- **traffic_accounting (SQLite):** накопительный lifetime-трафик по pubkey, reset-aware (счётчики awg обнуляются при рестарте/перегенерации). Пишется из `/api/traffic` при просмотре + cron `*/5` `scripts/traffic_accounting.py`. Столбец «Всего» в панели.
 
 ---
 
@@ -180,6 +185,8 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 7. **env_vars.txt не коммитить никогда**
 8. **После изменений:** `git add` → `git commit` → `git push` (push обязателен)
 9. **Reboot любого сервера** — проверь после: `systemctl is-active <services>`, `docker ps`, наличие всех peers (особенно AmneziaWG на Fornex: `docker exec amnezia-awg2 awg show awg0 | grep -c '^peer'` должно совпадать с количеством active eu1-peer'ов в peers.json).
+10. **Cron на Fornex (root):** `*/5 /opt/amnezia-save-conf.sh` (persist AWG peers) + `*/5 cd /opt/vpnservice && venv/bin/python scripts/traffic_accounting.py` (lifetime-трафик). После reboot проверять `crontab -l` — оба на месте.
+11. **Swap на eu1:** `/swapfile` 2 ГБ, `swappiness=10` (RAM всего 2 ГБ) — не удалять, страховка от OOM.
 
 ---
 

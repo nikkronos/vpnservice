@@ -1,5 +1,29 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-24 — Учёт трафика lifetime + колонки Email/Всего + swap + диагностика скорости
+
+**Панель мониторинга:**
+- Колонка **Email** — галочка email-верификации (джойн `email_verified` по `telegram_id`). Caveat: только для юзеров с активным AWG-peer; полная картина — CSV.
+- Колонка **Всего** — накопительный lifetime-трафик пользователя.
+
+**Reset-aware учёт трафика (SQLite):**
+- Таблица `traffic_accounting(public_key PK, telegram_id, lifetime_rx/tx, last_rx/tx, updated_at)`.
+- `db_accumulate_traffic` — детект сброса счётчика (current < last → приращение = current); `db_get_lifetime_by_user` — SUM по юзеру (включая удалённые peer'ы).
+- `/api/traffic` накапливает при просмотре + отдаёт `total_bytes`; `scripts/traffic_accounting.py` — cron `*/5` на случай простоя панели.
+- Baseline засеян текущими счётчиками 24.05 (ретроактива нет, дальше растёт надёжно).
+
+**Инфра (Fornex eu1, вне git):**
+- **swap 2 ГБ** + `swappiness=10` — страховка от OOM (RAM 2 ГБ).
+- cron `*/5 traffic_accounting.py`.
+
+**Диагностика «упала скорость»:**
+- Сервер здоров: load 0.31/2 ядра, CPU 86% idle, 0 пакетных ошибок, BBR+fq уже включены.
+- Bandwidth: 4–8 потоков = 93–95 Мбит/с → **жёсткий потолок ~100 Мбит/с (порт VPS)**. Делится на всех онлайн-юзеров.
+- Тариф: Cloud NVMe 2 (2/2/20), 936 ₽/мес. Апгрейды не указывают скорость порта → могут не решить. **Открыт тикет в Fornex** (порт + лимит трафика).
+- Коммиты: `9246d7a`, `8e71b02`. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-24.md`.
+
+---
+
 ## 2026-05-21 (вечер) — Recovery-сайт полный передел + Error-103 fallback
 
 **Recovery (`/recovery`):**
