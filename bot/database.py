@@ -86,6 +86,16 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS traffic_accounting (
+    public_key   TEXT PRIMARY KEY,
+    telegram_id  INTEGER,
+    lifetime_rx  INTEGER NOT NULL DEFAULT 0,
+    lifetime_tx  INTEGER NOT NULL DEFAULT 0,
+    last_rx      INTEGER NOT NULL DEFAULT 0,
+    last_tx      INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -594,3 +604,88 @@ def db_upsert_server(server_id: str, name: str, protocol: str, capacity: int, ac
             """,
             (server_id, name, protocol, capacity, 1 if active else 0),
         )
+
+
+# ─── Traffic accounting ─────────────────────────────────────────────────────────
+
+def db_accumulate_traffic(samples: List[Dict]) -> None:
+    """
+    Накопительный учёт трафика по счётчикам AmneziaWG (reset-aware).
+
+    samples: [{"public_key": str, "telegram_id": int|None, "rx": int, "tx": int}, ...]
+    rx/tx — текущие значения счётчиков из `awg show ... dump`. Они обнуляются при
+    рестарте интерфейса/контейнера или перегенерации peer'а. Поэтому если текущее
+    значение меньше сохранённого last — считаем, что был сброс, и приращение равно
+    текущему значению. Иначе приращение = current - last.
+
+    Важно: вызывать только для peer'ов, реально присутствующих в dump (иначе
+    нулевые сэмплы исказят last_* и приведут к двойному учёту).
+    """
+    _ensure_init()
+    if not samples:
+        return
+    with _conn() as con:
+        for s in samples:
+            pk = (s.get("public_key") or "").strip()
+            if not pk:
+                continue
+            rx = int(s.get("rx") or 0)
+            tx = int(s.get("tx") or 0)
+            tid = s.get("telegram_id")
+            row = con.execute(
+                "SELECT lifetime_rx, lifetime_tx, last_rx, last_tx "
+                "FROM traffic_accounting WHERE public_key = ?",
+                (pk,),
+            ).fetchone()
+            if row is None:
+                con.execute(
+                    """
+                    INSERT INTO traffic_accounting
+                        (public_key, telegram_id, lifetime_rx, lifetime_tx,
+                         last_rx, last_tx, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                    """,
+                    (pk, tid, rx, tx, rx, tx),
+                )
+                continue
+            d_rx = rx - row["last_rx"] if rx >= row["last_rx"] else rx
+            d_tx = tx - row["last_tx"] if tx >= row["last_tx"] else tx
+            con.execute(
+                """
+                UPDATE traffic_accounting
+                SET lifetime_rx = lifetime_rx + ?,
+                    lifetime_tx = lifetime_tx + ?,
+                    last_rx     = ?,
+                    last_tx     = ?,
+                    telegram_id = COALESCE(?, telegram_id),
+                    updated_at  = datetime('now')
+                WHERE public_key = ?
+                """,
+                (d_rx, d_tx, rx, tx, tid, pk),
+            )
+
+
+def db_get_lifetime_by_user() -> Dict[int, Dict]:
+    """
+    Возвращает накопительный трафик по пользователям:
+    {telegram_id: {"rx": int, "tx": int, "total": int}}.
+    Суммирует по всем peer'ам пользователя (включая удалённые/перегенерированные).
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT telegram_id,
+                   SUM(lifetime_rx) AS rx,
+                   SUM(lifetime_tx) AS tx
+            FROM traffic_accounting
+            WHERE telegram_id IS NOT NULL
+            GROUP BY telegram_id
+            """
+        ).fetchall()
+        out: Dict[int, Dict] = {}
+        for r in rows:
+            rx = r["rx"] or 0
+            tx = r["tx"] or 0
+            out[int(r["telegram_id"])] = {"rx": rx, "tx": tx, "total": rx + tx}
+        return out

@@ -39,6 +39,8 @@ from bot.database import (
     db_upsert_user,
     db_get_effective_telegram_id,
     db_get_all_users,
+    db_accumulate_traffic,
+    db_get_lifetime_by_user,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -516,11 +518,19 @@ def api_traffic():
         }
 
         by_user: Dict[int, Dict] = {}
+        samples: List[Dict] = []
         for peer in peers:
             if peer.server_id != "eu1" or not peer.active:
                 continue
             pk = (peer.public_key or "").strip()
             d = full_data.get(pk) or {"rx": 0, "tx": 0, "last_handshake": 0}
+            if pk in full_data:
+                samples.append({
+                    "public_key": pk,
+                    "telegram_id": peer.telegram_id,
+                    "rx": d["rx"],
+                    "tx": d["tx"],
+                })
             uid = peer.telegram_id
             if uid not in by_user:
                 user = find_user(uid)
@@ -541,6 +551,19 @@ def api_traffic():
             if d["last_handshake"] > by_user[uid]["last_handshake"]:
                 by_user[uid]["last_handshake"] = d["last_handshake"]
                 by_user[uid]["platform"] = peer.platform or "pc"
+
+        # Накопительный учёт (reset-aware) + lifetime-итог по пользователю.
+        # Накапливаем на каждом просмотре панели; cron-сэмплер дублирует это
+        # в фоне, чтобы трафик не терялся между просмотрами.
+        try:
+            db_accumulate_traffic(samples)
+            lifetime_map = db_get_lifetime_by_user()
+        except Exception as e:
+            logger.warning("Traffic accounting failed: %s", e)
+            lifetime_map = {}
+        for u in by_user.values():
+            lt = lifetime_map.get(u["telegram_id"])
+            u["total_bytes"] = lt["total"] if lt else (u["rx_bytes"] + u["tx_bytes"])
 
         # Сортировка: сначала по последней активности (handshake ИЛИ нажатие прокси),
         # потом по трафику. Так "только-прокси-юзеры" поднимаются вверх и видны.
