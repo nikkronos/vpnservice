@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Добавляем путь к модулям бота
 import sys
@@ -70,6 +71,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# За CF-прокси/nginx: доверяем X-Forwarded-Proto/Host, чтобы request.host_url
+# отдавал https://<домен> (иначе subscription-ссылка/QR соберутся как http).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # Загружаем конфиг
 import os
@@ -941,6 +945,7 @@ def api_account_info():
             "invited_count": db_count_referrals(code) if code else 0,
             "referral_reward_days": REFERRAL_REWARD_DAYS,
             "sub_link_path": sub_link_path,
+            "sub_link": sub_full,
             "sub_qr": sub_qr,
         })
     except Exception as e:
