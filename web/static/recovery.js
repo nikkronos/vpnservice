@@ -234,7 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Опционально — ссылка как кликабельная
           const aWrap = document.createElement('p');
-          aWrap.style.marginTop = '10px';
           const a = document.createElement('a');
           a.href = data.vpn_url;
           a.textContent = '👆 Открыть в AmneziaVPN';
@@ -251,7 +250,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const hint = document.createElement('p');
           hint.className = 'section-hint';
-          hint.style.marginTop = '10px';
           if (platform === 'ios') {
             hint.innerHTML = (
               '<b>iPhone / iPad:</b> открой файл → значок «Поделиться» → выбери ' +
@@ -271,7 +269,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Ошибка-103 fallback
         const fallback = document.createElement('p');
         fallback.className = 'section-hint';
-        fallback.style.marginTop = '12px';
         fallback.style.opacity = '0.85';
         fallback.innerHTML = (
           '⚠️ <b>Если AmneziaVPN на ПК выдаёт Error 103 «Фоновая служба не запущена»</b> — ' +
@@ -324,7 +321,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const apps = document.createElement('p');
         apps.className = 'section-hint';
-        apps.style.marginTop = '10px';
         apps.innerHTML = (
           '<b>Android:</b> <a href="https://hiddify.com" target="_blank">Hiddify</a> или v2rayNG — «+» → «Импорт из буфера».<br>' +
           '<b>iOS:</b> <a href="https://apps.apple.com/app/foxray/id6448898396" target="_blank">FoXray</a>, ' +

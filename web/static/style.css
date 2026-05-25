@@ -373,13 +373,67 @@ footer a:hover {
 /* ── Recovery page ── */
 .recovery {
     margin-bottom: 40px;
+    max-width: 640px;   /* единая колонка для всего флоу — выравнивание */
+}
+
+/* ── Hero / landing (до входа) ── */
+.recovery-hero {
+    display: block;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 26px;
+    padding: 18px 0 20px;
+}
+
+.recovery-hero h1 {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.02em;
+    text-shadow: 0 0 16px var(--accent);
+}
+
+.hero-tagline {
+    margin-top: 8px;
+    color: var(--text-dim);
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.hero-intro {
+    max-width: 640px;
+    margin-bottom: 24px;
+    color: var(--text);
+    font-size: 0.92em;
+    line-height: 1.6;
+}
+
+.hero-intro p {
+    margin-bottom: 14px;
+}
+
+.hero-points {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.hero-points li {
+    color: var(--text-dim);
+}
+
+.section-hint {
+    color: var(--text-dim);
+    font-size: 0.88em;
+    line-height: 1.55;
+    margin-top: 4px;
 }
 
 .recovery-form {
     display: grid;
     grid-template-columns: 1fr;
     gap: 12px;
-    max-width: 520px;
+    max-width: 100%;
 }
 
 .recovery-form label {
@@ -459,12 +513,12 @@ footer a:hover {
 .recovery-menu {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-top: 14px;
+    gap: 14px;
+    margin-top: 16px;
 }
 
 .btn-menu {
-    padding: 16px 18px;
+    padding: 18px 20px;
     text-align: left;
     font-size: 1.0em;
     display: flex;
@@ -536,16 +590,21 @@ footer a:hover {
 }
 
 .recovery-result {
-    margin-top: 14px;
-    padding: 14px 16px;
+    margin-top: 16px;
+    padding: 20px 22px;
     background: var(--surface);
     border: 1px solid var(--border2);
-    border-radius: 10px;
+    border-radius: 12px;
     color: var(--text);
     font-size: 0.9em;
     white-space: pre-wrap;
     word-break: break-word;
-    max-width: 900px;
+    max-width: 100%;
+}
+
+/* Равномерный вертикальный ритм между блоками результата */
+.recovery-result > * + * {
+    margin-top: 18px;
 }
 
 .recovery-slot-title {
@@ -568,8 +627,8 @@ footer a:hover {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    margin: 6px 0 16px;
+    gap: 10px;
+    margin: 0;
 }
 
 .qr-box img {
@@ -593,7 +652,7 @@ footer a:hover {
 
 .copy-primary {
     width: 100%;
-    max-width: 520px;
+    max-width: none;
     font-size: 1.0em;
     padding: 14px 16px;
     display: block;
@@ -602,14 +661,15 @@ footer a:hover {
 .link-code {
     display: block;
     word-break: break-all;
-    margin: 10px 0 0;
+    margin: 0;
     font-size: 12px;
+    line-height: 1.5;
     color: var(--text-dim);
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 10px 12px;
-    max-width: 520px;
+    padding: 12px 14px;
+    max-width: none;
 }
 
 .msg-ok { color: var(--green); }
