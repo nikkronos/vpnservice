@@ -230,8 +230,8 @@ def main() -> None:
                 types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
-                types.InlineKeyboardButton("📡 Прокси Telegram", callback_data="menu_proxy"),
-                types.InlineKeyboardButton("📱 Мобильный VPN", callback_data="menu_mobile_vpn"),
+                types.InlineKeyboardButton("📨 Разблокировка Telegram", callback_data="menu_proxy"),
+                types.InlineKeyboardButton("📡 VPN при блокировках", callback_data="menu_mobile_vpn"),
             )
             if is_owner(uid, admin_id):
                 markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
