@@ -64,19 +64,16 @@ document.addEventListener('DOMContentLoaded', () => {
     code.className = 'link-code';
     code.textContent = link;
 
+    const label = copyLabel || '📋 Копировать';
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = copyLabel || '📋 Копировать';
+    btn.textContent = label;
     btn.className = 'btn-recovery copy-primary';
     btn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(link);
-        const prev = btn.textContent;
-        btn.textContent = '✅ Скопировано!';
-        setTimeout(() => { btn.textContent = prev; }, 2000);
-      } catch {
-        code.focus();
-      }
+      const ok = await copyToClipboard(link);
+      btn.textContent = ok ? '✅ Скопировано!' : '⚠️ Выдели и скопируй вручную';
+      if (!ok) selectText(code);
+      setTimeout(() => { btn.textContent = label; }, 2200);
     });
     container.appendChild(btn);
     container.appendChild(code);
@@ -110,6 +107,42 @@ document.addEventListener('DOMContentLoaded', () => {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function selectText(el) {
+    try {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+    } catch (e) {}
+  }
+
+  // Копирование с fallback: navigator.clipboard только в secure context (HTTPS).
+  // На HTTP используем устаревший, но рабочий execCommand('copy').
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) {}
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
   }
 
   function fmtDate(iso) {
@@ -613,12 +646,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       status.remove();
-      const desc = document.createElement('p');
-      desc.className = 'section-hint';
-      desc.style.marginTop = '0';
-      desc.textContent = hint;
-      proxyResult.appendChild(desc);
-
       renderQr(proxyResult, data.qr, 'Сканируй QR или нажми кнопку — откроется в Telegram');
 
       const openA = document.createElement('a');
