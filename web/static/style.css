@@ -429,6 +429,52 @@ footer a:hover {
     margin-top: 4px;
 }
 
+/* ── Account dashboard ── */
+.account-card {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-top: 14px;
+}
+
+.account-card > * + * {
+    margin-top: 12px;
+}
+
+.acc-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.acc-label {
+    color: var(--text-dim);
+    font-size: 0.82em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.acc-value { font-weight: 700; font-size: 1.05em; }
+.acc-value.acc-ok   { color: var(--green); }
+.acc-value.acc-warn { color: var(--yellow); }
+.acc-value.acc-bad  { color: var(--red); }
+
+.acc-sub { color: var(--text-dim); font-size: 0.85em; }
+
+.acc-subtitle { font-weight: 700; color: var(--text); }
+
+.account-subhead {
+    margin-top: 26px;
+    margin-bottom: 2px;
+    font-size: 0.82em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-dim);
+}
+
 .recovery-form {
     display: grid;
     grid-template-columns: 1fr;

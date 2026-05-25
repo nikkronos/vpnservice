@@ -20,9 +20,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const mobileResult = document.getElementById('mobileResult');
   const proxyResult  = document.getElementById('proxyResult');
 
+  const accountStatus  = document.getElementById('accountStatus');
+  const trialBlock     = document.getElementById('trialBlock');
+  const referralBlock  = document.getElementById('referralBlock');
+
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionToken = '';
   let currentEmail = '';
+  const refCode = new URLSearchParams(location.search).get('ref') || '';
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function setMsg(el, text, isError) {
@@ -101,6 +106,118 @@ document.addEventListener('DOMContentLoaded', () => {
     URL.revokeObjectURL(url);
   }
 
+  function fmtDate(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+      return d.toLocaleDateString('ru-RU');
+    } catch { return ''; }
+  }
+
+  // ── «Мой аккаунт»: статус, триал, реферал ───────────────────────────────────
+  async function loadAccount() {
+    if (!accountStatus) return;
+    accountStatus.textContent = 'Загружаем…';
+    try {
+      const resp = await fetch('/api/account/info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        accountStatus.textContent = 'Не удалось загрузить аккаунт: ' + (d.error || resp.statusText);
+        return;
+      }
+      renderAccount(d);
+    } catch (err) {
+      accountStatus.textContent = 'Сетевая ошибка при загрузке аккаунта.';
+    }
+  }
+
+  function renderAccount(d) {
+    if (!accountStatus) return;
+    // Статус-карточка
+    let label = 'Доступ', value = '', cls = 'acc-ok', sub = '';
+    if (d.grandfathered) {
+      value = 'Бессрочный';
+    } else if (d.status === 'trial' && (d.days_left || 0) > 0) {
+      label = 'Пробный период'; value = `${d.days_left} дн`;
+      sub = `до ${fmtDate(d.expires_at)}`;
+    } else if ((d.days_left || 0) > 0) {
+      label = 'Подписка'; value = `${d.days_left} дн`;
+      cls = d.days_left <= 3 ? 'acc-warn' : 'acc-ok';
+      sub = `активна до ${fmtDate(d.expires_at)}`;
+    } else {
+      label = 'Подписка'; value = 'Неактивна'; cls = 'acc-bad';
+    }
+    accountStatus.innerHTML = '';
+    const line = document.createElement('div'); line.className = 'acc-line';
+    const l = document.createElement('span'); l.className = 'acc-label'; l.textContent = label;
+    const v = document.createElement('span'); v.className = 'acc-value ' + cls; v.textContent = value;
+    line.appendChild(l); line.appendChild(v);
+    accountStatus.appendChild(line);
+    if (sub) {
+      const s = document.createElement('div'); s.className = 'acc-sub'; s.textContent = sub;
+      accountStatus.appendChild(s);
+    }
+
+    // Пробный период
+    if (trialBlock) {
+      trialBlock.innerHTML = '';
+      if (d.trial_available) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn-recovery copy-primary';
+        b.textContent = `🎁 Активировать ${d.trial_days} дней бесплатно`;
+        b.addEventListener('click', () => startTrial(b));
+        trialBlock.appendChild(b);
+      }
+    }
+
+    // Реферальный блок
+    if (referralBlock) {
+      if (d.referral_code) {
+        referralBlock.hidden = false;
+        referralBlock.innerHTML = '';
+        const t = document.createElement('div');
+        t.className = 'acc-subtitle';
+        t.textContent = '👥 Приглашай друзей';
+        const note = document.createElement('p');
+        note.className = 'section-hint';
+        note.textContent = `Когда друг оплатит — вы оба получите +${d.referral_reward_days} дней. Приглашено: ${d.invited_count}.`;
+        referralBlock.appendChild(t);
+        referralBlock.appendChild(note);
+        const link = location.origin + d.referral_link_path;
+        renderLinkBlock(referralBlock, link, '', '📋 Скопировать ссылку-приглашение');
+      } else {
+        referralBlock.hidden = true;
+      }
+    }
+  }
+
+  async function startTrial(btn) {
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Активируем…';
+    try {
+      const resp = await fetch('/api/account/start-trial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        btn.textContent = prev; btn.disabled = false;
+        alert(d.error || 'Не удалось активировать пробный период.');
+        return;
+      }
+      loadAccount();
+    } catch (err) {
+      btn.textContent = prev; btn.disabled = false;
+    }
+  }
+
   // ── Шаг 1: Email → отправить OTP ─────────────────────────────────────────
   async function sendOtp() {
     currentEmail = (emailInput.value || '').trim().toLowerCase();
@@ -151,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const resp = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: currentEmail, code }),
+        body: JSON.stringify({ email: currentEmail, code, ref: refCode }),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
@@ -160,6 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sessionToken = data.token || '';
       showStep(stepMenu);
+      loadAccount();
     } catch (err) {
       setMsg(verifyResult, 'Сетевая ошибка: ' + (err.message || err), true);
     } finally {

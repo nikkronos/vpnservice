@@ -868,6 +868,18 @@ def db_get_user_by_referral_code(code: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def db_count_referrals(code: str) -> int:
+    """Сколько пользователей пришло по этому реферальному коду."""
+    _ensure_init()
+    if not code:
+        return 0
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE referred_by = ?", (code,)
+        ).fetchone()
+        return row["n"] if row else 0
+
+
 def db_set_referred_by(telegram_id: int, code: str) -> bool:
     """
     Привязывает пригласившего (по его referral_code), если ещё не привязан,

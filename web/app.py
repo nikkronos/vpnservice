@@ -41,6 +41,11 @@ from bot.database import (
     db_get_all_users,
     db_accumulate_traffic,
     db_get_lifetime_by_user,
+    db_get_subscription,
+    db_start_trial,
+    db_ensure_referral_code,
+    db_count_referrals,
+    db_set_referred_by,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -75,6 +80,10 @@ except Exception as e:
 app.secret_key = (getattr(config, "admin_secret", None) or os.urandom(32).hex())
 
 _recovery_lock = threading.Lock()
+
+# ── Биллинг (Фаза 2/4): значения, легко менять ──
+TRIAL_DAYS = 14            # длина пробного периода
+REFERRAL_REWARD_DAYS = 30  # +дней обоим, когда приглашённый оплатит (применяется в Фазе 4)
 
 
 def _require_admin_auth(f):
@@ -878,6 +887,75 @@ def api_recovery_mobile_link_by_email():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/account/info", methods=["POST"])
+def api_account_info():
+    """
+    Сводка по аккаунту для экрана «Мой аккаунт». Auth: email-token.
+    Тело: {token}
+    Ответ: статус подписки, срок, доступность триала, реферальный код/ссылка/счётчик.
+    """
+    try:
+        import math
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _user_row, telegram_id = auth
+
+        sub = db_get_subscription(telegram_id) or {}
+        code = db_ensure_referral_code(telegram_id)
+        expires_at = sub.get("expires_at")
+        grandfathered = expires_at is None
+        status = sub.get("subscription_status") or "none"
+
+        days_left = None
+        if expires_at:
+            try:
+                delta = datetime.fromisoformat(expires_at) - datetime.utcnow()
+                days_left = max(0, math.ceil(delta.total_seconds() / 86400.0))
+            except (ValueError, TypeError):
+                days_left = None
+
+        return jsonify({
+            "ok": True,
+            "status": status,
+            "expires_at": expires_at,
+            "days_left": days_left,
+            "grandfathered": grandfathered,
+            "trial_used": bool(sub.get("trial_used")),
+            "trial_available": not bool(sub.get("trial_used")),
+            "trial_days": TRIAL_DAYS,
+            "referral_code": code,
+            "referral_link_path": f"/recovery?ref={code}" if code else None,
+            "invited_count": db_count_referrals(code) if code else 0,
+            "referral_reward_days": REFERRAL_REWARD_DAYS,
+        })
+    except Exception as e:
+        logger.exception("api/account/info: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/account/start-trial", methods=["POST"])
+def api_account_start_trial():
+    """
+    Активирует пробный период (TRIAL_DAYS). Auth: email-token. Тело: {token}.
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _user_row, telegram_id = auth
+
+        new_exp = db_start_trial(telegram_id, TRIAL_DAYS)
+        if not new_exp:
+            return jsonify({"error": "Пробный период уже был использован."}), 409
+        return jsonify({"ok": True, "expires_at": new_exp, "trial_days": TRIAL_DAYS})
+    except Exception as e:
+        logger.exception("api/account/start-trial: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/auth/send-otp", methods=["POST"])
 def api_auth_send_otp():
     """Отправляет OTP-код на указанный email. Создаёт пользователя если нет."""
@@ -934,6 +1012,18 @@ def api_auth_verify_otp():
 
         db_upsert_user({"email": email, "email_verified": True, "active": True})
         token = db_create_session(email, ttl_minutes=60)
+
+        # Реферальная атрибуция: если пришли по ?ref=CODE — привязываем пригласившего
+        ref = (body.get("ref") or "").strip()
+        if ref:
+            try:
+                row = db_find_user_by_email(email)
+                tid = row.get("telegram_id") if row else None
+                if tid:
+                    db_set_referred_by(int(tid), ref)
+            except Exception as e:
+                logger.warning("referral attribution failed: %s", e)
+
         return jsonify({"ok": True, "token": token})
     except Exception as e:
         logger.exception("Ошибка api/auth/verify-otp: %s", e)
