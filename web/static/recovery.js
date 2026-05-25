@@ -11,6 +11,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSendOtp    = document.getElementById('btnSendOtp');
   const sendOtpResult = document.getElementById('sendOtpResult');
 
+  const authPassword     = document.getElementById('authPassword');
+  const btnLoginPassword = document.getElementById('btnLoginPassword');
+  const btnToggleLogin   = document.getElementById('btnToggleLogin');
+  const loginHint        = document.getElementById('loginHint');
+
   const codeInput      = document.getElementById('authCode');
   const btnVerifyOtp   = document.getElementById('btnVerifyOtp');
   const btnResendOtp   = document.getElementById('btnResendOtp');
@@ -23,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const accountStatus  = document.getElementById('accountStatus');
   const trialBlock     = document.getElementById('trialBlock');
   const referralBlock  = document.getElementById('referralBlock');
+  const passwordBlock  = document.getElementById('passwordBlock');
 
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionToken = '';
@@ -175,6 +181,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    // Управление паролем
+    renderPasswordBlock(!!d.has_password);
+
     // Реферальный блок
     if (referralBlock) {
       if (d.referral_code) {
@@ -218,6 +227,77 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Блок «Добавить/Изменить пароль» — раскрывает инлайн-форму
+  function renderPasswordBlock(hasPassword) {
+    if (!passwordBlock) return;
+    passwordBlock.innerHTML = '';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-recovery btn-recovery-secondary copy-primary';
+    btn.textContent = hasPassword ? '🔑 Изменить пароль' : '🔑 Добавить пароль';
+
+    const form = document.createElement('div');
+    form.className = 'recovery-form';
+    form.style.marginTop = '12px';
+    form.hidden = true;
+
+    const inp = document.createElement('input');
+    inp.type = 'password';
+    inp.placeholder = 'Новый пароль (мин. 8 символов)';
+    inp.autocomplete = 'new-password';
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'btn-recovery';
+    save.textContent = 'Сохранить пароль';
+
+    const msg = document.createElement('div');
+    msg.className = 'section-hint';
+
+    btn.addEventListener('click', () => { form.hidden = !form.hidden; });
+
+    save.addEventListener('click', async () => {
+      const pw = (inp.value || '').trim();
+      if (pw.length < 8) {
+        msg.style.color = 'var(--red)';
+        msg.textContent = 'Минимум 8 символов.';
+        return;
+      }
+      save.disabled = true;
+      msg.style.color = 'var(--green)';
+      msg.textContent = 'Сохраняем…';
+      try {
+        const r = await fetch('/api/account/set-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, password: pw }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          msg.style.color = 'var(--red)';
+          msg.textContent = d.error || 'Ошибка';
+          save.disabled = false;
+          return;
+        }
+        msg.style.color = 'var(--green)';
+        msg.textContent = 'Пароль сохранён ✅';
+        inp.value = '';
+        setTimeout(() => loadAccount(), 800);
+      } catch (e) {
+        msg.style.color = 'var(--red)';
+        msg.textContent = 'Сетевая ошибка';
+        save.disabled = false;
+      }
+    });
+
+    form.appendChild(inp);
+    form.appendChild(save);
+    form.appendChild(msg);
+    passwordBlock.appendChild(btn);
+    passwordBlock.appendChild(form);
+  }
+
   // ── Шаг 1: Email → отправить OTP ─────────────────────────────────────────
   async function sendOtp() {
     currentEmail = (emailInput.value || '').trim().toLowerCase();
@@ -254,6 +334,56 @@ document.addEventListener('DOMContentLoaded', () => {
     showStep(stepEmail);
     setMsg(sendOtpResult, '', false);
   });
+
+  // ── Вход по паролю (альтернатива OTP) ──────────────────────────────────────
+  let passwordMode = false;
+  function setLoginMode(pw) {
+    passwordMode = pw;
+    if (authPassword) authPassword.hidden = !pw;
+    if (btnSendOtp) btnSendOtp.hidden = pw;
+    if (btnLoginPassword) btnLoginPassword.hidden = !pw;
+    if (loginHint) loginHint.textContent = pw
+      ? 'Введи email и пароль.'
+      : 'Введи email — пришлём одноразовый код для входа.';
+    if (btnToggleLogin) btnToggleLogin.textContent = pw ? '📧 Войти по коду' : '🔑 Войти по паролю';
+    setMsg(sendOtpResult, '', false);
+  }
+
+  async function loginPassword() {
+    const email = (emailInput.value || '').trim().toLowerCase();
+    const password = (authPassword && authPassword.value) || '';
+    if (!email || !email.includes('@') || !password) {
+      setMsg(sendOtpResult, 'Введи email и пароль.', true);
+      return;
+    }
+    btnLoginPassword.disabled = true;
+    setMsg(sendOtpResult, 'Входим…', false);
+    try {
+      const resp = await fetch('/api/auth/login-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setMsg(sendOtpResult, data.error || 'Ошибка входа', true);
+        return;
+      }
+      sessionToken = data.token || '';
+      currentEmail = email;
+      setMsg(sendOtpResult, '', false);
+      showStep(stepMenu);
+      loadAccount();
+    } catch (err) {
+      setMsg(sendOtpResult, 'Сетевая ошибка: ' + (err.message || err), true);
+    } finally {
+      btnLoginPassword.disabled = false;
+    }
+  }
+
+  if (btnToggleLogin) btnToggleLogin.addEventListener('click', () => setLoginMode(!passwordMode));
+  if (btnLoginPassword) btnLoginPassword.addEventListener('click', loginPassword);
+  if (authPassword) authPassword.addEventListener('keydown', e => { if (e.key === 'Enter') loginPassword(); });
 
   // ── Шаг 2: Проверить OTP → главное меню ──────────────────────────────────
   async function verifyOtp() {

@@ -23,12 +23,15 @@
           <li>📨 Прокси, чтобы поднять сам Telegram</li>
         </ul>
       </div>
-      <h2>📧 Вход по email</h2>
-      <p class="section-hint">Введи email, на который придёт одноразовый код для входа.</p>
+      <h2>📧 Вход</h2>
+      <p class="section-hint" id="loginHint">Введи email — пришлём одноразовый код для входа.</p>
       <div class="recovery-form">
         <label for="authEmail">Email</label>
         <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
+        <input type="password" id="authPassword" placeholder="Пароль" autocomplete="current-password" hidden />
         <button type="button" id="btnSendOtp" class="btn-recovery">Получить код</button>
+        <button type="button" id="btnLoginPassword" class="btn-recovery" hidden>Войти</button>
+        <button type="button" id="btnToggleLogin" class="btn-recovery btn-recovery-secondary" style="margin-top:8px;">🔑 Войти по паролю</button>
       </div>
       <div id="sendOtpResult" class="recovery-result" aria-live="polite"></div>
     </section>
@@ -53,6 +56,7 @@
       <h2>👤 Мой аккаунт</h2>
       <div id="accountStatus" class="account-card">Загружаем…</div>
       <div id="trialBlock"></div>
+      <div id="passwordBlock"></div>
       <div id="referralBlock" class="account-card" hidden></div>
       <h3 class="account-subhead">Подключение</h3>
       <div class="recovery-menu">

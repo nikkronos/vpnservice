@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Добавляем путь к модулям бота
 import sys
@@ -46,6 +47,8 @@ from bot.database import (
     db_ensure_referral_code,
     db_count_referrals,
     db_set_referred_by,
+    db_set_password,
+    db_has_password,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -83,7 +86,7 @@ _recovery_lock = threading.Lock()
 
 # ── Биллинг (Фаза 2/4): значения, легко менять ──
 TRIAL_DAYS = 14            # длина пробного периода
-REFERRAL_REWARD_DAYS = 30  # +дней обоим, когда приглашённый оплатит (применяется в Фазе 4)
+REFERRAL_REWARD_DAYS = 14  # +дней обоим, когда приглашённый оплатит (применяется в Фазе 4)
 
 
 def _require_admin_auth(f):
@@ -925,6 +928,7 @@ def api_account_info():
             "trial_used": bool(sub.get("trial_used")),
             "trial_available": not bool(sub.get("trial_used")),
             "trial_days": TRIAL_DAYS,
+            "has_password": db_has_password(telegram_id),
             "referral_code": code,
             "referral_link_path": f"/recovery?ref={code}" if code else None,
             "invited_count": db_count_referrals(code) if code else 0,
@@ -953,6 +957,28 @@ def api_account_start_trial():
         return jsonify({"ok": True, "expires_at": new_exp, "trial_days": TRIAL_DAYS})
     except Exception as e:
         logger.exception("api/account/start-trial: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/account/set-password", methods=["POST"])
+def api_account_set_password():
+    """
+    Устанавливает/меняет пароль. Auth: email-token (личность подтверждена входом).
+    Тело: {token, password}. Пароль ≥ 8 символов.
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _user_row, telegram_id = auth
+        password = (body.get("password") or "").strip()
+        if len(password) < 8:
+            return jsonify({"error": "Пароль должен быть не короче 8 символов."}), 400
+        db_set_password(telegram_id, generate_password_hash(password))
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.exception("api/account/set-password: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
@@ -1027,6 +1053,30 @@ def api_auth_verify_otp():
         return jsonify({"ok": True, "token": token})
     except Exception as e:
         logger.exception("Ошибка api/auth/verify-otp: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auth/login-password", methods=["POST"])
+def api_auth_login_password():
+    """
+    Вход по email + паролю (альтернатива OTP). Возвращает session token (60 мин).
+    Тело: {email, password}.
+    """
+    try:
+        body = request.get_json() or {}
+        email = (body.get("email") or "").strip().lower()
+        password = body.get("password") or ""
+        if not email or not password:
+            return jsonify({"error": "Введите email и пароль."}), 400
+        row = db_find_user_by_email(email)
+        # одинаковый ответ для всех неуспехов — не раскрываем, что именно не так
+        if (not row or not row.get("active") or not row.get("password_hash")
+                or not check_password_hash(row["password_hash"], password)):
+            return jsonify({"error": "Неверный email или пароль."}), 401
+        token = db_create_session(email, ttl_minutes=60)
+        return jsonify({"ok": True, "token": token})
+    except Exception as e:
+        logger.exception("api/auth/login-password: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

@@ -210,9 +210,9 @@ def main() -> None:
 
         if not authorized:
             text = (
-                "Привет! Это VPN-бот. 🔐\n\n"
-                "Доступ открыт для всех — зарегистрируйся через email.\n\n"
-                f"🌐 Также можно получить конфиг на сайте: {recovery_url}"
+                "Привет! Это VPN-бот ForFriends. 🔐\n\n"
+                f"🌐 Личный кабинет: {recovery_url}\n"
+                "⌛ Канал с обновлениями: https://t.me/vforfriends"
             )
             markup = types.InlineKeyboardMarkup()
             markup.add(
@@ -220,8 +220,9 @@ def main() -> None:
             )
         else:
             text = (
-                "Привет! Это VPN-бот. 🔐\n\n"
-                f"🌐 Сайт (если Telegram не работает): {recovery_url}"
+                "Привет! Это VPN-бот ForFriends. 🔐\n\n"
+                f"🌐 Личный кабинет: {recovery_url}\n"
+                "⌛ Канал с обновлениями: https://t.me/vforfriends"
             )
             markup = types.InlineKeyboardMarkup(row_width=2)
             markup.add(

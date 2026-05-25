@@ -128,6 +128,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_servers_table()
     _migrate_add_proxy_column()
     _migrate_add_subscription_columns()
+    _migrate_add_password_column()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -192,6 +193,18 @@ def _migrate_add_subscription_columns() -> None:
                 except sqlite3.OperationalError as e:
                     # гонка двух сервисов (vpn-web + vpn-bot) или повторный запуск
                     logger.info("Migration: skip %s (%s)", name, e)
+
+
+def _migrate_add_password_column() -> None:
+    """Добавляет password_hash в users (идемпотентно)."""
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "password_hash" not in existing:
+            try:
+                con.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+                logger.info("Migration: added password_hash column to users")
+            except sqlite3.OperationalError as e:
+                logger.info("Migration: skip password_hash (%s)", e)
 
 
 def _migrate_add_vless_columns() -> None:
@@ -878,6 +891,26 @@ def db_count_referrals(code: str) -> int:
             "SELECT COUNT(*) AS n FROM users WHERE referred_by = ?", (code,)
         ).fetchone()
         return row["n"] if row else 0
+
+
+def db_set_password(telegram_id: int, password_hash: str) -> None:
+    """Устанавливает/меняет хэш пароля пользователя."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET password_hash = ? WHERE telegram_id = ?",
+            (password_hash, telegram_id),
+        )
+
+
+def db_has_password(telegram_id: int) -> bool:
+    """True, если у пользователя установлен пароль."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT password_hash FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    return bool(row and row["password_hash"])
 
 
 def db_set_referred_by(telegram_id: int, code: str) -> bool:
