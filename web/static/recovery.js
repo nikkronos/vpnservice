@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function setMsg(el, text, isError) {
     if (!el) return;
     el.textContent = text || '';
-    el.style.color = isError ? '#b00020' : '#1b5e20';
+    el.style.color = isError ? 'var(--red)' : 'var(--green)';
   }
 
   function showStep(step) {
@@ -38,8 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (step) step.hidden = false;
   }
 
-  function renderLinkBlock(container, link, hintText, copyLabel) {
-    container.innerHTML = '';
+  // Заметная кнопка «копировать» + сама ссылка под ней.
+  // clear=true очищает контейнер (когда блок единственный).
+  function renderLinkBlock(container, link, hintText, copyLabel, clear) {
+    if (clear) container.innerHTML = '';
     if (hintText) {
       const p = document.createElement('p');
       p.className = 'section-hint';
@@ -48,17 +50,13 @@ document.addEventListener('DOMContentLoaded', () => {
       container.appendChild(p);
     }
     const code = document.createElement('code');
-    code.style.wordBreak = 'break-all';
-    code.style.display = 'block';
-    code.style.margin = '8px 0';
-    code.style.fontSize = '13px';
+    code.className = 'link-code';
     code.textContent = link;
-    container.appendChild(code);
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = copyLabel || '📋 Копировать ссылку';
-    btn.className = 'btn-recovery btn-recovery-secondary';
+    btn.textContent = copyLabel || '📋 Копировать';
+    btn.className = 'btn-recovery copy-primary';
     btn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(link);
@@ -70,6 +68,25 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     container.appendChild(btn);
+    container.appendChild(code);
+  }
+
+  // QR-код (PNG data-URI с бэкенда) — для скана с телефона.
+  function renderQr(container, dataUri, caption) {
+    if (!dataUri) return;
+    const box = document.createElement('div');
+    box.className = 'qr-box';
+    const img = document.createElement('img');
+    img.src = dataUri;
+    img.alt = 'QR';
+    box.appendChild(img);
+    if (caption) {
+      const c = document.createElement('div');
+      c.className = 'qr-caption';
+      c.textContent = caption;
+      box.appendChild(c);
+    }
+    container.appendChild(box);
   }
 
   function downloadFile(filename, content) {
@@ -185,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!awgResult) return;
       awgResult.innerHTML = '';
       const status = document.createElement('p');
-      status.style.color = '#1b5e20';
+      status.style.color = 'var(--green)';
       status.textContent = 'Генерируем конфиг…';
       awgResult.appendChild(status);
 
@@ -225,11 +242,12 @@ document.addEventListener('DOMContentLoaded', () => {
           a.style.display = 'inline-block';
           aWrap.appendChild(a);
           awgResult.appendChild(aWrap);
+          renderQr(awgResult, data.qr, 'Или сканируй QR в приложении AmneziaVPN (импорт конфига)');
         } else {
           // PC / iOS — скачать файл
           downloadFile(filename, cfg);
           status.textContent = 'Готово. Файл ' + filename + ' скачан.';
-          status.style.color = '#1b5e20';
+          status.style.color = 'var(--green)';
 
           const hint = document.createElement('p');
           hint.className = 'section-hint';
@@ -247,6 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
             );
           }
           awgResult.appendChild(hint);
+          renderQr(awgResult, data.qr, 'Или сканируй QR в приложении AmneziaWG (импорт конфига)');
         }
 
         // Ошибка-103 fallback
@@ -275,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!mobileResult) return;
       mobileResult.innerHTML = '';
       const status = document.createElement('p');
-      status.style.color = '#1b5e20';
+      status.style.color = 'var(--green)';
       status.textContent = 'Запрашиваем ссылку…';
       mobileResult.appendChild(status);
 
@@ -300,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         status.remove();
+        renderQr(mobileResult, data.qr, 'Сканируй QR в приложении (Hiddify / v2rayNG)');
         renderLinkBlock(mobileResult, link, hint, '📋 Копировать ссылку');
 
         const apps = document.createElement('p');
@@ -325,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!proxyResult) return;
     proxyResult.innerHTML = '';
     const status = document.createElement('p');
-    status.style.color = '#1b5e20';
+    status.style.color = 'var(--green)';
     status.textContent = 'Загружаем ссылку…';
     proxyResult.appendChild(status);
 
@@ -355,34 +375,19 @@ document.addEventListener('DOMContentLoaded', () => {
       desc.textContent = hint;
       proxyResult.appendChild(desc);
 
+      renderQr(proxyResult, data.qr, 'Сканируй QR или нажми кнопку — откроется в Telegram');
+
       const openA = document.createElement('a');
       openA.href = link;
       openA.textContent = '👆 Открыть в Telegram';
-      openA.className = 'btn-recovery';
-      openA.style.display = 'inline-block';
-      openA.style.marginRight = '8px';
+      openA.className = 'btn-recovery copy-primary';
+      openA.style.display = 'block';
+      openA.style.textAlign = 'center';
+      openA.style.textDecoration = 'none';
+      openA.style.marginBottom = '8px';
       proxyResult.appendChild(openA);
 
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.textContent = '📋 Копировать tg://';
-      copyBtn.className = 'btn-recovery btn-recovery-secondary';
-      copyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(link);
-          copyBtn.textContent = '✅ Скопировано!';
-          setTimeout(() => { copyBtn.textContent = '📋 Копировать tg://'; }, 2000);
-        } catch {}
-      });
-      proxyResult.appendChild(copyBtn);
-
-      const code = document.createElement('code');
-      code.style.wordBreak = 'break-all';
-      code.style.display = 'block';
-      code.style.marginTop = '12px';
-      code.style.fontSize = '13px';
-      code.textContent = link;
-      proxyResult.appendChild(code);
+      renderLinkBlock(proxyResult, link, '', '📋 Копировать tg://');
     } catch (err) {
       setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
     }

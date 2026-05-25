@@ -686,6 +686,31 @@ def api_stats():
         return jsonify({"error": str(e)}), 500
 
 
+def _qr_datauri(data: str) -> Optional[str]:
+    """
+    Генерирует QR-код для строки → PNG data-URI (для <img src>).
+    Возвращает None, если данных нет или библиотека qrcode недоступна
+    (graceful degradation — фронт просто не покажет QR).
+    """
+    if not data:
+        return None
+    try:
+        import base64
+        import qrcode
+        img = qrcode.make(
+            data,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=8,
+            border=2,
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning("QR generation failed: %s", e)
+        return None
+
+
 def _verify_email_session(body: dict) -> tuple:
     """
     Универсальный auth по email-token (для всех recovery endpoints с email-flow).
@@ -736,6 +761,7 @@ def api_recovery_proxy_link_by_email():
                 "Та же ссылка, что по команде /proxy в боте. "
                 "Нажми кнопку, чтобы открыть её прямо в Telegram, или скопируй вручную."
             ),
+            "qr": _qr_datauri(effective_link),
         })
     except Exception as e:
         logger.exception("Ошибка api/recovery/proxy-link-by-email: %s", e)
@@ -788,6 +814,9 @@ def api_recovery_awg_config_by_email():
                 response["vpn_url"] = generate_vpn_url(cfg)
             except Exception as e:
                 logger.warning("Не удалось сгенерировать vpn:// deep link: %s", e)
+        # QR конфига для мобильных — скан в приложении AmneziaWG/AmneziaVPN
+        if platform in ("ios", "android"):
+            response["qr"] = _qr_datauri(cfg)
         return jsonify(response)
     except Exception as e:
         logger.exception("Ошибка api/recovery/awg-config-by-email: %s", e)
@@ -842,6 +871,7 @@ def api_recovery_mobile_link_by_email():
             "vless_url": vless_url.strip(),
             "operator": operator,
             "hint": hint,
+            "qr": _qr_datauri(vless_url.strip()),
         })
     except Exception as e:
         logger.exception("Ошибка api/recovery/mobile-link-by-email: %s", e)
