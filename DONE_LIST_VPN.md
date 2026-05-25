@@ -1,5 +1,30 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-25 — Личный кабинет: модель аккаунта + UX + триал/реферал + пароль (Фазы 0–2)
+
+Старт коммерциализации через ЛК. План по фазам: 0 модель → 1 домен/YC-хост/HTTPS+БС-тест → 2 UX ЛК → 3 бот под ЛК → 4 enforcement+оплата → 5 реферал-начисление.
+
+**Фаза 0 — модель аккаунта (`bot/database.py`):**
+- `users` +колонки: subscription_status, expires_at, trial_used, plan, referral_code, referred_by, password_hash. Таблица `payments`.
+- Хелперы: subscription/trial/referral/payment/password (`db_is_access_active`, `db_extend_subscription`, `db_start_trial`, `db_ensure_referral_code`, `db_count_referrals`, `db_set_referred_by`, `db_set_password`, `db_has_password`, …). expires_at NULL = grandfathered.
+
+**Фаза 2 — UX ЛК (`web/`):**
+- QR-коды (qrcode[pil]) для VLESS / MTProxy / AmneziaWG-конфига (iOS/Android — скан в приложении).
+- Заметная primary-кнопка копирования; единая колонка 640px + ритм (выравнивание/воздух); hero-заголовок + объяснение на входе.
+- Экран **«Мой аккаунт»**: статус/срок, кнопка триала (14д), реферальный блок (код/ссылка/счётчик), быстрые кнопки каналов.
+- **Вход по паролю** (email+пароль) + установка/смена пароля (werkzeug hash, ≥8); `verify-otp` ловит `?ref` для атрибуции.
+- Эндпоинты: `/api/account/info`, `/account/start-trial`, `/account/set-password`, `/api/auth/login-password`. Константы TRIAL_DAYS=14, REFERRAL_REWARD_DAYS=14.
+
+**Бот:** приветствие → «ForFriends» + ссылка на ЛК + канал `@vforfriends`.
+
+**Решения:** домен — нейтральный на базе ForFriends (предпоч. не .ru); хост ЛК — YC (whitelisted, при БС нужен whitelisted-SNI хостинг); оплата — ЮKassa(карты+СБП)→Stars→крипта; триал 14д; реферал «дни обоим» +14.
+
+**Косметика до Фазы 4:** enforcement выключен (у всех «Бессрочный»); реф-бонус начисляется при оплате; пароль по HTTP — безопасен только с HTTPS (Фаза 1).
+
+Коммиты: `1cfb5ec`, `c0e2384`, `9d561ba`, `0b3f6a7`, `3647133`. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md`.
+
+---
+
 ## 2026-05-24 — Учёт трафика lifetime + колонки Email/Всего + swap + диагностика скорости
 
 **Панель мониторинга:**

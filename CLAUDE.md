@@ -89,6 +89,8 @@ scripts/
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
 - **Recovery auth:** `RECOVERY_SECRET` — для legacy recovery endpoints
 - **traffic_accounting (SQLite):** накопительный lifetime-трафик по pubkey, reset-aware (счётчики awg обнуляются при рестарте/перегенерации). Пишется из `/api/traffic` при просмотре + cron `*/5` `scripts/traffic_accounting.py`. Столбец «Всего» в панели.
+- **Модель аккаунта (биллинг, Фаза 0, 2026-05-25):** в `users` поля `subscription_status`/`expires_at`/`trial_used`/`plan`/`referral_code`/`referred_by`/`password_hash` + таблица `payments`. Хелперы в `database.py` (`db_is_access_active`, `db_start_trial`, `db_extend_subscription`, `db_ensure_referral_code`, `db_set_password`, …). **expires_at NULL = grandfathered** (доступ без ограничения). **Enforcement пока ВЫКЛЮЧЕН** — доступ у всех; включаем в Фазе 4 (тогда же grandfather существующих + новые стартуют с триала). Константы в `web/app.py`: TRIAL_DAYS=14, REFERRAL_REWARD_DAYS=14.
+- **Зависимость:** `qrcode[pil]` (QR в ЛК). В `requirements.txt`; на сервере уже в venv.
 
 ---
 
@@ -109,7 +111,7 @@ scripts/
 ## Веб-панель
 
 - **Мониторинг:** `http://185.21.8.91:5001/` — тёмная тема, статус AWG/VLESS, таблица трафика по пользователям с устройством и handshake
-- **Recovery:** `http://185.21.8.91:5001/recovery` — восстановление VPN-конфига EU1, ссылка MTProxy, восстановление Telegram
+- **Recovery / ЛК:** `http://185.21.8.91:5001/recovery` — личный кабинет. Вход по email-OTP **или паролю**. Экран «Мой аккаунт»: статус/срок подписки, кнопка триала (14д), реферальный блок, быстрые кнопки каналов (Основной VPN / Мобильный резерв / MTProxy). QR-коды для конфигов (qrcode[pil]). Управление паролем (установка/смена). ⚠️ Пароль по HTTP — безопасен только с HTTPS (переезд на YC/домен — Фаза 1).
 
 ---
 
