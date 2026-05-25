@@ -129,6 +129,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_proxy_column()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
+    _migrate_add_sub_token_column()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -205,6 +206,18 @@ def _migrate_add_password_column() -> None:
                 logger.info("Migration: added password_hash column to users")
             except sqlite3.OperationalError as e:
                 logger.info("Migration: skip password_hash (%s)", e)
+
+
+def _migrate_add_sub_token_column() -> None:
+    """Добавляет sub_token (стабильный токен subscription-ссылки) в users (идемпотентно)."""
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "sub_token" not in existing:
+            try:
+                con.execute("ALTER TABLE users ADD COLUMN sub_token TEXT")
+                logger.info("Migration: added sub_token column to users")
+            except sqlite3.OperationalError as e:
+                logger.info("Migration: skip sub_token (%s)", e)
 
 
 def _migrate_add_vless_columns() -> None:
@@ -911,6 +924,43 @@ def db_has_password(telegram_id: int) -> bool:
             "SELECT password_hash FROM users WHERE telegram_id = ?", (telegram_id,)
         ).fetchone()
     return bool(row and row["password_hash"])
+
+
+def db_ensure_sub_token(telegram_id: int) -> Optional[str]:
+    """Возвращает стабильный токен subscription-ссылки пользователя, создаёт если нет."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT sub_token FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not row:
+            return None
+        if row["sub_token"]:
+            return row["sub_token"]
+        for _ in range(10):
+            tok = secrets.token_hex(16)
+            exists = con.execute(
+                "SELECT 1 FROM users WHERE sub_token = ?", (tok,)
+            ).fetchone()
+            if not exists:
+                con.execute(
+                    "UPDATE users SET sub_token = ? WHERE telegram_id = ?",
+                    (tok, telegram_id),
+                )
+                return tok
+    return None
+
+
+def db_find_user_by_sub_token(token: str) -> Optional[Dict]:
+    """Находит пользователя по токену subscription-ссылки."""
+    _ensure_init()
+    if not token:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM users WHERE sub_token = ?", (token,)
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def db_set_referred_by(telegram_id: int, code: str) -> bool:

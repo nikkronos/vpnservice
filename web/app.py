@@ -49,6 +49,9 @@ from bot.database import (
     db_set_referred_by,
     db_set_password,
     db_has_password,
+    db_ensure_sub_token,
+    db_find_user_by_sub_token,
+    db_is_access_active,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -907,6 +910,10 @@ def api_account_info():
 
         sub = db_get_subscription(telegram_id) or {}
         code = db_ensure_referral_code(telegram_id)
+        sub_token = db_ensure_sub_token(telegram_id)
+        sub_link_path = f"/sub/{sub_token}" if sub_token else None
+        sub_full = (request.host_url.rstrip("/") + sub_link_path) if sub_link_path else None
+        sub_qr = _qr_datauri(sub_full) if sub_full else None
         expires_at = sub.get("expires_at")
         grandfathered = expires_at is None
         status = sub.get("subscription_status") or "none"
@@ -933,6 +940,8 @@ def api_account_info():
             "referral_link_path": f"/recovery?ref={code}" if code else None,
             "invited_count": db_count_referrals(code) if code else 0,
             "referral_reward_days": REFERRAL_REWARD_DAYS,
+            "sub_link_path": sub_link_path,
+            "sub_qr": sub_qr,
         })
     except Exception as e:
         logger.exception("api/account/info: %s", e)
@@ -980,6 +989,61 @@ def api_account_set_password():
     except Exception as e:
         logger.exception("api/account/set-password: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+def _build_subscription_links() -> List[str]:
+    """
+    Список vless:// для subscription (СПАЙК): берём готовые рабочие REALITY-ссылки
+    из конфига (eu1/yc www.microsoft.com + main cloud.mail.ru при БС). Клиент сам
+    выберет рабочий/быстрый сервер.
+    TODO (продакшен): подставлять per-user UUID вместо общих share-ссылок.
+    """
+    cfg = load_config()
+    out: List[str] = []
+    seen = set()
+    for attr in ("vless_reality_share_url", "vless_cdn_tls_share_url"):
+        u = (getattr(cfg, attr, None) or "").strip()
+        if u.startswith("vless://") and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+@app.route("/sub/<token>")
+def api_subscription(token):
+    """
+    Subscription-URL (СПАЙК, аддитивно): GET /sub/<sub_token> → base64-список
+    vless:// для HAPP / Streisand / V2Box / Hiddify. Токен = креденшл (стабильный).
+    Гейтинг по сроку (db_is_access_active) — хук enforcement: истёк срок → пустая
+    подписка → все устройства отваливаются. Сейчас все grandfathered → отдаётся всем.
+    """
+    try:
+        import base64 as _b64
+        user = db_find_user_by_sub_token(token)
+        if not user or not user.get("active"):
+            return Response("", mimetype="text/plain", status=404)
+
+        tid = user.get("telegram_id")
+        if tid and not db_is_access_active(int(tid)):
+            # enforcement: нет доступа → пустая подписка (нет серверов)
+            return Response("", mimetype="text/plain")
+
+        links = _build_subscription_links()
+        body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
+        resp = Response(body, mimetype="text/plain; charset=utf-8")
+        resp.headers["Profile-Update-Interval"] = "12"
+        resp.headers["Cache-Control"] = "no-store"
+        exp = user.get("expires_at")
+        if exp:
+            try:
+                ts = int(datetime.fromisoformat(exp).timestamp())
+                resp.headers["Subscription-Userinfo"] = f"upload=0; download=0; total=0; expire={ts}"
+            except (ValueError, TypeError):
+                pass
+        return resp
+    except Exception as e:
+        logger.exception("api/subscription: %s", e)
+        return Response("", mimetype="text/plain", status=500)
 
 
 @app.route("/api/auth/send-otp", methods=["POST"])

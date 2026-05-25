@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const trialBlock     = document.getElementById('trialBlock');
   const referralBlock  = document.getElementById('referralBlock');
   const passwordBlock  = document.getElementById('passwordBlock');
+  const subBlock       = document.getElementById('subBlock');
 
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionToken = '';
@@ -211,6 +212,26 @@ document.addEventListener('DOMContentLoaded', () => {
         b.textContent = `🎁 Активировать ${d.trial_days} дней бесплатно`;
         b.addEventListener('click', () => startTrial(b));
         trialBlock.appendChild(b);
+      }
+    }
+
+    // Подписка — одна ссылка на все устройства (спайк)
+    if (subBlock) {
+      if (d.sub_link_path) {
+        subBlock.hidden = false;
+        subBlock.innerHTML = '';
+        const t = document.createElement('div');
+        t.className = 'acc-subtitle';
+        t.textContent = '🔗 Подписка — одна ссылка на все устройства';
+        const note = document.createElement('p');
+        note.className = 'section-hint';
+        note.textContent = 'Импортируй в приложение HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера. Один импорт — все серверы, авто-выбор быстрого, обновления приходят сами.';
+        subBlock.appendChild(t);
+        subBlock.appendChild(note);
+        renderQr(subBlock, d.sub_qr, 'Сканируй в приложении (HAPP и др.)');
+        renderLinkBlock(subBlock, location.origin + d.sub_link_path, '', '📋 Скопировать ссылку подписки');
+      } else {
+        subBlock.hidden = true;
       }
     }
 
