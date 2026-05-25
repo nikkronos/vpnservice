@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS traffic_accounting (
     last_tx      INTEGER NOT NULL DEFAULT 0,
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS payments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id  INTEGER,
+    email        TEXT,
+    provider     TEXT NOT NULL,                     -- 'yookassa' | 'stars' | 'crypto' | 'sbp'
+    amount       REAL,
+    currency     TEXT NOT NULL DEFAULT 'RUB',
+    status       TEXT NOT NULL DEFAULT 'pending',   -- 'pending'|'succeeded'|'canceled'|'failed'
+    external_id  TEXT,                              -- id платежа у провайдера
+    plan         TEXT,                              -- что куплено
+    days         INTEGER,                           -- сколько дней доступа даёт платёж
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT
+);
 """
 
 
@@ -112,6 +127,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_vless_columns()
     _migrate_add_servers_table()
     _migrate_add_proxy_column()
+    _migrate_add_subscription_columns()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -145,6 +161,37 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_subscription_columns() -> None:
+    """
+    Добавляет поля подписки/биллинга/реферала в users (идемпотентно).
+
+    Семантика:
+    - expires_at IS NULL → grandfathered (доступ без ограничения; legacy-юзеры
+      до ввода enforcement). Доступ активен пока now < expires_at.
+    - subscription_status: 'none' | 'trial' | 'active' | 'expired'.
+    - trial_used: 0/1 — был ли использован пробный период.
+    - referral_code: личный код юзера для приглашений; referred_by — код пригласившего.
+    """
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        cols = [
+            ("subscription_status", "TEXT DEFAULT 'none'"),
+            ("expires_at", "TEXT"),
+            ("trial_used", "INTEGER NOT NULL DEFAULT 0"),
+            ("plan", "TEXT"),
+            ("referral_code", "TEXT"),
+            ("referred_by", "TEXT"),
+        ]
+        for name, decl in cols:
+            if name not in existing:
+                try:
+                    con.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
+                    logger.info("Migration: added %s column to users", name)
+                except sqlite3.OperationalError as e:
+                    # гонка двух сервисов (vpn-web + vpn-bot) или повторный запуск
+                    logger.info("Migration: skip %s (%s)", name, e)
 
 
 def _migrate_add_vless_columns() -> None:
@@ -689,3 +736,199 @@ def db_get_lifetime_by_user() -> Dict[int, Dict]:
             tx = r["tx"] or 0
             out[int(r["telegram_id"])] = {"rx": rx, "tx": tx, "total": rx + tx}
         return out
+
+
+# ─── Subscription / billing / referral ──────────────────────────────────────────
+# Фаза 0: модель аккаунта. Функции готовы, но НЕ вызываются из логики доступа
+# (enforcement) — это включаем в Фазе 4. Сейчас доступ у всех без ограничений.
+
+def db_get_subscription(telegram_id: int) -> Optional[Dict]:
+    """Возвращает поля подписки/реферала пользователя или None."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT subscription_status, expires_at, trial_used, plan, "
+            "referral_code, referred_by FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_is_access_active(telegram_id: int) -> bool:
+    """
+    True если у пользователя активный доступ.
+    expires_at IS NULL → grandfathered (legacy-юзеры до ввода биллинга, доступ без ограничения).
+    Иначе доступ активен, пока now < expires_at (UTC).
+    """
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT expires_at FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    if not row:
+        return False
+    exp = row["expires_at"]
+    if not exp:
+        return True  # grandfathered
+    try:
+        return datetime.utcnow() < datetime.fromisoformat(exp)
+    except (ValueError, TypeError):
+        return False
+
+
+def db_extend_subscription(
+    telegram_id: int,
+    days: int,
+    plan: Optional[str] = None,
+    status: str = "active",
+) -> Optional[str]:
+    """
+    Продлевает доступ на N дней от max(now, текущий expires_at).
+    Возвращает новый expires_at (ISO). Используется и для оплаты, и для бонусов (реферал).
+    """
+    _ensure_init()
+    now = datetime.utcnow()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT expires_at FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not row:
+            return None
+        base = now
+        if row["expires_at"]:
+            try:
+                cur = datetime.fromisoformat(row["expires_at"])
+                if cur > now:
+                    base = cur
+            except (ValueError, TypeError):
+                pass
+        new_exp = (base + timedelta(days=days)).isoformat()
+        con.execute(
+            "UPDATE users SET expires_at = ?, subscription_status = ?, "
+            "plan = COALESCE(?, plan) WHERE telegram_id = ?",
+            (new_exp, status, plan, telegram_id),
+        )
+    return new_exp
+
+
+def db_start_trial(telegram_id: int, days: int) -> Optional[str]:
+    """
+    Активирует пробный период, если не использован. Возвращает expires_at или None.
+    """
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT trial_used FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not row or row["trial_used"]:
+            return None
+    new_exp = db_extend_subscription(telegram_id, days, plan="trial", status="trial")
+    if new_exp:
+        with _conn() as con:
+            con.execute(
+                "UPDATE users SET trial_used = 1 WHERE telegram_id = ?", (telegram_id,)
+            )
+    return new_exp
+
+
+def db_ensure_referral_code(telegram_id: int) -> Optional[str]:
+    """Возвращает реферальный код пользователя, создаёт уникальный если нет."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT referral_code FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not row:
+            return None
+        if row["referral_code"]:
+            return row["referral_code"]
+        for _ in range(10):
+            code = secrets.token_urlsafe(6)[:8]
+            exists = con.execute(
+                "SELECT 1 FROM users WHERE referral_code = ?", (code,)
+            ).fetchone()
+            if not exists:
+                con.execute(
+                    "UPDATE users SET referral_code = ? WHERE telegram_id = ?",
+                    (code, telegram_id),
+                )
+                return code
+    return None
+
+
+def db_get_user_by_referral_code(code: str) -> Optional[Dict]:
+    """Находит пользователя по его реферальному коду."""
+    _ensure_init()
+    if not code:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM users WHERE referral_code = ?", (code,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_set_referred_by(telegram_id: int, code: str) -> bool:
+    """
+    Привязывает пригласившего (по его referral_code), если ещё не привязан,
+    код существует и это не сам пользователь. Возвращает True при успехе.
+    """
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT referred_by, referral_code FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not row or row["referred_by"]:
+            return False
+        if row["referral_code"] and row["referral_code"] == code:
+            return False  # нельзя пригласить самого себя
+        inviter = con.execute(
+            "SELECT 1 FROM users WHERE referral_code = ?", (code,)
+        ).fetchone()
+        if not inviter:
+            return False
+        con.execute(
+            "UPDATE users SET referred_by = ? WHERE telegram_id = ?",
+            (code, telegram_id),
+        )
+        return True
+
+
+def db_record_payment(
+    provider: str,
+    amount: float,
+    currency: str = "RUB",
+    telegram_id: Optional[int] = None,
+    email: Optional[str] = None,
+    external_id: Optional[str] = None,
+    plan: Optional[str] = None,
+    days: Optional[int] = None,
+    status: str = "pending",
+) -> int:
+    """Создаёт запись платежа. Возвращает её id."""
+    _ensure_init()
+    with _conn() as con:
+        cur = con.execute(
+            """
+            INSERT INTO payments
+                (telegram_id, email, provider, amount, currency, status,
+                 external_id, plan, days, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (telegram_id, email, provider, amount, currency, status, external_id, plan, days),
+        )
+        return cur.lastrowid
+
+
+def db_update_payment_status(external_id: str, status: str) -> bool:
+    """Обновляет статус платежа по external_id провайдера."""
+    _ensure_init()
+    if not external_id:
+        return False
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE payments SET status = ?, updated_at = datetime('now') WHERE external_id = ?",
+            (status, external_id),
+        )
+        return cur.rowcount > 0
