@@ -158,6 +158,20 @@ def main() -> None:
     bot = telebot.TeleBot(config.bot_token, parse_mode="HTML")
     admin_id = config.admin_id
 
+    # Menu Button → Mini App (ЛК открывается прямо внутри Telegram).
+    # При запуске бота через Telegram.WebApp клиент шлёт initData → auto-login по telegram_id.
+    # Set глобально (для всех юзеров бота). Идемпотентно — повтор не вреден.
+    recovery_url = getattr(config, "vpn_recovery_url", None) or "https://supportkronos.online:8443/recovery"
+    try:
+        bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(
+            type="web_app",
+            text="🌐 Личный кабинет",
+            web_app=types.WebAppInfo(url=recovery_url),
+        ))
+        logger.info("Menu Button set to WebApp: %s", recovery_url)
+    except Exception as e:
+        logger.warning("set_chat_menu_button failed: %s", e)
+
     def safe_reply(message: types.Message, text: str, reply_markup=None) -> bool:
         """Отправляет ответ; при ошибке логирует и возвращает False.
         Если reply_markup не задан, автоматически использует _back_markup из message (если есть).
