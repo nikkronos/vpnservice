@@ -85,3 +85,57 @@
 4. **Фаза 5** — начисление реф-бонусов при оплате.
 5. **Мегафон при БС** — разведка whitelist через друга при активных БС (ждёт окна).
 6. Тексты/инструкции — сократить (запаркован фидбэк владельца).
+
+---
+
+## Дополнение (вечер 2026-05-25) — домен `supportkronos.online` + прямой HTTPS на Fornex + subscription-спайк validated
+
+### Контекст
+Пост в TG (FSystem88/1717) натолкнул на модель «subscription-URL + HAPP» (одна ссылка → клиент сам подтягивает много серверов, авто-выбирает, refresh сам). Решили **спайкнуть** это на нашей инфре — аддитивно, ничего из работающего не ломая.
+
+### Решения
+- **Домен:** `supportkronos.online` (reg.ru, 199₽/год + WHOIS-privacy 243₽; нейтральное «support»-имя — маскировка, не палит VPN). Бренд бота/канала остаётся ForFriends; домен — нейтральный support-портал.
+- **Оплата:** ЮKassa(карты+СБП) → Stars → крипта (provider-agnostic модель в БД — Фаза 0).
+
+### Спайк (Фаза 0/2 продолжение): subscription-endpoint
+- БД: `sub_token` column + helpers (`db_ensure_sub_token`, `db_find_user_by_sub_token`).
+- `GET /sub/<token>` → base64-список наших REALITY-ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`). Гейт: `db_is_access_active` (хук enforcement Фазы 4 — пустая подписка для истёкших).
+- ЛК: блок «Подписка — одна ссылка на все устройства» (ссылка + QR через `_qr_datauri`).
+- `app.py + ProxyFix(x_proto, x_host)` — за прокси Flask собирает `https://<домен>` (иначе sub-ссылка была бы http и HAPP её отверг).
+- Аддитивно: AmneziaWG / индивидуальные VLESS / MTProxy не тронуты, recovery/traffic 200 не сломалось.
+
+### Дорога к HTTPS — нетривиальный путь
+1. **Cloudflare Tunnel отвалился** — Zero Trust требует не-Mir-карту (у владельца только МИР).
+2. **CF proxy (orange) + Origin Rule (порт 5001) + Flexible SSL** — серверно работало (`/recovery` 200), но HAPP падал в таймаут.
+3. **Диагностика**: `curl` с пустым UA → CF 403 (Browser Integrity Check). Browser Integrity Check выключили — empty-UA → 200, но HAPP всё равно таймаут.
+4. **Ключевое открытие**: Safari у владельца тоже не открывает `https://supportkronos.online` («сетевое подключение прервано» = DPI RST). **Cloudflare у него в РФ блокируется/тротлится** (не только при БС, а вообще сейчас). → CF не годится как хост для РФ-юзеров. **Дроп CF.**
+5. **Решение**: A-запись **grey-cloud (DNS-only)** → резолв напрямую на Fornex `185.21.8.91`. Сертификат **Let's Encrypt через DNS-01** (CF API token DNS:Edit, certbot-dns-cloudflare, авто-продление). **nginx на :8443 ssl http2** → proxy `:5001` (443 занят Xray REALITY, поэтому :8443). Файл `docs/scripts/nginx-supportkronos-8443.conf`, на сервере `/etc/nginx/conf.d/supportkronos.conf`.
+
+### Спайк validated в HAPP
+- Подписка `https://supportkronos.online:8443/sub/<token>` подтянулась в HAPP (iOS): 2 сервера (YC-Reality + RU-REALITY), авто-обновление 12ч. Работает **на Wi-Fi и LTE**.
+- ⚠️ **БС-валидация не проведена** (БС сейчас нет). Архитектурно RU-REALITY/cloud.mail.ru должен держать при БС, но реальный тест — позже при окне (принцип «гипотеза о клиенте только через тест»).
+- Пустой UA отдаёт 200 (CF-BIC ушёл вместе с CF) — HAPP-фетчер любым UA примет.
+
+### Закрепление (Phase 1 — done в форме прямого HTTPS на Fornex)
+- `VPN_RECOVERY_URL=https://supportkronos.online:8443/recovery` в env_vars.txt → приветствие бота, инструкции, ссылки указывают на новый URL.
+- Инструкции ios/android/windows — URL заменён.
+- ЛК: блок «Подписка» поднят выше как **главный CTA** (после статуса), подзаголовок «Альтернативные способы (конкретные конфиги)» для старых каналов.
+- `env_vars.example.txt`: пример нового URL.
+
+### Серверные изменения (вне git)
+- A-запись `supportkronos.online` → 185.21.8.91 (proxied: **false**, grey-cloud) — через CF API.
+- Browser Integrity Check отключён в CF (не нужен, т.к. ушли с прокси) — historical note.
+- Let's Encrypt сертификат `/etc/letsencrypt/live/supportkronos.online/` (DNS-01, авто-продление, истекает 2026-08-23).
+- `nginx -t` ок, конфиг в `/etc/nginx/conf.d/supportkronos.conf`, reload.
+- CF API token (DNS:Edit, zone supportkronos.online) в `/root/.secrets/cloudflare.ini` (600) для авто-продления.
+- `env_vars.txt`: `VPN_RECOVERY_URL` обновлён.
+
+### Что НЕ сделали и что осталось
+- **Phase 1b — БС-robust хост на RU-облаке с чистым :443** — pending. Текущий setup (немецкий Fornex :8443) работает в обычных условиях РФ, но при БС немецкий IP недоступен. И `:8443` в URL — не идеал для «вбить руками».
+- **Per-user UUID** на main/yc для REALITY (сейчас shared UUID) — Phase 4 prerequisite для биллинга.
+- **БС-полевой тест** subscription-модели (RU-REALITY должен держать).
+- **Переименование меток** «YC-Reality / RU-REALITY» в понятные пользователю — следующая итерация.
+- **Новый бот + монетизация** — на общем бэкенде, после закрепления текущего.
+
+### Ключевое durable-наблюдение
+**Cloudflare не надёжен в РФ** для нашего use-case (не только БС, а вообще). DPI RST на TLS к CF подтверждён живым тестом. Использовать CF только как DNS (grey-cloud), не как прокси. Для HTTPS — прямой хостинг.

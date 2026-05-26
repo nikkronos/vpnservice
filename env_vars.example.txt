@@ -18,9 +18,10 @@ RECOVERY_SECRET=replace_with_random_secret
 # MTPROXY_PORT=8444
 # MTPROXY_PUBLIC_IP=185.21.8.91
 
-# Ссылка на страницу восстановления (web-панель), чтобы пользователь мог перейти,
-# если Telegram не работает.
-# VPN_RECOVERY_URL=http://185.21.8.91:5001/recovery
+# Ссылка на страницу восстановления / ЛК. Используется в приветствии бота и инструкциях.
+# С 2026-05-25 — HTTPS-домен с прямого Fornex (LE-cert, :8443, т.к. 443 занят Xray).
+# Старое значение http://185.21.8.91:5001/recovery — fallback в коде.
+# VPN_RECOVERY_URL=https://supportkronos.online:8443/recovery
 
 # Резерв для мобильного интернета (LTE/5G): полная share-ссылка VLESS+XTLS-Vision+REALITY (команда /mobile_vpn).
 # Генерируется на eu1 после развёртывания Xray (см. docs/xray-vless-reality-eu1-deploy.md). Одна строка, без кавычек.

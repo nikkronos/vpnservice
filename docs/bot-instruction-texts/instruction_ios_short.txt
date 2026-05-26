@@ -15,5 +15,5 @@
 • ссылка <code>vless://</code> → только Streisand / Happ / V2Box (НЕ в AmneziaWG)
 • конфиг или QR AmneziaWG → только в AmneziaWG (НЕ в V2Box)
 
-🌐 Личный кабинет: <code>http://185.21.8.91:5001/recovery</code>
+🌐 Личный кабинет: <code>https://supportkronos.online:8443/recovery</code>
 📨 Telegram не открывается? В Личном кабинете есть кнопка MTProxy.

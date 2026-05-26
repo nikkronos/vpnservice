@@ -39,6 +39,7 @@ git log --oneline -3
 | AmneziaWG (Docker) | контейнер `amnezia-awg2` | `39580/UDP` |
 | MTProxy Fake TLS | контейнер `mtproxy-faketls` | `8444/TCP` |
 | Xray VLESS+WS | `xray.service` | `80/TCP` (CDN через `sub.vpnnkrns.ru`) |
+| nginx (ЛК HTTPS) | `nginx.service` | `8443/TCP` ssl → :5001 для `supportkronos.online`; конфиг `/etc/nginx/conf.d/supportkronos.conf`. LE-cert via DNS-01 (CF token в `/root/.secrets/cloudflare.ini`, auto-renew). |
 
 ---
 
@@ -89,7 +90,9 @@ scripts/
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
 - **Recovery auth:** `RECOVERY_SECRET` — для legacy recovery endpoints
 - **traffic_accounting (SQLite):** накопительный lifetime-трафик по pubkey, reset-aware (счётчики awg обнуляются при рестарте/перегенерации). Пишется из `/api/traffic` при просмотре + cron `*/5` `scripts/traffic_accounting.py`. Столбец «Всего» в панели.
-- **Модель аккаунта (биллинг, Фаза 0, 2026-05-25):** в `users` поля `subscription_status`/`expires_at`/`trial_used`/`plan`/`referral_code`/`referred_by`/`password_hash` + таблица `payments`. Хелперы в `database.py` (`db_is_access_active`, `db_start_trial`, `db_extend_subscription`, `db_ensure_referral_code`, `db_set_password`, …). **expires_at NULL = grandfathered** (доступ без ограничения). **Enforcement пока ВЫКЛЮЧЕН** — доступ у всех; включаем в Фазе 4 (тогда же grandfather существующих + новые стартуют с триала). Константы в `web/app.py`: TRIAL_DAYS=14, REFERRAL_REWARD_DAYS=14.
+- **Модель аккаунта (биллинг, Фаза 0, 2026-05-25):** в `users` поля `subscription_status`/`expires_at`/`trial_used`/`plan`/`referral_code`/`referred_by`/`password_hash`/`sub_token` + таблица `payments`. Хелперы в `database.py` (`db_is_access_active`, `db_start_trial`, `db_extend_subscription`, `db_ensure_referral_code`, `db_set_password`, `db_ensure_sub_token`, …). **expires_at NULL = grandfathered** (доступ без ограничения). **Enforcement пока ВЫКЛЮЧЕН** — доступ у всех; включаем в Фазе 4 (тогда же grandfather существующих + новые стартуют с триала). Константы в `web/app.py`: TRIAL_DAYS=14, REFERRAL_REWARD_DAYS=14.
+- **Subscription-URL (validated 2026-05-25):** `GET /sub/<sub_token>` → base64-список VLESS-REALITY ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`). HAPP/Streisand/V2Box/Hiddify импортируют как «subscription» — один URL, авто-выбор сервера, авто-обновление. Гейт `db_is_access_active` — истёк срок → пустая подписка → все устройства отваливаются (чистый enforcement для Фазы 4). Спайк: общие share-ссылки; per-user UUID — TODO. `ProxyFix(x_proto, x_host)` в app.py чтобы за nginx Flask отдавал https-ссылки.
+- **Cloudflare в РФ заблокирован/throttled** (durable, 2026-05-25): DPI режет TLS к CF — у владельца Safari не открывает CF-fronted домен. **CF используем только как DNS (grey-cloud)**, не как прокси. HTTPS — прямой с нашего хоста (Fornex direct + LE cert).
 - **Зависимость:** `qrcode[pil]` (QR в ЛК). В `requirements.txt`; на сервере уже в venv.
 
 ---
@@ -111,7 +114,7 @@ scripts/
 ## Веб-панель
 
 - **Мониторинг:** `http://185.21.8.91:5001/` — тёмная тема, статус AWG/VLESS, таблица трафика по пользователям с устройством и handshake
-- **Recovery / ЛК:** `http://185.21.8.91:5001/recovery` — личный кабинет. Вход по email-OTP **или паролю**. Экран «Мой аккаунт»: статус/срок подписки, кнопка триала (14д), реферальный блок, быстрые кнопки каналов (Основной VPN / VPN при блокировках / Разблокировка Telegram). QR-коды для конфигов (qrcode[pil]). Управление паролем (установка/смена). ⚠️ Пароль по HTTP — безопасен только с HTTPS (переезд на YC/домен — Фаза 1).
+- **Recovery / ЛК:** **`https://supportkronos.online:8443/recovery`** (HTTPS direct с Fornex, LE cert, nginx :8443 → Flask :5001; домен grey-cloud в CF). Старый `http://185.21.8.91:5001/recovery` тоже жив как fallback (не закрыт). Вход email-OTP или пароль. Экран «Мой аккаунт»: статус/срок, **«Подписка» как главный CTA** (одна ссылка для всех устройств, импорт в HAPP/Streisand/V2Box/Hiddify), триал, реферал, управление паролем. Альтернативно — конкретные конфиги (Основной VPN / VPN при блокировках / Разблокировка Telegram). QR (qrcode[pil]).
 
 ---
 

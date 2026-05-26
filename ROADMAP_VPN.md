@@ -27,14 +27,17 @@
 
 Курс: личный кабинет (ЛК) как ядро → оплата/триал/реферал. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md`.
 
-- **Фаза 0 — модель аккаунта (БД)** — ✅ DONE (subscription/expires/trial/referral/password + payments).
-- **Фаза 1 — домен + БС-достижимый хост ЛК (YC) + HTTPS → тест при БС** — ⏳ ждёт доступа к YC + окна БС. Имя: ForFriends (финал не выбран, предпоч. не .ru). Нюанс: при строгом БС нужен whitelisted-SNI хостинг (не только whitelisted-IP).
-- **Фаза 2 — UX ЛК** — ✅ в основном DONE (QR, one-click copy, выравнивание, hero+объяснение, экран «Мой аккаунт», вход по паролю). Итеративно полируем.
+- **Фаза 0 — модель аккаунта (БД)** — ✅ DONE (subscription/expires/trial/referral/password/sub_token + payments).
+- **Фаза 1a — HTTPS-домен (обычные условия РФ)** — ✅ DONE 2026-05-25. **Домен: `supportkronos.online`** (reg.ru, WHOIS-privacy, нейтральное имя). Cloudflare как DNS-only (orange/прокси не годится — **CF в РФ блокируется** DPI, подтверждено живым тестом). HTTPS прямой с Fornex: LE-сертификат через DNS-01 (CF API token), **nginx :8443** → :5001 (443 занят Xray). ЛК: `https://supportkronos.online:8443/recovery`. Subscription-endpoint `/sub/<token>` validated в HAPP (2 сервера, авто-выбор, Wi-Fi+LTE).
+- **Фаза 1b — БС-robust RU-хост с чистым :443** — ⬜ TODO. Текущий Fornex :8443 работает в обычных условиях РФ (немецкий IP доступен), но **при БС немецкий IP отвалится** + `:8443` в URL некрасиво. Решение: новый RU-VPS на whitelisted-облаке (VK/Yandex/Selectel) с free 443, или поднять второй REALITY-хост чтобы 443 не конфликтовал. БС-полевой тест subscription-модели — там же.
+- **Фаза 2 — UX ЛК** — ✅ DONE (QR, one-click copy, выравнивание, hero, экран «Мой аккаунт», вход по паролю, subscription-блок как главный CTA, перевод на новый HTTPS-домен).
 - **Фаза 3 — меню бота под ЛК** — ⬜ TODO.
-- **Фаза 4 — enforcement (`db_is_access_active` готов) + grandfather существующих + триал + оплата ЮKassa (карты+СБП)** — ⬜ TODO. Ядро монетизации.
+- **Фаза 4 — enforcement (`db_is_access_active` готов, `/sub` гейт по нему) + grandfather существующих + триал + оплата ЮKassa (карты+СБП)** — ⬜ TODO. Subscription-модель **резко упрощает enforcement** — истёк срок → пустая подписка → все устройства отваливаются автоматически.
 - **Фаза 5 — реферальная система: начисление бонусов при оплате** — ⬜ TODO (атрибуция и счётчик уже есть).
 
-Решения: триал 14д; реферал «дни обоим» +14; оплата ЮKassa→Stars→крипта (модель provider-agnostic). ⚠️ Пароль ЛК пока по HTTP — безопасен только с HTTPS (Фаза 1).
+Решения: триал 14д; реферал «дни обоим» +14; оплата ЮKassa→Stars→крипта (модель provider-agnostic).
+
+**Durable finding (2026-05-25):** Cloudflare не годится как прокси в РФ — DPI RST на TLS к CF, у владельца Safari тоже не открывает CF-fronted домен. CF используем только как DNS (grey-cloud). HTTPS — прямой с нашего хоста.
 
 ---
 

@@ -1,5 +1,34 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-25 (вечер) — Домен `supportkronos.online`, прямой HTTPS на Fornex, subscription-спайк validated
+
+Пост FSystem88/1717 → решили проверить модель «subscription-URL + HAPP» на нашей инфре (аддитивно).
+
+**Спайк (БД/бэкенд):**
+- `users.sub_token` + helpers (`db_ensure_sub_token`, `db_find_user_by_sub_token`).
+- `GET /sub/<token>` → base64 наших REALITY-ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`). Гейт `db_is_access_active` (хук enforcement Фазы 4).
+- ЛК: блок «Подписка» (ссылка + QR). ProxyFix → за прокси Flask отдаёт https-ссылки.
+
+**Дорога к HTTPS:**
+- Купили `supportkronos.online` (reg.ru, WHOIS-privacy). Нейтральное «support»-имя — маскировка.
+- CF Tunnel отвалился (Zero Trust требует не-Mir карту).
+- CF proxy + Origin Rule + Browser Integrity Check off — серверно работало, но **HAPP падал в таймаут**. **Safari владельца тоже не открывает `https://supportkronos.online` через CF** (DPI RST = «сетевое подключение прервано»). → **Cloudflare не надёжен в РФ для нашего use-case** (durable finding).
+- **Дроп CF.** A-запись → grey-cloud (DNS-only) → Fornex `185.21.8.91`. LE-сертификат через **DNS-01 via CF API token** (certbot-dns-cloudflare, авто-продление). **nginx на :8443 ssl http2** → :5001 (443 занят Xray REALITY). Файл `docs/scripts/nginx-supportkronos-8443.conf`.
+
+**Validated в HAPP:** подтянулись 2 сервера (YC-Reality + RU-REALITY), Wi-Fi + LTE — работают. **БС-полевой тест отдельно** (БС сейчас нет).
+
+**Закрепление:**
+- `VPN_RECOVERY_URL=https://supportkronos.online:8443/recovery` в env (бот + ссылки).
+- Инструкции ios/android/windows: URL заменён.
+- ЛК: «Подписка» поднята выше — главный CTA, остальные каналы — «Альтернативные способы (конкретные конфиги)».
+- `env_vars.example.txt` обновлён.
+
+**Серверно (вне git):** A-запись grey, LE cert, nginx :8443, CF API token в `/root/.secrets/cloudflare.ini`.
+
+**Что осталось:** Phase 1b (БС-robust RU-хост с чистым :443), per-user UUID на main/yc, БС-полевой тест, переименование меток серверов, новый бот + монетизация. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md` (Дополнение).
+
+---
+
 ## 2026-05-25 — Личный кабинет: модель аккаунта + UX + триал/реферал + пароль (Фазы 0–2)
 
 Старт коммерциализации через ЛК. План по фазам: 0 модель → 1 домен/YC-хост/HTTPS+БС-тест → 2 UX ЛК → 3 бот под ЛК → 4 enforcement+оплата → 5 реферал-начисление.

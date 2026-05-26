@@ -222,10 +222,10 @@ document.addEventListener('DOMContentLoaded', () => {
         subBlock.innerHTML = '';
         const t = document.createElement('div');
         t.className = 'acc-subtitle';
-        t.textContent = '🔗 Подписка — одна ссылка на все устройства';
+        t.textContent = '🔗 Подписка — рекомендуется';
         const note = document.createElement('p');
         note.className = 'section-hint';
-        note.textContent = 'Импортируй в приложение HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера. Один импорт — все серверы, авто-выбор быстрого, обновления приходят сами.';
+        note.textContent = 'Одна ссылка для всех устройств. Импортируй в HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера. Приложение само выберет рабочий сервер и подтянет обновления.';
         subBlock.appendChild(t);
         subBlock.appendChild(note);
         renderQr(subBlock, d.sub_qr, 'Сканируй в приложении (HAPP и др.)');
