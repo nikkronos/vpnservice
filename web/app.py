@@ -996,21 +996,40 @@ def api_account_set_password():
         return jsonify({"error": str(e)}), 500
 
 
+_SUB_LABEL_MAP = {
+    # технические метки в исходных vless-ссылках → user-friendly для подписки
+    "YC-Reality": "🇪🇺 Европа",
+    "EU1-VLESS":  "🇪🇺 Европа",
+    "RU-REALITY": "🇷🇺 Россия",
+}
+
+
 def _build_subscription_links() -> List[str]:
     """
-    Список vless:// для subscription (СПАЙК): берём готовые рабочие REALITY-ссылки
-    из конфига (eu1/yc www.microsoft.com + main cloud.mail.ru при БС). Клиент сам
-    выберет рабочий/быстрый сервер.
+    Список vless:// для subscription. Берём готовые рабочие REALITY-ссылки из
+    конфига (eu/yc + main cloud.mail.ru для БС) и переписываем #fragment на
+    user-friendly метки (URL-encoded UTF-8). Исходные env-ссылки не трогаем.
     TODO (продакшен): подставлять per-user UUID вместо общих share-ссылок.
     """
     cfg = load_config()
     out: List[str] = []
     seen = set()
-    for attr in ("vless_reality_share_url", "vless_cdn_tls_share_url"):
+    for attr, default_label in (
+        ("vless_reality_share_url", "🇪🇺 Европа"),
+        ("vless_cdn_tls_share_url", "🇷🇺 Россия"),
+    ):
         u = (getattr(cfg, attr, None) or "").strip()
-        if u.startswith("vless://") and u not in seen:
-            seen.add(u)
-            out.append(u)
+        if not u.startswith("vless://") or u in seen:
+            continue
+        seen.add(u)
+        if "#" in u:
+            base, frag = u.rsplit("#", 1)
+            current = urllib.parse.unquote(frag)
+            label = _SUB_LABEL_MAP.get(current, default_label)
+            u = base + "#" + urllib.parse.quote(label, safe="")
+        else:
+            u = u + "#" + urllib.parse.quote(default_label, safe="")
+        out.append(u)
     return out
 
 
