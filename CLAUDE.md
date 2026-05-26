@@ -2,6 +2,8 @@
 
 Репозиторий: `nikkronos/vpnservice` | Путь: `Projects/VPN/`
 
+**Бренд (с 2026-05-25):** Kronos / VPN Kronos. Бот `@vpnkronos_bot` (display `vpnkronos`). Домен `supportkronos.online` (нейтральный, маскировка под support-портал). Канал `@vforfriends` legacy. **Цена**: 200 ₽/мес. Текущие 34 юзера — на старом боте, миграция broadcast'ом владельца после Phase 3b.
+
 ---
 
 ## Старт сессии
@@ -205,6 +207,8 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
+| **План фаз 3–4–5 (master)** | **`docs/plan-phase-3-4-5.md`** — читать первым при потере контекста |
+| ЮKassa setup (владельцу) | `docs/yookassa-setup-instruction.md` |
 | Yandex Cloud REALITY | `docs/yandex-cloud-reality-setup.md` |
 | Бэкап/восстановление | `docs/backup-restore.md` |
 | Стратегия обхода блокировок | `docs/blocking-bypass-strategy.md` |

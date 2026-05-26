@@ -27,17 +27,26 @@
 
 Курс: личный кабинет (ЛК) как ядро → оплата/триал/реферал. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md`.
 
+**Бренд:** Kronos / VPN Kronos. Бот `@vpnkronos_bot` (display `vpnkronos`). Домен `supportkronos.online` (нейтральный, маскировка под support-портал). Канал `@vforfriends` legacy. **Цена**: **200 ₽/мес** (середина рынка, УТП «работает при БС»).
+
+**Master-план: `docs/plan-phase-3-4-5.md`** (полная спецификация Phase 3+4+5 — читать первым при потере контекста).
+
 - **Фаза 0 — модель аккаунта (БД)** — ✅ DONE (subscription/expires/trial/referral/password/sub_token + payments).
-- **Фаза 1a — HTTPS-домен (обычные условия РФ)** — ✅ DONE 2026-05-25. **Домен: `supportkronos.online`** (reg.ru, WHOIS-privacy, нейтральное имя). Cloudflare как DNS-only (orange/прокси не годится — **CF в РФ блокируется** DPI, подтверждено живым тестом). HTTPS прямой с Fornex: LE-сертификат через DNS-01 (CF API token), **nginx :8443** → :5001 (443 занят Xray). ЛК: `https://supportkronos.online:8443/recovery`. Subscription-endpoint `/sub/<token>` validated в HAPP (2 сервера, авто-выбор, Wi-Fi+LTE).
-- **Фаза 1b — БС-robust RU-хост с чистым :443** — ⬜ TODO. Текущий Fornex :8443 работает в обычных условиях РФ (немецкий IP доступен), но **при БС немецкий IP отвалится** + `:8443` в URL некрасиво. Решение: новый RU-VPS на whitelisted-облаке (VK/Yandex/Selectel) с free 443, или поднять второй REALITY-хост чтобы 443 не конфликтовал. БС-полевой тест subscription-модели — там же.
-- **Фаза 2 — UX ЛК** — ✅ DONE (QR, one-click copy, выравнивание, hero, экран «Мой аккаунт», вход по паролю, subscription-блок как главный CTA, перевод на новый HTTPS-домен).
-- **Фаза 3 — меню бота под ЛК** — ⬜ TODO.
-- **Фаза 4 — enforcement (`db_is_access_active` готов, `/sub` гейт по нему) + grandfather существующих + триал + оплата ЮKassa (карты+СБП)** — ⬜ TODO. Subscription-модель **резко упрощает enforcement** — истёк срок → пустая подписка → все устройства отваливаются автоматически.
-- **Фаза 5 — реферальная система: начисление бонусов при оплате** — ⬜ TODO (атрибуция и счётчик уже есть).
+- **Фаза 1a — HTTPS-домен (обычные условия РФ)** — ✅ DONE 2026-05-25. Cloudflare как DNS-only (orange/прокси не годится — **CF в РФ блокируется** DPI). HTTPS прямой с Fornex: LE через DNS-01 (CF API token), **nginx :8443** → :5001. ЛК: `https://supportkronos.online:8443/recovery`. Subscription `/sub/<token>` validated в HAPP.
+- **Фаза 1b — БС-robust RU-хост с чистым :443** — ⬜ TODO. Текущий :8443 + немецкий Fornex работает в обычных условиях, но при БС немецкий IP отвалится. Нужен RU-VPS на whitelisted-облаке.
+- **Фаза 2 — UX ЛК** — ✅ DONE (QR, copy-fallback на HTTP, выравнивание, hero, дашборд «Мой аккаунт», вход по паролю, subscription как главный CTA, переименование меток серверов в «🇪🇺 Европа / 🇷🇺 Россия»).
+- **Фаза 3 — новый бот + Mini App** — ⬜ TODO (бот `@vpnkronos_bot` создан, токен в env, см. master-план): 3a создание бота ✅, 3b меню бота под ЛК (Menu Button = web_app), 3c Mini App auto-login через initData (доп. способ к email), 3d enforcement + grandfather + триал.
+- **Фаза 4 — ЮKassa (основная оплата)** — ⬜ TODO. Карты + СБП через ЮKassa для самозанятого; webhook → `db_extend_subscription`. Цена 200₽/мес. Инструкция владельцу: `docs/yookassa-setup-instruction.md`.
+- **Фаза 5 — реферал-начисление + Stars (вторая оплата)** — ⬜ TODO. Реферал «дни обоим» +14 при первой оплате. Stars — дополнительная кнопка в ЛК, рекуррент нативно (Bot API 8.0 `subscription_period`).
 
-Решения: триал 14д; реферал «дни обоим» +14; оплата ЮKassa→Stars→крипта (модель provider-agnostic).
-
-**Durable finding (2026-05-25):** Cloudflare не годится как прокси в РФ — DPI RST на TLS к CF, у владельца Safari тоже не открывает CF-fronted домен. CF используем только как DNS (grey-cloud). HTTPS — прямой с нашего хоста.
+**Решения 2026-05-25 (durable):**
+- Email-OTP/пароль остаётся (важно для сбора БД).
+- Web ЛК остаётся (юзеры привыкли).
+- Mini App = доп. способ авторизации, не замена.
+- ЮKassa = основная оплата, Stars = вторая.
+- Замена старого бота (не двух параллельных), broadcast-миграция через старый.
+- AmneziaWG остаётся как опция «макс. скорость».
+- **CF не как прокси в РФ** (DPI режет TLS, подтверждено живым тестом). Только DNS, grey-cloud.
 
 ---
 

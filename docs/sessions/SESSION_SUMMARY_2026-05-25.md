@@ -139,3 +139,56 @@
 
 ### Ключевое durable-наблюдение
 **Cloudflare не надёжен в РФ** для нашего use-case (не только БС, а вообще). DPI RST на TLS к CF подтверждён живым тестом. Использовать CF только как DNS (grey-cloud), не как прокси. Для HTTPS — прямой хостинг.
+
+---
+
+## Дополнение (поздний вечер 2026-05-25) — фиксация бренда, цены, нового бота, и Mini App-пивота
+
+После подтверждения спайка subscription-модели обсудили план Phase 3+4+5. Зафиксированы решения:
+
+### Бренд
+- **Kronos / VPN Kronos** (переход с ForFriends, под личный handle владельца).
+- **Бот**: `@vpnkronos_bot` (display `vpnkronos`). **Создан в BotFather, токен получен** — будет в env_vars.txt на сервере при деплое Phase 3b.
+- **Домен**: `supportkronos.online` (нейтральная маскировка).
+- **Канал**: `@vforfriends` legacy (не блокирует, rename — задача владельца).
+- **Цена**: **200 ₽/мес** (середина рынка, УТП «работает при БС»).
+
+### Открыли две большие TG-фичи 2024–2025, которые меняют план
+- **Telegram Mini Apps (Web Apps)** — UI прямо внутри Telegram, авторизация через подписанный `initData` (HMAC с bot-token) → auto-login по `telegram_id`. Серверный HTTPS — наш (уже есть).
+- **Star Subscriptions** (Bot API 8.0, ноябрь 2024) — `createInvoiceLink(subscription_period=2592000)` → Telegram сам списывает Stars ежемесячно, шлёт webhook на `successful_payment` (`is_recurring`, `is_first_recurring`). Нативный recurring.
+
+### Скорректированный план (после уточнений владельца)
+Владелец уточнил приоритеты:
+- **Email-OTP/пароль ОСТАЁТСЯ** (сбор БД важен).
+- **Web-ЛК ОСТАЁТСЯ** (юзеры привыкли к сайтам).
+- **Mini App = ДОПОЛНИТЕЛЬНЫЙ способ авторизации**, не замена email-флоу.
+- **ЮKassa = ОСНОВНАЯ оплата** (карты+СБП, привычно). Stars = вторая кнопка позже.
+- **Замена** старого бота (не два параллельных). Broadcast-миграция через старый.
+
+### Документы созданы / обновлены
+- `docs/plan-phase-3-4-5.md` — **master-план Phase 3+4+5** (читать первым при потере контекста).
+- `docs/yookassa-setup-instruction.md` — пошаговая инструкция владельцу по подключению ЮKassa для самозанятого (Shop ID + Secret + webhook).
+- `ROADMAP_VPN.md` — обновлён, фазы и решения зафиксированы.
+- `CLAUDE.md` — добавлен блок «Бренд» + ссылки на master-план и ЮKassa.
+- `env_vars.example.txt` — заготовки `YOOKASSA_SHOP_ID/SECRET_KEY/WEBHOOK_URL`.
+- Память (`project_vpn_decisions.md`) — Phase 3+4+5 решения как durable.
+
+### Что осталось pending до старта Phase 3 (реальный код)
+1. **3a — новый бот**: внешне DONE (создан, токен у нас).
+2. **3b — меню бота под ЛК** (Menu Button = web_app, минимум кнопок): код, после деплоя токена.
+3. **3c — Mini App initData auth**: новый endpoint `/api/auth/tg-webapp` + frontend detect Telegram.WebApp.
+4. **3d — enforcement + grandfather + триал**: миграция БД (legacy `expires_at` = far future), новые → авто-триал, `/sub` уже гейтит.
+5. **3e — ЮKassa**: ждёт регистрации владельца (~1-2 дня) → Shop ID + Secret → код endpoint'ов + webhook.
+6. **3f — реферал-начисление при первой оплате** (флаг `referral_bonus_paid`).
+7. **3g — Stars** (необязательный 2-й способ, после ЮKassa).
+8. **3h — broadcast в старом боте** (владелец).
+
+### Принципы для следующего агента (если контекст этого диалога потеряется)
+1. Читай `docs/plan-phase-3-4-5.md` ПЕРВЫМ — это master.
+2. Аддитивно > переписывание. Email-OTP/пароль/Web-ЛК — остаются. Mini App / Stars — добавляются.
+3. Grandfather ДО enforcement (иначе 34 юзера потеряют доступ).
+4. CF не как прокси в РФ (durable, в памяти).
+5. БС-валидация — только реальным тестом.
+6. ЮKassa — основная оплата; Stars — вторая, не блокер.
+7. Цена 200 ₽/мес.
+8. Бот `@vpnkronos_bot`, домен `supportkronos.online`, бренд Kronos.

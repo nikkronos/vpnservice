@@ -25,7 +25,15 @@
 
 **Серверно (вне git):** A-запись grey, LE cert, nginx :8443, CF API token в `/root/.secrets/cloudflare.ini`.
 
-**Что осталось:** Phase 1b (БС-robust RU-хост с чистым :443), per-user UUID на main/yc, БС-полевой тест, переименование меток серверов, новый бот + монетизация. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md` (Дополнение).
+**Также этим вечером:**
+- Переименованы метки серверов в подписке: `YC-Reality / RU-REALITY` → **🇪🇺 Европа / 🇷🇺 Россия** (commit `0d74701`, URL-encoded UTF-8 в `_SUB_LABEL_MAP`).
+- Создан **новый бот** в BotFather: `@vpnkronos_bot` (display `vpnkronos`). Токен у владельца + у нас (в env при деплое Phase 3b). Бренд: Kronos / VPN Kronos.
+- Зафиксирована **цена 200 ₽/мес** (середина рынка, УТП «работает при БС»).
+- Открыты для использования две большие TG-фичи: **Mini Apps** (auto-login через initData) и **Star Subscriptions** (Bot API 8.0). Mini App — доп. способ авторизации (email/пароль остаются). Stars — вторая кнопка оплаты после ЮKassa.
+- **Master-план Phase 3+4+5: `docs/plan-phase-3-4-5.md`** (читать первым при потере контекста).
+- **ЮKassa setup инструкция владельцу: `docs/yookassa-setup-instruction.md`** (200₽/мес, самозанятый, чеки через ФНС, webhook на `/api/billing/yookassa-webhook`).
+
+**Что осталось:** Phase 1b (БС-robust RU clean-443 host), per-user UUID на main/yc, БС-полевой тест subscription, broadcast-миграция старого бота, **ЮKassa-регистрация владельцем**. Детали — `docs/plan-phase-3-4-5.md`.
 
 ---
 

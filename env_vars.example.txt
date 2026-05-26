@@ -1,6 +1,13 @@
 # Telegram bot settings
+# С 2026-05-25 — новый бот @vpnkronos_bot (display: vpnkronos). Старый бот заменён.
 BOT_TOKEN=your_bot_token_here
 ADMIN_ID=your_telegram_id
+
+# ЮKassa (основная оплата, Phase 4). Инструкция: docs/yookassa-setup-instruction.md
+# Тестовый shop: ключи начинаются с test_; боевой — live_
+# YOOKASSA_SHOP_ID=
+# YOOKASSA_SECRET_KEY=
+# YOOKASSA_WEBHOOK_URL=https://supportkronos.online:8443/api/billing/yookassa-webhook
 
 # Секреты для веб-панели (обязательно задать на сервере!)
 # ADMIN_SECRET — защищает /api/users (случайная строка, например: openssl rand -hex 32)
