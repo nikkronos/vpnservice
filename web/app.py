@@ -10,6 +10,8 @@
 
 import csv
 import functools
+import hashlib
+import hmac
 import io
 import json
 import logging
@@ -18,6 +20,7 @@ import shlex
 import socket
 import subprocess
 import threading
+import time
 import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -53,6 +56,8 @@ from bot.database import (
     db_ensure_sub_token,
     db_find_user_by_sub_token,
     db_is_access_active,
+    db_find_user_by_telegram_id,
+    db_ensure_signup_trial,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -730,6 +735,51 @@ def _qr_datauri(data: str) -> Optional[str]:
         return None
 
 
+def _validate_init_data(init_data: str) -> Optional[Dict]:
+    """
+    Валидация Telegram Mini App initData по HMAC.
+    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+
+    Возвращает распарсенный dict (с ключом 'user' = объект) при успехе, иначе None.
+    Проверяет: hash подпись + freshness (auth_date < 24ч).
+    """
+    if not init_data:
+        return None
+    try:
+        parsed = urllib.parse.parse_qs(init_data, keep_blank_values=True)
+        data = {k: v[0] for k, v in parsed.items()}
+        recv_hash = data.pop("hash", None)
+        if not recv_hash:
+            return None
+        # Anti-replay: auth_date не старше 24ч
+        try:
+            auth_date = int(data.get("auth_date", "0"))
+            if abs(int(time.time()) - auth_date) > 86400:
+                return None
+        except (ValueError, TypeError):
+            return None
+        # data_check_string: пары "k=v", отсортированные по ключу, склеенные через \n
+        data_check_string = "\n".join(
+            f"{k}={data[k]}" for k in sorted(data.keys())
+        )
+        bot_token = getattr(config, "bot_token", None) if config else None
+        if not bot_token:
+            return None
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        computed = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(computed, recv_hash):
+            return None
+        user_str = data.get("user")
+        if not user_str:
+            return None
+        user = json.loads(user_str)
+        data["user"] = user
+        return data
+    except Exception as e:
+        logger.warning("init_data validation failed: %s", e)
+        return None
+
+
 def _verify_email_session(body: dict) -> tuple:
     """
     Универсальный auth по email-token (для всех recovery endpoints с email-flow).
@@ -1127,16 +1177,18 @@ def api_auth_verify_otp():
         db_upsert_user({"email": email, "email_verified": True, "active": True})
         token = db_create_session(email, ttl_minutes=60)
 
-        # Реферальная атрибуция: если пришли по ?ref=CODE — привязываем пригласившего
-        ref = (body.get("ref") or "").strip()
-        if ref:
-            try:
-                row = db_find_user_by_email(email)
-                tid = row.get("telegram_id") if row else None
-                if tid:
+        # Post-auth: реферал-атрибуция + авто-триал (только для юзеров с telegram_id)
+        try:
+            row = db_find_user_by_email(email)
+            tid = row.get("telegram_id") if row else None
+            if tid:
+                ref = (body.get("ref") or "").strip()
+                if ref:
                     db_set_referred_by(int(tid), ref)
-            except Exception as e:
-                logger.warning("referral attribution failed: %s", e)
+                # idempotent — для grandfather/уже-платящих ничего не делает
+                db_ensure_signup_trial(int(tid), days=TRIAL_DAYS)
+        except Exception as e:
+            logger.warning("post-auth (ref/trial) failed: %s", e)
 
         return jsonify({"ok": True, "token": token})
     except Exception as e:
@@ -1162,9 +1214,74 @@ def api_auth_login_password():
                 or not check_password_hash(row["password_hash"], password)):
             return jsonify({"error": "Неверный email или пароль."}), 401
         token = db_create_session(email, ttl_minutes=60)
+        # Авто-триал (idempotent): покрывает кейс, если юзер не залогинился по email раньше
+        try:
+            tid = row.get("telegram_id")
+            if tid:
+                db_ensure_signup_trial(int(tid), days=TRIAL_DAYS)
+        except Exception as e:
+            logger.warning("auto-trial in login-password: %s", e)
         return jsonify({"ok": True, "token": token})
     except Exception as e:
         logger.exception("api/auth/login-password: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auth/tg-webapp", methods=["POST"])
+def api_auth_tg_webapp():
+    """
+    Авторизация через Telegram Mini App. Валидируем initData (HMAC с BOT_TOKEN),
+    извлекаем telegram_id → upsert юзера (синтетический email tg_<id>@kronos.internal
+    если нет своего) → выдаём session-token (60 мин, как verify-otp).
+
+    Поддержка реферала: t.me/<bot>?startapp=ref_<CODE> → start_param обработается.
+    Auto-trial: новый юзер сразу получает TRIAL_DAYS дней.
+
+    Тело: {init_data: <Telegram.WebApp.initData string>}
+    """
+    try:
+        body = request.get_json() or {}
+        init_data = (body.get("init_data") or "").strip()
+        parsed = _validate_init_data(init_data)
+        if not parsed:
+            return jsonify({"error": "Invalid Telegram WebApp data"}), 401
+
+        user_info = parsed.get("user") or {}
+        try:
+            tid = int(user_info.get("id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Missing telegram user id"}), 401
+        username = user_info.get("username") or None
+        start_param = (parsed.get("start_param") or "").strip()
+
+        # Upsert: для новых — синтетический email; для существующих — оставляем их email
+        existing = db_find_user_by_telegram_id(tid)
+        email = (existing.get("email") if existing else None) or f"tg_{tid}@kronos.internal"
+        db_upsert_user({
+            "telegram_id": tid,
+            "username": username,
+            "email": email,
+            "email_verified": True,
+            "active": True,
+        })
+
+        # Реферал-атрибуция: ?startapp=ref_<CODE>
+        if start_param.startswith("ref_"):
+            try:
+                db_set_referred_by(tid, start_param[4:])
+            except Exception as e:
+                logger.warning("referral attribution failed: %s", e)
+
+        # Авто-триал для новых (idempotent для grandfather/использовавших)
+        try:
+            db_ensure_signup_trial(tid, days=TRIAL_DAYS)
+        except Exception as e:
+            logger.warning("auto-trial failed: %s", e)
+
+        token = db_create_session(email, ttl_minutes=60)
+        return jsonify({"ok": True, "token": token})
+    except Exception as e:
+        logger.exception("api/auth/tg-webapp: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

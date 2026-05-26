@@ -857,6 +857,30 @@ def db_start_trial(telegram_id: int, days: int) -> Optional[str]:
     return new_exp
 
 
+def db_ensure_signup_trial(telegram_id: int, days: int = 14) -> Optional[str]:
+    """
+    Авто-активация триала при первой регистрации.
+    Активирует только если:
+      - expires_at IS NULL (т.е. не grandfather и не платил),
+      - trial_used == 0 (не использовал ранее).
+    Idempotent: для grandfather/триал-использованных/платящих ничего не делает.
+    Возвращает новый expires_at или None.
+    """
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT expires_at, trial_used FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not row:
+            return None
+        if row["expires_at"] is not None:
+            return None  # grandfather или уже есть подписка
+        if row["trial_used"]:
+            return None  # триал уже был
+    return db_start_trial(telegram_id, days)
+
+
 def db_ensure_referral_code(telegram_id: int) -> Optional[str]:
     """Возвращает реферальный код пользователя, создаёт уникальный если нет."""
     _ensure_init()

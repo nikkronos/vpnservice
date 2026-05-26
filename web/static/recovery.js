@@ -36,6 +36,34 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentEmail = '';
   const refCode = new URLSearchParams(location.search).get('ref') || '';
 
+  // ── Telegram Mini App auto-login (если открыто из бота) ──────────────────
+  // В обычном браузере Telegram.WebApp пуст → флоу не меняется (email/пароль).
+  (function tryTelegramAutoLogin() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    const initData = tg && tg.initData;
+    if (!initData) return;
+    try { tg.ready(); tg.expand(); } catch (e) {}
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/tg-webapp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData }),
+        });
+        if (!r.ok) {
+          console.warn('TG WebApp auth failed: HTTP', r.status);
+          return;
+        }
+        const d = await r.json();
+        sessionToken = d.token || '';
+        showStep(stepMenu);
+        loadAccount();
+      } catch (e) {
+        console.warn('TG WebApp auth error:', e);
+      }
+    })();
+  })();
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   function setMsg(el, text, isError) {
     if (!el) return;
