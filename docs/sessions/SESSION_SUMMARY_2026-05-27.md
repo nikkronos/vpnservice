@@ -87,4 +87,32 @@ stepMenu (главная)
 
 ## Серверно (вне git)
 
-- Бэкапы `/opt/vpnservice/web/templates/recovery.html.bak.<ts>` и `/opt/vpnservice/web/static/recovery.js.bak.<ts>`.
+- Бэкапы `/opt/vpnservice/web/templates/recovery.html.bak.<ts>` и `/opt/vpnservice/web/static/recovery.js.bak.<ts>` (от Mini App restructure).
+- Бэкап `/opt/vpnservice/web/app.py.bak.<ts>` (от auto-login дебага).
+
+---
+
+## Дополнение (вечер 2026-05-27) — фикс auto-login в Mini App
+
+### Симптом
+После реструктуризации ЛК владелец открыл Mini App с iPhone (`@thisvpnforfriends_bot` → Menu Button «🌐 Личный кабинет») и попадал на экран email-логина вместо дашборда. Auto-login через `initData` не срабатывал.
+
+### Диагностика (через временный debug-bar в UI + серверное логирование `_validate_init_data`)
+1. **Первый снимок**: dbgBar показал `DBG: loading…` — JS вообще не выполнялся.
+2. **Гипотеза**: блокирующий `<script src="https://telegram.org/js/telegram-web-app.js">` подвисал на загрузке → следующий за ним `recovery.js` ждал и не запускался.
+3. **Фикс №1**: `async` на SDK-теге + JS-поллинг `window.Telegram.WebApp` до 3 секунд.
+4. **Второй снимок**: dbgBar показал `tg=no ver=? initLen=0 inTG=false no tg after 3s (browser mode)` — SDK вообще не подгрузился даже за 3 секунды. То есть `telegram.org/js/telegram-web-app.js` **не доходит до iPhone** в этом WebView.
+5. **Корень**: `telegram.org` из РФ-сети владельца (mobile) режется DPI/тротлится — даже когда сам TG-клиент работает (он использует свои app-сервера, не telegram.org/js). Эпизодически кэш TG спасал — отсюда «утром работало, вечером нет».
+6. **Фикс №2 (durable)**: скачали SDK один раз на сервер (`/opt/vpnservice/web/static/telegram-web-app.js`, 116 KB) и переключили `<script src>` на локальный путь. Теперь SDK гарантированно доходит — он раздаётся с того же хоста и порта, что и сам ЛК (`supportkronos.online:8443`).
+7. **Третий снимок**: `tg=yes ver=9.6 pl=ios initLen=580 inTG=true auth=200 token=ok` — дашборд открылся сразу.
+
+### Что закрепилось
+- В памяти (`project_vpn_decisions.md`): «**Telegram-web-app.js хостим у себя**» — любые внешние JS/asset, нужные внутри Mini App, дублируем на нашем хосте. Не полагаться на telegram.org / cdn.jsdelivr / unpkg из РФ.
+- Polling `window.Telegram.WebApp` оставлен как defensive-фолбэк (если в будущем SDK по какой-то причине загрузится с задержкой).
+- Debug-bar и серверное расширенное логирование вырезаны после фикса.
+
+### Файлы, которые поехали этим фиксом
+- `web/static/telegram-web-app.js` — **новый** (116 KB, скачан с telegram.org один раз).
+- `web/templates/recovery.html` — script src переключён на локальный путь.
+- `web/static/recovery.js` — рефакторинг auto-login: `setupTelegramFeatures()` + `runAutoLogin()` + поллинг.
+- `web/app.py` — без изменений в финальном виде (debug-логирование вырезано).

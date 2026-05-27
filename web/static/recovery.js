@@ -46,13 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentEmail = '';
   const refCode = new URLSearchParams(location.search).get('ref') || '';
 
-  // ── Telegram WebApp context ──────────────────────────────────────────────
-  const tg = window.Telegram && window.Telegram.WebApp;
-  const inTelegram = !!(tg && tg.initData);
-  if (inTelegram) {
-    document.body.classList.add('tg-mode');
-    try { tg.ready(); tg.expand(); } catch (e) {}
-  }
+  // ── Telegram WebApp context ───────────────────────────────────────────────
+  // SDK telegram-web-app.js хостится у нас локально (telegram.org из РФ нестабилен).
+  // Скрипт sync, поэтому к моменту запуска recovery.js window.Telegram.WebApp уже определён —
+  // но на всякий случай оставлен polling-фолбэк (см. ниже).
+  let tg = window.Telegram && window.Telegram.WebApp;
+  let inTelegram = !!(tg && tg.initData);
 
   // Нативные TG-диалоги (showAlert) — fallback на browser alert вне TG.
   function notify(message) {
@@ -74,9 +73,34 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {}
   }
 
-  // ── Telegram WebApp auto-login (если открыто из бота) ────────────────────
-  // В обычном браузере inTelegram=false → флоу не меняется (email/пароль).
-  if (inTelegram) {
+  // ── Telegram WebApp init + auto-login (если открыто из бота) ─────────────
+  // telegram-web-app.js грузится async — может появиться позже нашего кода.
+  // Поэтому: 1) выполняем сразу если уже доступен, 2) иначе поллим до 3с.
+  // В обычном браузере SDK тоже подгрузится, но initData останется пустой →
+  // флоу падает на email/пароль, как и было.
+  let tgFeaturesSetup = false;
+
+  function setupTelegramFeatures() {
+    if (tgFeaturesSetup || !inTelegram) return;
+    tgFeaturesSetup = true;
+    document.body.classList.add('tg-mode');
+    try { tg.ready(); tg.expand(); } catch (e) {}
+    // BackButton: регистрируем onClick один раз; видимость пересчитывается в showStep().
+    if (tg.BackButton) {
+      try {
+        tg.BackButton.onClick(() => {
+          const p = stepParent.get(currentStep);
+          if (p) showStep(p);
+        });
+        // Если уже на substep (например, после showStep до инициализации TG) — показываем стрелку.
+        if (currentStep && stepParent.has(currentStep)) tg.BackButton.show();
+      } catch (e) {}
+    }
+    runAutoLogin();
+  }
+
+  function runAutoLogin() {
+    if (!inTelegram) return;
     (async () => {
       try {
         const r = await fetch('/api/auth/tg-webapp', {
@@ -96,6 +120,25 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('TG WebApp auth error:', e);
       }
     })();
+  }
+
+  // Отложенный запуск: stepParent/showStep/currentStep объявлены ниже в этом же
+  // обработчике DOMContentLoaded; setTimeout(0) гарантирует, что они уже инициализированы.
+  // Polling — defensive: если SDK по какой-то причине не определил Telegram.WebApp сразу.
+  if (inTelegram) {
+    setTimeout(setupTelegramFeatures, 0);
+  } else {
+    const pollStart = Date.now();
+    const tgPoll = setInterval(() => {
+      tg = window.Telegram && window.Telegram.WebApp;
+      inTelegram = !!(tg && tg.initData);
+      if (inTelegram) {
+        clearInterval(tgPoll);
+        setupTelegramFeatures();
+      } else if (Date.now() - pollStart > 3000) {
+        clearInterval(tgPoll);
+      }
+    }, 100);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -133,13 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Один раз регистрируем хендлер TG BackButton: возвращает на родительский шаг.
-  if (inTelegram && tg.BackButton) {
-    try { tg.BackButton.onClick(() => {
-      const p = stepParent.get(currentStep);
-      if (p) showStep(p);
-    }); } catch (e) {}
-  }
+  // TG BackButton onClick регистрируется в setupTelegramFeatures() (когда SDK реально доступен).
 
   // Заметная кнопка «копировать» + сама ссылка под ней.
   // clear=true очищает контейнер (когда блок единственный).
