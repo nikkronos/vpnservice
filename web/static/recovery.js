@@ -551,16 +551,6 @@ document.addEventListener('DOMContentLoaded', () => {
       renderLinkBlock(manualBox, cardDigits, '', '📋 Скопировать номер карты');
     }
 
-    // Шаблон комментария к переводу
-    const commentTitle = document.createElement('div');
-    commentTitle.className = 'manual-pay-title';
-    commentTitle.style.marginTop = '10px';
-    commentTitle.innerHTML = '<b>💬 Комментарий к переводу</b> (опционально)';
-    manualBox.appendChild(commentTitle);
-    const myEmail = currentEmail || (d.email || '');
-    const comment = myEmail ? `VPN ${myEmail}` : 'VPN';
-    renderLinkBlock(manualBox, comment, '', '📋 Скопировать комментарий');
-
     // Кнопка «Написать владельцу»
     if (mp.owner_tg) {
       const ownerLink = `https://t.me/${mp.owner_tg}`;
@@ -584,6 +574,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       manualBox.appendChild(ownerBtn);
 
+      const myEmail = currentEmail || (d.email || '');
       const step = document.createElement('p');
       step.className = 'section-hint';
       step.style.marginTop = '8px';
