@@ -344,12 +344,24 @@ def main() -> None:
     def _onboarding_needed(telegram_id: int) -> bool:
         """
         Запускать ли онбординг при /start.
-        Условия: ENV-флаг включён, юзер ещё не отметил migrated_at в БД.
-        Owner тоже проходит онбординг (один раз — потом не повторится из-за migrated_at).
+        Триггерим, если ENV-флаг включён И юзер не ЗАВЕРШИЛ онбординг (email_verified+migrated_at).
+        Так если на каком-то шаге был сбой (например OTP не отправился из-за неверного api_key),
+        повторный /start снова запустит FSM, а не уведёт сразу в меню.
         """
         if not config.onboarding_enabled:
             return False
-        return not db_is_migrated(telegram_id)
+        user = find_user(telegram_id)
+        if not user:
+            return True
+        # Завершённый онбординг = real email_verified=True И migrated_at IS NOT NULL.
+        # Синтетические email (tg_<id>@kronos.internal от Mini App) считаются как «не собран».
+        if not user.email_verified:
+            return True
+        if _is_synthetic_email(user.email):
+            return True
+        if not db_is_migrated(telegram_id):
+            return True
+        return False
 
     def _start_onboarding(chat_id: int, telegram_id: int) -> None:
         """Показывает дисклеймер. Дальше — по нажатию кнопки `onb_ack`."""
@@ -375,10 +387,19 @@ def main() -> None:
             return f"{local}***@{domain}"
         return f"{local[0]}***@{domain}"
 
+    def _is_synthetic_email(email: str | None) -> bool:
+        """Синтетические email вида tg_<id>@kronos.internal генерятся при Mini App auto-login.
+        Считаем их как «email не собран» — гонят юзера ввести настоящий."""
+        return bool(email) and email.endswith("@kronos.internal")
+
     def _post_disclaimer_step(chat_id: int, telegram_id: int) -> None:
-        """После дисклеймера: если email уже есть — предлагаем оставить/сменить; иначе запрашиваем."""
+        """После дисклеймера: если REAL email уже есть — предлагаем оставить/сменить; иначе запрашиваем."""
         user = find_user(telegram_id)
-        existing_email = user.email if (user and user.email_verified) else None
+        existing_email = (
+            user.email
+            if (user and user.email_verified and not _is_synthetic_email(user.email))
+            else None
+        )
         if existing_email:
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
@@ -407,13 +428,19 @@ def main() -> None:
 
     def _finalize_onboarding(chat_id: int, telegram_id: int) -> None:
         """
-        Завершение онбординга: авто-trial для новых, переход в основное меню.
+        Завершение онбординга: авто-trial для новых, отметка migrated_at, переход в основное меню.
+        db_mark_migrated идёт ИМЕННО ЗДЕСЬ (а не в /start) — у новых юзеров запись в users
+        появляется только после db_upsert_user в OTP-шаге, до этого UPDATE затрагивает 0 строк.
         """
         _onboarding_state.pop(telegram_id, None)
         try:
             db_ensure_signup_trial(telegram_id, days=14)
         except Exception as e:
             logger.warning("db_ensure_signup_trial failed for %s: %s", telegram_id, e)
+        try:
+            db_mark_migrated(telegram_id)
+        except Exception as e:
+            logger.warning("db_mark_migrated (finalize) failed for %s: %s", telegram_id, e)
         # Показываем главное меню
         bot.send_message(chat_id, "✅ Готово! Открываю меню.")
         from types import SimpleNamespace
@@ -478,8 +505,15 @@ def main() -> None:
             # Создаём OTP и отправляем письмо (переиспользуем существующую логику)
             try:
                 otp = generate_otp()
-                db_create_otp(email, otp, ttl_minutes=10)
-                send_otp_email(email, otp)
+                db_create_otp(email, otp)
+                sent = send_otp_email(
+                    to_email=email,
+                    code=otp,
+                    api_key=config.resend_api_key,
+                    from_email=config.resend_from_email,
+                )
+                if not sent:
+                    raise RuntimeError("send_otp_email returned False")
             except Exception as e:
                 logger.exception("onboarding: send_otp failed: %s", e)
                 bot.send_message(
