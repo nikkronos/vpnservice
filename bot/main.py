@@ -232,23 +232,36 @@ def main() -> None:
         recovery_url = getattr(config, "vpn_recovery_url", None) or "http://185.21.8.91:5001/recovery"
         authorized = _is_authorized(uid)
 
+        greeting = (
+            "Привет! Это VPN-бот Kronos. 🔐\n\n"
+            f"🌐 Личный кабинет: {recovery_url}\n"
+            "⌛️ Канал с обновлениями: https://t.me/vpnkronos"
+        )
+
         if not authorized:
-            text = (
-                "Привет! Это VPN-бот ForFriends. 🔐\n\n"
-                f"🌐 Личный кабинет: {recovery_url}\n"
-                "⌛ Канал с обновлениями: https://t.me/vforfriends"
-            )
+            text = greeting
             markup = types.InlineKeyboardMarkup()
+            # Mini App-кнопка для незарегистрированных тоже работает —
+            # auto-login по telegram_id; внутри Mini App юзер может пройти email-OTP.
             markup.add(
-                types.InlineKeyboardButton("📧 Войти по email", callback_data="email_register")
+                types.InlineKeyboardButton(
+                    "🌐 Открыть личный кабинет",
+                    web_app=types.WebAppInfo(url=recovery_url),
+                ),
+            )
+            markup.add(
+                types.InlineKeyboardButton("📧 Войти по email", callback_data="email_register"),
             )
         else:
-            text = (
-                "Привет! Это VPN-бот ForFriends. 🔐\n\n"
-                f"🌐 Личный кабинет: {recovery_url}\n"
-                "⌛ Канал с обновлениями: https://t.me/vforfriends"
-            )
+            text = greeting
             markup = types.InlineKeyboardMarkup(row_width=2)
+            # Mini App кнопка первая — заметная альтернатива списку инлайн-кнопок.
+            markup.add(
+                types.InlineKeyboardButton(
+                    "🌐 Открыть личный кабинет",
+                    web_app=types.WebAppInfo(url=recovery_url),
+                ),
+            )
             markup.add(
                 types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_config"),
                 types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),

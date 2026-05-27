@@ -166,7 +166,9 @@ document.addEventListener('DOMContentLoaded', () => {
   stepParent.set(stepSettings,  stepMenu);
   stepParent.set(stepPlatform,  stepConnect);
   stepParent.set(stepOperator,  stepConnect);
-  stepParent.set(stepProxy,     stepConnect);
+  // stepProxy теперь доступен прямо из главного меню (по запросу владельца 2026-05-27),
+  // а не через stepConnect — Telegram-прокси логически независим от VPN.
+  stepParent.set(stepProxy,     stepMenu);
 
   function showStep(step) {
     allSteps.forEach(s => { if (s) s.hidden = true; });
@@ -819,9 +821,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnVerifyOtp) btnVerifyOtp.addEventListener('click', verifyOtp);
   if (codeInput) codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') verifyOtp(); });
 
-  // ── Главное меню: 4 раздела (Продлить / Резервные конфиги / Реферал / Настройки)
+  // ── Главное меню: 5 разделов (Продлить / Разблокировка TG / Резервные конфиги / Реферал / Настройки)
   const substepMap = {
     billing:  stepBilling,
+    proxy:    stepProxy,
     connect:  stepConnect,
     referral: stepReferral,
     settings: stepSettings,
@@ -829,12 +832,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-substep]').forEach(btn => {
     btn.addEventListener('click', () => {
       haptic('light');
-      const target = substepMap[btn.dataset.substep];
-      if (target) showStep(target);
+      const key = btn.dataset.substep;
+      const target = substepMap[key];
+      if (!target) return;
+      showStep(target);
+      if (key === 'proxy') fetchProxyLink();
     });
   });
 
-  // ── Резервные конфиги: выбор канала (в stepConnect)
+  // ── Резервные конфиги: выбор канала (в stepConnect) — только VPN-каналы.
+  // MTProxy переехал в главное меню (см. data-substep="proxy").
   document.querySelectorAll('[data-channel]').forEach(btn => {
     btn.addEventListener('click', () => {
       const ch = btn.dataset.channel;
@@ -844,9 +851,6 @@ document.addEventListener('DOMContentLoaded', () => {
       } else if (ch === 'mobile') {
         if (mobileResult) mobileResult.innerHTML = '';
         showStep(stepOperator);
-      } else if (ch === 'mtproxy') {
-        showStep(stepProxy);
-        fetchProxyLink();
       }
     });
   });

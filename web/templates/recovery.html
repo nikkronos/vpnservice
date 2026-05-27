@@ -62,9 +62,13 @@
           💳 Продлить подписку
           <span class="btn-menu-sub">Telegram Stars или СБП / карта Т-Банк</span>
         </button>
+        <button type="button" class="btn-recovery btn-menu" data-substep="proxy">
+          📨 Разблокировка Telegram
+          <span class="btn-menu-sub">Если сам Telegram не открывается</span>
+        </button>
         <button type="button" class="btn-recovery btn-menu" data-substep="connect">
           🔌 Резервные конфиги
-          <span class="btn-menu-sub">Отдельные конфиги для каждого канала</span>
+          <span class="btn-menu-sub">Отдельные конфиги для VPN-каналов</span>
         </button>
         <button type="button" class="btn-recovery btn-menu" data-substep="referral">
           👥 Пригласить друзей
@@ -91,7 +95,7 @@
       <div id="manualPayContent" class="account-card"></div>
     </section>
 
-    <!-- ── Substep: Резервные конфиги (3 канала) ──────────────── -->
+    <!-- ── Substep: Резервные конфиги (VPN-каналы) ─────────────── -->
     <section class="recovery" id="stepConnect" hidden>
       <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2>🔌 Резервные конфиги</h2>
@@ -104,10 +108,6 @@
         <button type="button" class="btn-recovery btn-menu" data-channel="mobile">
           📡 VPN при блокировках
           <span class="btn-menu-sub">Если основной не идёт — пробивает строгие блокировки</span>
-        </button>
-        <button type="button" class="btn-recovery btn-menu" data-channel="mtproxy">
-          📨 Разблокировка Telegram
-          <span class="btn-menu-sub">Если сам Telegram не открывается</span>
         </button>
       </div>
     </section>
