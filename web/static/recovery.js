@@ -1,15 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
   // ── DOM ───────────────────────────────────────────────────────────────────
-  const stepEmail    = document.getElementById('stepEmail');
-  const stepOtp      = document.getElementById('stepOtp');
-  const stepMenu     = document.getElementById('stepMenu');
-  const stepBilling  = document.getElementById('stepBilling');
-  const stepConnect  = document.getElementById('stepConnect');
-  const stepReferral = document.getElementById('stepReferral');
-  const stepSettings = document.getElementById('stepSettings');
-  const stepPlatform = document.getElementById('stepPlatform');
-  const stepOperator = document.getElementById('stepOperator');
-  const stepProxy    = document.getElementById('stepProxy');
+  const stepEmail      = document.getElementById('stepEmail');
+  const stepOtp        = document.getElementById('stepOtp');
+  const stepMenu       = document.getElementById('stepMenu');
+  const stepBilling    = document.getElementById('stepBilling');
+  const stepManualPay  = document.getElementById('stepManualPay');
+  const stepConnect    = document.getElementById('stepConnect');
+  const stepReferral   = document.getElementById('stepReferral');
+  const stepSettings   = document.getElementById('stepSettings');
+  const stepPlatform   = document.getElementById('stepPlatform');
+  const stepOperator   = document.getElementById('stepOperator');
+  const stepProxy      = document.getElementById('stepProxy');
 
   // Карта родительских шагов — для TG BackButton и наших «« Назад».
   // Шаги без родителя — корни (email/otp/menu) — назад скрывается.
@@ -34,12 +35,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const mobileResult = document.getElementById('mobileResult');
   const proxyResult  = document.getElementById('proxyResult');
 
-  const accountStatus  = document.getElementById('accountStatus');
-  const trialBlock     = document.getElementById('trialBlock');
-  const referralBlock  = document.getElementById('referralBlock');
-  const passwordBlock  = document.getElementById('passwordBlock');
-  const subBlock       = document.getElementById('subBlock');
-  const payBlock       = document.getElementById('payBlock');
+  const accountStatus    = document.getElementById('accountStatus');
+  const trialBlock       = document.getElementById('trialBlock');
+  const referralBlock    = document.getElementById('referralBlock');
+  const passwordBlock    = document.getElementById('passwordBlock');
+  const subBlock         = document.getElementById('subBlock');
+  const payBlock         = document.getElementById('payBlock');
+  const manualPayContent = document.getElementById('manualPayContent');
 
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionToken = '';
@@ -150,19 +152,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const allSteps = [
     stepEmail, stepOtp, stepMenu,
-    stepBilling, stepConnect, stepReferral, stepSettings,
+    stepBilling, stepManualPay, stepConnect, stepReferral, stepSettings,
     stepPlatform, stepOperator, stepProxy,
   ];
 
   // Иерархия шагов: главное меню — корень, четыре раздела ведут к нему,
-  // выбор канала/платформы/оператора возвращает в stepConnect.
-  stepParent.set(stepBilling,  stepMenu);
-  stepParent.set(stepConnect,  stepMenu);
-  stepParent.set(stepReferral, stepMenu);
-  stepParent.set(stepSettings, stepMenu);
-  stepParent.set(stepPlatform, stepConnect);
-  stepParent.set(stepOperator, stepConnect);
-  stepParent.set(stepProxy,    stepConnect);
+  // выбор канала/платформы/оператора возвращает в stepConnect,
+  // ручная оплата (substep stepBilling) возвращает в stepBilling.
+  stepParent.set(stepBilling,   stepMenu);
+  stepParent.set(stepManualPay, stepBilling);
+  stepParent.set(stepConnect,   stepMenu);
+  stepParent.set(stepReferral,  stepMenu);
+  stepParent.set(stepSettings,  stepMenu);
+  stepParent.set(stepPlatform,  stepConnect);
+  stepParent.set(stepOperator,  stepConnect);
+  stepParent.set(stepProxy,     stepConnect);
 
   function showStep(step) {
     allSteps.forEach(s => { if (s) s.hidden = true; });
@@ -358,24 +362,25 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Оплата подписки (продление)
+    // Оплата подписки (продление) + страница ручной оплаты
     renderPayBlock(d);
+    renderManualPay(d);
 
-    // Подписка — одна ссылка на все устройства (спайк)
+    // Доступ к VPN — одна ссылка для всех устройств
     if (subBlock) {
       if (d.sub_link_path) {
         subBlock.hidden = false;
         subBlock.innerHTML = '';
         const t = document.createElement('div');
         t.className = 'acc-subtitle';
-        t.textContent = '🔗 Подписка — рекомендуется';
+        t.textContent = '🔗 Доступ к VPN.';
         const note = document.createElement('p');
         note.className = 'section-hint';
-        note.textContent = 'Одна ссылка для всех устройств. Импортируй в HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера. Приложение само выберет рабочий сервер и подтянет обновления.';
+        note.textContent = 'Одна ссылка для всех устройств. Импортируй в HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера обмена. Приложение само выберет рабочий сервер и подтянет обновления.';
         subBlock.appendChild(t);
         subBlock.appendChild(note);
         renderQr(subBlock, d.sub_qr, 'Сканируй в приложении (HAPP и др.)');
-        renderLinkBlock(subBlock, location.origin + d.sub_link_path, '', '📋 Скопировать ссылку подписки');
+        renderLinkBlock(subBlock, location.origin + d.sub_link_path, '', 'Скопировать ссылку');
       } else {
         subBlock.hidden = true;
       }
@@ -522,17 +527,41 @@ document.addEventListener('DOMContentLoaded', () => {
       payBlock.appendChild(makeStarsBtn(`⭐ Оплатить Stars один раз (${stars} ⭐)`, false, true));
     }
 
-    // ── Ручная оплата (СБП / карта Т-Банк) — раскрывающийся блок ────────────
+    // ── Ручная оплата (СБП / карта Т-Банк) — навигация на отдельный substep ─
     const manualBtn = document.createElement('button');
     manualBtn.type = 'button';
     manualBtn.className = 'btn-recovery btn-recovery-secondary copy-primary';
     manualBtn.style.marginTop = '8px';
     manualBtn.textContent = '💳 Оплатить СБП / картой (Т-Банк)';
+    manualBtn.addEventListener('click', () => {
+      haptic('light');
+      showStep(stepManualPay);
+    });
+    payBlock.appendChild(manualBtn);
+  }
 
-    const manualBox = document.createElement('div');
-    manualBox.className = 'manual-pay-box';
-    manualBox.style.marginTop = '10px';
-    manualBox.hidden = true;
+  // Отдельный substep stepManualPay: реквизиты + кнопка «✅ Я перевёл деньги».
+  // Заполняется в renderAccount (когда d уже есть) — навигация просто показывает заполненный контент.
+  function renderManualPay(d) {
+    if (!manualPayContent) return;
+    manualPayContent.innerHTML = '';
+    const mp = d.manual_pay || {};
+    const rub = d.subscription_rub_price || mp.rub || 200;
+    const days = d.subscription_days || 30;
+
+    // Если есть pending-заявка — показываем «ждём подтверждения» вместо реквизитов,
+    // чтобы юзер случайно не нажал «Я перевёл» второй раз и не плодил уведомлений.
+    if (d.pending_claim) {
+      const pendingNote = document.createElement('p');
+      pendingNote.className = 'section-hint';
+      pendingNote.innerHTML = (
+        '✅ <b>Заявка на оплату отправлена владельцу.</b> ' +
+        'Жди подтверждения — придёт сообщение в этот бот, как только проверит поступление. ' +
+        'Обычно в течение часа.'
+      );
+      manualPayContent.appendChild(pendingNote);
+      return;
+    }
 
     const intro = document.createElement('p');
     intro.className = 'section-hint';
@@ -542,30 +571,26 @@ document.addEventListener('DOMContentLoaded', () => {
       `2. Нажми <b>«✅ Я перевёл деньги»</b> — владельцу придёт уведомление.<br>` +
       `3. Он проверит поступление и зачислит подписку (обычно в течение часа).`
     );
-    manualBox.appendChild(intro);
+    manualPayContent.appendChild(intro);
 
-    // СБП по телефону
     if (mp.sbp_phone) {
       const sbpTitle = document.createElement('div');
       sbpTitle.className = 'manual-pay-title';
       sbpTitle.innerHTML = `<b>📱 СБП по телефону</b> — <span class="muted">${mp.sbp_bank || ''}</span>`;
-      manualBox.appendChild(sbpTitle);
-      renderLinkBlock(manualBox, mp.sbp_phone, '', '📋 Скопировать номер');
+      manualPayContent.appendChild(sbpTitle);
+      renderLinkBlock(manualPayContent, mp.sbp_phone, '', 'Скопировать номер');
     }
 
-    // Карта
     if (mp.card) {
       const cardTitle = document.createElement('div');
       cardTitle.className = 'manual-pay-title';
       cardTitle.style.marginTop = '10px';
       cardTitle.innerHTML = `<b>💳 Карта</b> — <span class="muted">${mp.card_bank || ''}</span>`;
-      manualBox.appendChild(cardTitle);
-      // Копируем без пробелов (банк сам разрулит)
+      manualPayContent.appendChild(cardTitle);
       const cardDigits = String(mp.card).replace(/\s/g, '');
-      renderLinkBlock(manualBox, cardDigits, '', '📋 Скопировать номер карты');
+      renderLinkBlock(manualPayContent, cardDigits, '', 'Скопировать номер карты');
     }
 
-    // Главная кнопка donation-flow: уведомить владельца, что юзер перевёл.
     const claimBtn = document.createElement('button');
     claimBtn.type = 'button';
     claimBtn.className = 'btn-recovery copy-primary';
@@ -592,8 +617,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         haptic('success');
         notify('Заявка отправлена. Жди подтверждение в этом боте.');
-        // Перезагружаем аккаунт → payBlock переключится в pending-режим
+        // Возвращаемся на stepBilling — там pending уже отрисуется
         loadAccount();
+        showStep(stepBilling);
       } catch (e) {
         haptic('error');
         notify('Сетевая ошибка.');
@@ -601,15 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
         claimBtn.disabled = false;
       }
     });
-    manualBox.appendChild(claimBtn);
-
-    manualBtn.addEventListener('click', () => {
-      haptic('light');
-      manualBox.hidden = !manualBox.hidden;
-    });
-
-    payBlock.appendChild(manualBtn);
-    payBlock.appendChild(manualBox);
+    manualPayContent.appendChild(claimBtn);
   }
 
   // Блок «Добавить/Изменить пароль» — раскрывает инлайн-форму
