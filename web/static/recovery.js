@@ -452,53 +452,61 @@ document.addEventListener('DOMContentLoaded', () => {
     note.textContent = `Цена: ${rub} ₽ (или ${stars} ⭐ Telegram Stars). Подписка продлевается на ${days} дней.`;
     payBlock.appendChild(note);
 
-    // Telegram Stars (только в TG WebApp — снаружи tg.openInvoice не работает)
+    // Telegram Stars (только в TG WebApp — снаружи tg.openInvoice не работает).
+    // Две кнопки: разовая оплата + авто-продление (Bot API 8.0 subscription_period).
     if (inTelegram) {
-      const starsBtn = document.createElement('button');
-      starsBtn.type = 'button';
-      starsBtn.className = 'btn-recovery copy-primary';
-      starsBtn.textContent = `⭐ Оплатить Telegram Stars (${stars} ⭐)`;
-      starsBtn.addEventListener('click', async () => {
-        starsBtn.disabled = true;
-        haptic('light');
-        try {
-          const r = await fetch('/api/billing/create-stars-invoice', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: sessionToken }),
-          });
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok || !data.invoice_link) {
-            haptic('error');
-            notify(data.error || 'Не удалось создать счёт.');
-            starsBtn.disabled = false;
-            return;
-          }
-          if (!tg.openInvoice) {
-            haptic('error');
-            notify('Эта версия Telegram не поддерживает Stars-оплату.');
-            starsBtn.disabled = false;
-            return;
-          }
-          tg.openInvoice(data.invoice_link, (status) => {
-            starsBtn.disabled = false;
-            if (status === 'paid') {
-              haptic('success');
-              notify('Оплата получена. Подписка продлена.');
-              loadAccount();
-            } else if (status === 'cancelled') {
-              haptic('warning');
-            } else if (status === 'failed') {
+      const makeStarsBtn = (label, recurring, secondary) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-recovery copy-primary' + (secondary ? ' btn-recovery-secondary' : '');
+        if (secondary) btn.style.marginTop = '8px';
+        btn.textContent = label;
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          haptic('light');
+          try {
+            const r = await fetch('/api/billing/create-stars-invoice', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: sessionToken, recurring }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok || !data.invoice_link) {
               haptic('error');
-              notify('Платёж не прошёл.');
+              notify(data.error || 'Не удалось создать счёт.');
+              btn.disabled = false;
+              return;
             }
-          });
-        } catch (e) {
-          haptic('error');
-          starsBtn.disabled = false;
-        }
-      });
-      payBlock.appendChild(starsBtn);
+            if (!tg.openInvoice) {
+              haptic('error');
+              notify('Эта версия Telegram не поддерживает Stars-оплату.');
+              btn.disabled = false;
+              return;
+            }
+            tg.openInvoice(data.invoice_link, (status) => {
+              btn.disabled = false;
+              if (status === 'paid') {
+                haptic('success');
+                notify(recurring
+                  ? 'Подписка оформлена. Будет продлеваться автоматически каждый месяц.'
+                  : 'Оплата получена. Подписка продлена.');
+                loadAccount();
+              } else if (status === 'cancelled') {
+                haptic('warning');
+              } else if (status === 'failed') {
+                haptic('error');
+                notify('Платёж не прошёл.');
+              }
+            });
+          } catch (e) {
+            haptic('error');
+            btn.disabled = false;
+          }
+        });
+        return btn;
+      };
+      payBlock.appendChild(makeStarsBtn(`⭐ Подписка Stars (${stars} ⭐/мес, авто)`, true, false));
+      payBlock.appendChild(makeStarsBtn(`⭐ Оплатить Stars один раз (${stars} ⭐)`, false, true));
     }
 
     // ── Ручная оплата (СБП / карта Т-Банк) — раскрывающийся блок ────────────

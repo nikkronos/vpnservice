@@ -1053,8 +1053,10 @@ def api_billing_create_stars_invoice():
     """
     Создаёт invoice-ссылку для оплаты Telegram Stars (currency=XTR).
     Auth: email-token. Возвращает {invoice_link, amount, days}.
+    Параметр recurring=true → добавляем subscription_period=2592000 (30 дней) →
+    Telegram сам продлевает подписку ежемесячно и шлёт новые successful_payment
+    события (обрабатываются тем же хендлером, идемпотентно по charge_id).
     Фронтенд (в Mini App): tg.openInvoice(invoice_link, cb) → on 'paid' → reload account.
-    Бот ловит pre_checkout_query + successful_payment → продлевает подписку.
     """
     try:
         body = request.get_json() or {}
@@ -1062,21 +1064,31 @@ def api_billing_create_stars_invoice():
         if err:
             return err
         _row, telegram_id = auth
+        recurring = bool(body.get("recurring", False))
 
         bot_token = getattr(config, "bot_token", None) if config else None
         if not bot_token:
             return jsonify({"error": "Bot token не настроен"}), 503
 
-        # Payload — самоидентифицируется в successful_payment-хендлере бота
+        # Payload — самоидентифицируется в successful_payment-хендлере бота.
+        # Префикс stars_sub один и тот же для one-time и recurring: хендлер всегда
+        # продлевает на N дней из payload, что корректно и для авто-продления.
         payload = f"stars_sub:{telegram_id}:{SUBSCRIPTION_DAYS_PER_PAYMENT}:{int(time.time())}"
 
-        api_body = json.dumps({
-            "title": "VPN Kronos — подписка",
-            "description": f"Доступ на {SUBSCRIPTION_DAYS_PER_PAYMENT} дней",
+        api_body_dict = {
+            "title": "VPN Kronos — подписка" + (" (авто-продление)" if recurring else ""),
+            "description": (
+                f"Доступ на {SUBSCRIPTION_DAYS_PER_PAYMENT} дней"
+                + (", обновляется автоматически каждый месяц" if recurring else "")
+            ),
             "payload": payload,
             "currency": "XTR",
             "prices": [{"label": f"{SUBSCRIPTION_DAYS_PER_PAYMENT} дней", "amount": STARS_MONTHLY_PRICE}],
-        }).encode("utf-8")
+        }
+        if recurring:
+            # Bot API 8.0: subscription_period=2592000 (30 дней) → нативный recurring биллинг.
+            api_body_dict["subscription_period"] = 2592000
+        api_body = json.dumps(api_body_dict).encode("utf-8")
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
             data=api_body,
@@ -1099,6 +1111,7 @@ def api_billing_create_stars_invoice():
             "invoice_link": invoice_link,
             "amount_stars": STARS_MONTHLY_PRICE,
             "days": SUBSCRIPTION_DAYS_PER_PAYMENT,
+            "recurring": recurring,
         })
     except Exception as e:
         logger.exception("api/billing/create-stars-invoice: %s", e)
