@@ -147,6 +147,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_sub_token_column()
     _migrate_add_referral_bonus_paid_column()
     _migrate_add_expiry_notif_columns()
+    _migrate_add_migrated_at_column()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -247,6 +248,18 @@ def _migrate_add_referral_bonus_paid_column() -> None:
                 logger.info("Migration: added referral_bonus_paid column to users")
             except sqlite3.OperationalError as e:
                 logger.info("Migration: skip referral_bonus_paid (%s)", e)
+
+
+def _migrate_add_migrated_at_column() -> None:
+    """Флаг первого /start в новом боте — для selective reset при миграции на @vpnkronos_bot."""
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "migrated_at" not in existing:
+            try:
+                con.execute("ALTER TABLE users ADD COLUMN migrated_at TEXT")
+                logger.info("Migration: added migrated_at column to users")
+            except sqlite3.OperationalError as e:
+                logger.info("Migration: skip migrated_at (%s)", e)
 
 
 def _migrate_add_expiry_notif_columns() -> None:
@@ -1258,6 +1271,69 @@ def db_users_due_for_expiry_notif(days_until: int) -> List[Dict]:
         # next_day помогает быть строгим к дате (на случай зон), но date(expires_at) уже округлит.
         _ = next_day
         return [dict(r) for r in rows]
+
+
+def db_mark_migrated(telegram_id: int) -> bool:
+    """
+    Помечает юзера как «прошёл /start в новом боте». Idempotent.
+    Возвращает True если флаг впервые выставлен (= это первый /start), False если уже был.
+    """
+    _ensure_init()
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE users SET migrated_at = datetime('now') "
+            "WHERE telegram_id = ? AND migrated_at IS NULL",
+            (telegram_id,),
+        )
+        return cur.rowcount > 0
+
+
+def db_is_migrated(telegram_id: int) -> bool:
+    """True если у юзера выставлен migrated_at (т.е. он /start'нул новый бот)."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT migrated_at FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        return bool(row and row["migrated_at"])
+
+
+def db_get_non_migrated_users() -> List[Dict]:
+    """
+    Возвращает активных юзеров, у которых migrated_at IS NULL.
+    Используется командой /migrate_reset для selective сброса конфигов.
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT id, telegram_id, username, email, vless_uuid, sub_token "
+            "FROM users "
+            "WHERE active = 1 AND telegram_id IS NOT NULL "
+            "AND migrated_at IS NULL "
+            "ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def db_clear_sub_token(telegram_id: int) -> None:
+    """Сбрасывает sub_token у юзера (для selective reset). Следующий вызов db_ensure_sub_token сгенерит новый."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET sub_token = NULL WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+
+
+def db_clear_vless_uuid(telegram_id: int) -> None:
+    """Сбрасывает vless_uuid у юзера (для selective reset)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET vless_uuid = NULL, vless_short_id = NULL WHERE telegram_id = ?",
+            (telegram_id,),
+        )
 
 
 def db_mark_expiry_notif_sent(telegram_id: int, days_until: int) -> None:

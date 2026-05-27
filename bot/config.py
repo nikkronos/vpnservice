@@ -35,6 +35,11 @@ class BotConfig:
     vless_eu1_pubkey: str | None = None
     vless_eu1_short_id: str = "04d9b6c0"
     vless_eu1_sni: str = "www.microsoft.com"
+    # Флаги переезда на @vpnkronos_bot. При swap токена выставить оба в 1.
+    # ONBOARDING_ENABLED: запускает FSM при /start (дисклеймер→email→меню) для новых юзеров.
+    # ENFORCEMENT_ENABLED: гейт «Получить VPN» по db_is_access_active (резать доступ просрочкам).
+    onboarding_enabled: bool = False
+    enforcement_enabled: bool = False
 
 
 def _parse_env_file(path: pathlib.Path) -> Dict[str, str]:
@@ -122,6 +127,13 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
     vless_eu1_short_id = (data.get("VLESS_EU1_SHORT_ID") or "").strip() or "04d9b6c0"
     vless_eu1_sni = (data.get("VLESS_EU1_SNI") or "").strip() or "www.microsoft.com"
 
+    def _bool_flag(key: str) -> bool:
+        v = (data.get(key) or "").strip().lower()
+        return v in ("1", "true", "yes", "on")
+
+    onboarding_enabled = _bool_flag("ONBOARDING_ENABLED")
+    enforcement_enabled = _bool_flag("ENFORCEMENT_ENABLED")
+
     return BotConfig(
         bot_token=token,
         admin_id=admin_id,
@@ -140,6 +152,8 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         vless_eu1_pubkey=vless_eu1_pubkey,
         vless_eu1_short_id=vless_eu1_short_id,
         vless_eu1_sni=vless_eu1_sni,
+        onboarding_enabled=onboarding_enabled,
+        enforcement_enabled=enforcement_enabled,
     )
 
 

@@ -102,3 +102,9 @@ WG_DNS=1.1.1.1
 # AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client.sh
 # AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/vpnservice/scripts/amneziawg-remove-client-docker.sh
 
+
+# Флаги переезда на @vpnkronos_bot (выставить в 1 при swap токена).
+# ONBOARDING_ENABLED — запускает FSM-онбординг (дисклеймер→email→меню) при первом /start.
+# ENFORCEMENT_ENABLED — гейт «Получить VPN» по db_is_access_active (резать просрочкам).
+ONBOARDING_ENABLED=0
+ENFORCEMENT_ENABLED=0

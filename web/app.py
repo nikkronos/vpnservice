@@ -876,6 +876,10 @@ def api_recovery_awg_config_by_email():
             return err
         _user_row, telegram_id = auth
 
+        # Enforcement gate (под ENV-флагом ENFORCEMENT_ENABLED). Subscription URL уже гейтится в /sub/<token>.
+        if getattr(config, "enforcement_enabled", False) and not db_is_access_active(telegram_id):
+            return jsonify({"error": "Подписка неактивна. Продли в ЛК или боте.", "subscription_inactive": True}), 402
+
         platform = str(body.get("platform") or "pc").strip().lower()
         if platform not in ("pc", "ios", "android"):
             return jsonify({"error": "platform must be one of: pc, ios, android"}), 400
@@ -930,6 +934,11 @@ def api_recovery_mobile_link_by_email():
         auth, err = _verify_email_session(body)
         if err:
             return err
+        _row, telegram_id = auth
+
+        # Enforcement gate (под ENV-флагом ENFORCEMENT_ENABLED).
+        if getattr(config, "enforcement_enabled", False) and not db_is_access_active(telegram_id):
+            return jsonify({"error": "Подписка неактивна. Продли в ЛК или боте.", "subscription_inactive": True}), 402
 
         operator = str(body.get("operator") or "").strip().lower()
         if operator not in ("megafon", "yota", "beeline", "mts", "tele2", "tmobile", "other"):

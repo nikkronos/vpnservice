@@ -31,8 +31,15 @@ from .database import (
     db_get_pending_claim,
     db_create_payment_claim,
     db_get_subscription,
+    db_is_access_active,
     db_find_user_by_telegram_id,
     db_ensure_sub_token,
+    db_mark_migrated,
+    db_is_migrated,
+    db_get_non_migrated_users,
+    db_clear_sub_token,
+    db_clear_vless_uuid,
+    db_ensure_signup_trial,
     init_db,
 )
 from .vless_peers import (
@@ -209,6 +216,34 @@ def main() -> None:
         markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         return markup
 
+    def _check_access_or_block(chat_id: int, telegram_id: int) -> bool:
+        """
+        Гейт на VPN-конфиги. Возвращает True если доступ активен (или enforcement выключен).
+        Если доступ неактивен — отправляет юзеру блокирующее сообщение и возвращает False.
+        """
+        if not config.enforcement_enabled:
+            return True
+        if db_is_access_active(telegram_id):
+            return True
+        # Доступ блокируется
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
+        try:
+            bot.send_message(
+                chat_id,
+                "🔴 <b>Подписка неактивна.</b>\n\n"
+                "Продли — и VPN снова заработает. Текущие конфиги останутся теми же, "
+                "перенастраивать ничего не надо.",
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        except Exception as e:
+            logger.warning("_check_access_or_block: send_message failed: %s", e)
+        return False
+
     # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
     _pending_add_user: set[int] = set()
 
@@ -220,6 +255,11 @@ def main() -> None:
 
     # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
     _email_link_state: dict[int, dict] = {}
+
+    # Onboarding flow (Phase 3b proper, под ONBOARDING_ENABLED): {tid: {"step": "email"|"otp", "email": str}}
+    # "disclaimer" фаза не нужна в state — она показывается один раз через cmd_start без ожидания текстового ввода,
+    # дальнейшие шаги — через callback'и + сообщения.
+    _onboarding_state: dict[int, dict] = {}
 
     def _is_authorized(telegram_id: int) -> bool:
         """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
@@ -289,10 +329,209 @@ def main() -> None:
         else:
             bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
 
+    # ── Онбординг при /start в новом боте (под ENV-флагом ONBOARDING_ENABLED) ─
+
+    _DISCLAIMER_TEXT = (
+        "<b>Онбординг.</b>\n\n"
+        "1. Данный сервис позволяет быстро получать доступ к любым сайтам и программам.\n"
+        "2. В сервисе безлимитный трафик, однако, будьте учтивы и не используйте торренты.\n"
+        "3. Обратная связь приветствуется. По всем вопросам @nikkronos.\n"
+        "4. Сервис будет дорабатываться и улучшаться по мере прихода новых пользователей, "
+        "реферальная система в разработке.\n"
+        "5. Вся важная информация будет публиковаться в тг канале: https://t.me/vpnkronos."
+    )
+
+    def _onboarding_needed(telegram_id: int) -> bool:
+        """
+        Запускать ли онбординг при /start.
+        Условия: ENV-флаг включён, юзер ещё не отметил migrated_at в БД.
+        Owner тоже проходит онбординг (один раз — потом не повторится из-за migrated_at).
+        """
+        if not config.onboarding_enabled:
+            return False
+        return not db_is_migrated(telegram_id)
+
+    def _start_onboarding(chat_id: int, telegram_id: int) -> None:
+        """Показывает дисклеймер. Дальше — по нажатию кнопки `onb_ack`."""
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("Я ознакомился(-ась)", callback_data="onb_ack"))
+        try:
+            bot.send_message(
+                chat_id,
+                _DISCLAIMER_TEXT,
+                parse_mode="HTML",
+                reply_markup=markup,
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            logger.exception("_start_onboarding send_message failed: %s", e)
+
+    def _mask_email(email: str) -> str:
+        """user@example.com → u***@example.com (для отображения уже привязанного email)."""
+        if not email or "@" not in email:
+            return email or "—"
+        local, _, domain = email.partition("@")
+        if len(local) <= 1:
+            return f"{local}***@{domain}"
+        return f"{local[0]}***@{domain}"
+
+    def _post_disclaimer_step(chat_id: int, telegram_id: int) -> None:
+        """После дисклеймера: если email уже есть — предлагаем оставить/сменить; иначе запрашиваем."""
+        user = find_user(telegram_id)
+        existing_email = user.email if (user and user.email_verified) else None
+        if existing_email:
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton(
+                    f"✅ Использовать {_mask_email(existing_email)}",
+                    callback_data="onb_keep_email",
+                ),
+                types.InlineKeyboardButton(
+                    "✏️ Ввести другой email",
+                    callback_data="onb_new_email",
+                ),
+            )
+            bot.send_message(
+                chat_id,
+                f"📧 У тебя уже привязан email: <b>{_mask_email(existing_email)}</b>\n\n"
+                f"Использовать его, или ввести другой?",
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        else:
+            _onboarding_state[telegram_id] = {"step": "email"}
+            bot.send_message(
+                chat_id,
+                "📧 Введи свой email — пришлём одноразовый код для подтверждения.",
+            )
+
+    def _finalize_onboarding(chat_id: int, telegram_id: int) -> None:
+        """
+        Завершение онбординга: авто-trial для новых, переход в основное меню.
+        """
+        _onboarding_state.pop(telegram_id, None)
+        try:
+            db_ensure_signup_trial(telegram_id, days=14)
+        except Exception as e:
+            logger.warning("db_ensure_signup_trial failed for %s: %s", telegram_id, e)
+        # Показываем главное меню
+        bot.send_message(chat_id, "✅ Готово! Открываю меню.")
+        from types import SimpleNamespace
+        # Эмулируем from_user — у нас есть telegram_id и можно достать username из БД
+        user_row = db_find_user_by_telegram_id(telegram_id) or {}
+        fake_from_user = SimpleNamespace(
+            id=telegram_id,
+            username=user_row.get("username"),
+        )
+        _send_main_menu(chat_id, fake_from_user)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "onb_ack")
+    def callback_onb_ack(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        # На всякий случай ставим migrated_at если ещё не выставлен (на случай гонки)
+        try:
+            db_mark_migrated(tid)
+        except Exception as e:
+            logger.warning("db_mark_migrated failed: %s", e)
+        _post_disclaimer_step(call.message.chat.id, tid)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "onb_keep_email")
+    def callback_onb_keep_email(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        # Email уже верифицирован, никаких OTP не нужно — финализируем
+        _finalize_onboarding(call.message.chat.id, call.from_user.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "onb_new_email")
+    def callback_onb_new_email(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        _onboarding_state[tid] = {"step": "email"}
+        bot.send_message(
+            call.message.chat.id,
+            "📧 Введи новый email — пришлём одноразовый код для подтверждения.",
+        )
+
+    # Текстовый ввод во время онбординга (email или OTP)
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _onboarding_state
+    )
+    def handle_onboarding_input(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        tid = message.from_user.id
+        state = _onboarding_state.get(tid) or {}
+        step = state.get("step")
+        text = (message.text or "").strip()
+
+        if step == "email":
+            email = text.lower()
+            if "@" not in email or "." not in email.split("@")[-1]:
+                bot.send_message(message.chat.id, "Это не похоже на email. Попробуй ещё раз.")
+                return
+            # Создаём OTP и отправляем письмо (переиспользуем существующую логику)
+            try:
+                otp = generate_otp()
+                db_create_otp(email, otp, ttl_minutes=10)
+                send_otp_email(email, otp)
+            except Exception as e:
+                logger.exception("onboarding: send_otp failed: %s", e)
+                bot.send_message(
+                    message.chat.id,
+                    "❌ Не удалось отправить код. Попробуй позже или напиши @nikkronos.",
+                )
+                return
+            _onboarding_state[tid] = {"step": "otp", "email": email}
+            bot.send_message(
+                message.chat.id,
+                "🔢 Введи 6 цифр из письма (проверь спам, если не пришло за минуту).",
+            )
+            return
+
+        if step == "otp":
+            code = text.replace(" ", "")
+            email = state.get("email", "")
+            if not db_verify_otp(email, code):
+                bot.send_message(message.chat.id, "❌ Код неверный или истёк. Попробуй ещё раз.")
+                return
+            # Помечаем email верифицированным в БД
+            from .database import db_upsert_user
+            db_upsert_user({
+                "telegram_id": tid,
+                "email": email,
+                "email_verified": True,
+                "active": True,
+            })
+            _finalize_onboarding(message.chat.id, tid)
+            return
+
+        # Неизвестный шаг — чистим состояние
+        _onboarding_state.pop(tid, None)
+
     @bot.message_handler(commands=["start"])
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
+
+        tid = message.from_user.id
+
+        # Если онбординг включён и юзер ещё не «прошёл» — запускаем FSM, не показывая обычное меню.
+        if _onboarding_needed(tid):
+            try:
+                # Помечаем юзера как мигрировавшего сразу при первом /start (даже если он дисклеймер не дочитает —
+                # selective reset не должен его задеть, раз он хотя бы зашёл в новый бот).
+                db_mark_migrated(tid)
+            except Exception as e:
+                logger.warning("db_mark_migrated on /start failed: %s", e)
+            _start_onboarding(message.chat.id, tid)
+            return
+
         _send_main_menu(message.chat.id, message.from_user)
 
         # Автоматически регистрируем владельца как пользователя (owner)
@@ -730,6 +969,8 @@ def main() -> None:
             )
             bot.send_message(call.message.chat.id, sub_text, parse_mode="HTML", reply_markup=sub_markup)
         elif action == "menu_get_config":
+            if not _check_access_or_block(call.message.chat.id, call.from_user.id):
+                return
             _show_platform_keyboard(call.message.chat.id, "get_config")
         elif action == "menu_regen":
             # Подтверждение перед сбросом конфига (добавлено по фидбэку владельца).
@@ -746,12 +987,16 @@ def main() -> None:
             )
             bot.send_message(call.message.chat.id, confirm_text, parse_mode="HTML", reply_markup=confirm_markup)
         elif action == "menu_regen_confirm":
+            if not _check_access_or_block(call.message.chat.id, call.from_user.id):
+                return
             _show_platform_keyboard(call.message.chat.id, "regen")
         elif action == "menu_instruction":
             cmd_instruction(call.message)
         elif action == "menu_proxy":
-            cmd_proxy(call.message)
+            cmd_proxy(call.message)  # MTProxy не гейтим — открыт для всех
         elif action == "menu_mobile_vpn":
+            if not _check_access_or_block(call.message.chat.id, call.from_user.id):
+                return
             cmd_mobile_vpn(call.message)
         elif action == "menu_status":
             cmd_status(call.message)
@@ -1801,6 +2046,104 @@ def main() -> None:
         "Старый конфиг удалите и замените новым."
     )
 
+    @bot.message_handler(commands=["migrate_reset"])
+    def cmd_migrate_reset(message: types.Message) -> None:  # type: ignore[override]
+        """
+        Selective reset для миграции на @vpnkronos_bot: сбрасывает AmneziaWG peer,
+        VLESS UUID и sub_token у юзеров, которые не прошли /start в новом боте
+        (migrated_at IS NULL).
+
+        Двушаговое подтверждение:
+          /migrate_reset           → показывает превью кого тронем
+          /migrate_reset RESET     → реально сбрасывает
+        """
+        if not message.from_user:
+            return
+        if not is_owner(message.from_user.id, admin_id):
+            return  # silent — не выдаём наличие команды
+
+        args = (message.text or "").split(maxsplit=1)
+        confirmation = args[1].strip().upper() if len(args) > 1 else ""
+
+        from .wireguard_peers import _remove_amneziawg_peer  # type: ignore[attr-defined]
+        from .storage import delete_peer, get_all_peers
+        from .vless_peers import remove_vless_client_for_user
+
+        users = db_get_non_migrated_users()
+        if not users:
+            safe_reply(message, "✅ Все активные юзеры уже прошли /start в новом боте. Сбрасывать нечего.")
+            return
+
+        if confirmation != "RESET":
+            # Превью без действий
+            preview_lines = []
+            for u in users[:15]:
+                uname = u.get("username") or "no_username"
+                preview_lines.append(f"  • @{uname} (id: <code>{u['telegram_id']}</code>)")
+            preview = "\n".join(preview_lines)
+            more = f"\n  ... и ещё {len(users) - 15}" if len(users) > 15 else ""
+            text = (
+                f"⚠️ Не-перешедших юзеров (migrated_at IS NULL): <b>{len(users)}</b>\n\n"
+                f"{preview}{more}\n\n"
+                f"Сброс выполнит:\n"
+                f"  • удалит AmneziaWG peers у этих юзеров\n"
+                f"  • удалит VLESS UUIDs (на серверах)\n"
+                f"  • очистит sub_token (subscription-ссылка перестанет отдавать конфиг)\n\n"
+                f"БД-запись юзера и email НЕ удаляются.\n\n"
+                f"Подтвердить: <code>/migrate_reset RESET</code>"
+            )
+            safe_reply(message, text)
+            return
+
+        # Реально сбрасываем
+        all_peers = get_all_peers()
+        reset_summary = {"awg_removed": 0, "vless_removed": 0, "sub_tokens_cleared": 0, "errors": 0}
+        for u in users:
+            tid = int(u["telegram_id"])
+
+            # 1. AmneziaWG peers (могут быть несколько — pc / ios / android)
+            user_peers = [p for p in all_peers if p.telegram_id == tid and p.active]
+            for peer in user_peers:
+                try:
+                    if peer.public_key:
+                        _remove_amneziawg_peer(peer.public_key)
+                    delete_peer(tid, peer.server_id, peer.platform or "pc")
+                    reset_summary["awg_removed"] += 1
+                except Exception as e:
+                    logger.warning("migrate_reset: AWG remove tid=%s failed: %s", tid, e)
+                    reset_summary["errors"] += 1
+
+            # 2. VLESS клиент
+            try:
+                remove_vless_client_for_user(tid)
+                reset_summary["vless_removed"] += 1
+            except Exception as e:
+                # Если у юзера не было VLESS — это норма, не считаем ошибкой
+                logger.debug("migrate_reset: VLESS remove tid=%s: %s", tid, e)
+
+            # 3. sub_token
+            try:
+                db_clear_sub_token(tid)
+                reset_summary["sub_tokens_cleared"] += 1
+            except Exception as e:
+                logger.warning("migrate_reset: clear sub_token tid=%s failed: %s", tid, e)
+                reset_summary["errors"] += 1
+
+        # Сохраняем AmneziaWG-конфиг в контейнере (persistance после reboot)
+        try:
+            execute_server_command("eu1", "/opt/amnezia-save-conf.sh 2>/dev/null || true", timeout=10)
+        except Exception as e:
+            logger.warning("migrate_reset: amnezia-save-conf.sh failed: %s", e)
+
+        safe_reply(
+            message,
+            f"✅ Selective reset выполнен.\n\n"
+            f"  • AWG peers сброшено: {reset_summary['awg_removed']}\n"
+            f"  • VLESS клиенты сброшено: {reset_summary['vless_removed']}\n"
+            f"  • sub_token очищено: {reset_summary['sub_tokens_cleared']}\n"
+            f"  • ошибок: {reset_summary['errors']}",
+        )
+
     @bot.message_handler(commands=["broadcast"])
     def cmd_broadcast(message: types.Message) -> None:  # type: ignore[override]
         """
@@ -2195,6 +2538,8 @@ def main() -> None:
             return
         if not _is_authorized(call.from_user.id):
             bot.send_message(call.message.chat.id, "Нет доступа.")
+            return
+        if not _check_access_or_block(call.message.chat.id, call.from_user.id):
             return
         tid = call.from_user.id
         try:
