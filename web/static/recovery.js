@@ -352,25 +352,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Блок «Продлить подписку» — Telegram Stars (нативно) + ручной СБП/карта (скоро).
+  // Блок «Продлить подписку» — Telegram Stars (нативно) + ручной СБП/карта.
+  // Показываем ВСЕМ (включая grandfather/owner) — пусть видят, что доступно.
   function renderPayBlock(d) {
     if (!payBlock) return;
-    // Скрыть для grandfather (срок > 2 лет — фактически бессрочный)
-    if ((d.days_left || 0) > 730) {
-      payBlock.hidden = true;
-      return;
-    }
     payBlock.hidden = false;
     payBlock.innerHTML = '';
 
+    const mp = d.manual_pay || {};
+    const rub = d.subscription_rub_price || mp.rub || 200;
+    const stars = d.stars_monthly_price || 150;
+    const days = d.subscription_days || 30;
+
     const title = document.createElement('div');
     title.className = 'acc-subtitle';
-    title.textContent = '💳 Продлить подписку — 30 дней';
+    title.textContent = `💳 Продлить подписку — ${days} дней`;
     payBlock.appendChild(title);
 
     const note = document.createElement('p');
     note.className = 'section-hint';
-    note.textContent = 'Цена: ~200 ₽ (или 150 ⭐ Telegram Stars). Подписка продлевается на 30 дней.';
+    note.textContent = `Цена: ${rub} ₽ (или ${stars} ⭐ Telegram Stars). Подписка продлевается на ${days} дней.`;
     payBlock.appendChild(note);
 
     // Telegram Stars (только в TG WebApp — снаружи tg.openInvoice не работает)
@@ -378,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const starsBtn = document.createElement('button');
       starsBtn.type = 'button';
       starsBtn.className = 'btn-recovery copy-primary';
-      starsBtn.textContent = '⭐ Оплатить Telegram Stars (150 ⭐)';
+      starsBtn.textContent = `⭐ Оплатить Telegram Stars (${stars} ⭐)`;
       starsBtn.addEventListener('click', async () => {
         starsBtn.disabled = true;
         haptic('light');
@@ -422,17 +423,100 @@ document.addEventListener('DOMContentLoaded', () => {
       payBlock.appendChild(starsBtn);
     }
 
-    // Ручная оплата (СБП / карта) — placeholder, активируется когда добавим реквизиты
+    // ── Ручная оплата (СБП / карта Т-Банк) — раскрывающийся блок ────────────
     const manualBtn = document.createElement('button');
     manualBtn.type = 'button';
     manualBtn.className = 'btn-recovery btn-recovery-secondary copy-primary';
     manualBtn.style.marginTop = '8px';
-    manualBtn.textContent = '💳 Оплатить картой / СБП';
+    manualBtn.textContent = '💳 Оплатить СБП / картой (Т-Банк)';
+
+    const manualBox = document.createElement('div');
+    manualBox.className = 'manual-pay-box';
+    manualBox.style.marginTop = '10px';
+    manualBox.hidden = true;
+
+    const intro = document.createElement('p');
+    intro.className = 'section-hint';
+    intro.style.marginTop = '0';
+    intro.innerHTML = (
+      `Переведи <b>${rub} ₽</b> любым удобным способом, затем напиши владельцу — ` +
+      `подтвердит вручную в течение часа (обычно быстрее).`
+    );
+    manualBox.appendChild(intro);
+
+    // СБП по телефону
+    if (mp.sbp_phone) {
+      const sbpTitle = document.createElement('div');
+      sbpTitle.className = 'manual-pay-title';
+      sbpTitle.innerHTML = `<b>📱 СБП по телефону</b> — <span class="muted">${mp.sbp_bank || ''}</span>`;
+      manualBox.appendChild(sbpTitle);
+      renderLinkBlock(manualBox, mp.sbp_phone, '', '📋 Скопировать номер');
+    }
+
+    // Карта
+    if (mp.card) {
+      const cardTitle = document.createElement('div');
+      cardTitle.className = 'manual-pay-title';
+      cardTitle.style.marginTop = '10px';
+      cardTitle.innerHTML = `<b>💳 Карта</b> — <span class="muted">${mp.card_bank || ''}</span>`;
+      manualBox.appendChild(cardTitle);
+      // Копируем без пробелов (банк сам разрулит)
+      const cardDigits = String(mp.card).replace(/\s/g, '');
+      renderLinkBlock(manualBox, cardDigits, '', '📋 Скопировать номер карты');
+    }
+
+    // Шаблон комментария к переводу
+    const commentTitle = document.createElement('div');
+    commentTitle.className = 'manual-pay-title';
+    commentTitle.style.marginTop = '10px';
+    commentTitle.innerHTML = '<b>💬 Комментарий к переводу</b> (опционально)';
+    manualBox.appendChild(commentTitle);
+    const myEmail = currentEmail || (d.email || '');
+    const comment = myEmail ? `VPN ${myEmail}` : 'VPN';
+    renderLinkBlock(manualBox, comment, '', '📋 Скопировать комментарий');
+
+    // Кнопка «Написать владельцу»
+    if (mp.owner_tg) {
+      const ownerLink = `https://t.me/${mp.owner_tg}`;
+      const ownerBtn = document.createElement('a');
+      ownerBtn.href = ownerLink;
+      ownerBtn.target = '_blank';
+      ownerBtn.rel = 'noopener';
+      ownerBtn.className = 'btn-recovery copy-primary';
+      ownerBtn.style.display = 'block';
+      ownerBtn.style.textAlign = 'center';
+      ownerBtn.style.textDecoration = 'none';
+      ownerBtn.style.marginTop = '12px';
+      ownerBtn.textContent = `✉️ Написать @${mp.owner_tg} после оплаты`;
+      // В TG WebApp — нативный openTelegramLink (без выхода из Telegram)
+      ownerBtn.addEventListener('click', (e) => {
+        haptic('light');
+        if (inTelegram && tg.openTelegramLink) {
+          e.preventDefault();
+          try { tg.openTelegramLink(ownerLink); } catch (_) {}
+        }
+      });
+      manualBox.appendChild(ownerBtn);
+
+      const step = document.createElement('p');
+      step.className = 'section-hint';
+      step.style.marginTop = '8px';
+      step.style.opacity = '0.85';
+      step.textContent = (
+        'Что написать: «Оплатил ' + rub + ' ₽ за VPN' +
+        (myEmail ? ' (' + myEmail + ')' : '') +
+        '». Прикрепи скрин чека — так быстрее.'
+      );
+      manualBox.appendChild(step);
+    }
+
     manualBtn.addEventListener('click', () => {
       haptic('light');
-      notify('Скоро. Свяжись с владельцем для оплаты картой/СБП напрямую (контакт в канале @vforfriends).');
+      manualBox.hidden = !manualBox.hidden;
     });
+
     payBlock.appendChild(manualBtn);
+    payBlock.appendChild(manualBox);
   }
 
   // Блок «Добавить/Изменить пароль» — раскрывает инлайн-форму

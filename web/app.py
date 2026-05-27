@@ -26,7 +26,7 @@ import urllib.request
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from flask import Flask, Response, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, render_template_string, request, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -59,6 +59,10 @@ from bot.database import (
     db_is_access_active,
     db_find_user_by_telegram_id,
     db_ensure_signup_trial,
+    db_record_payment,
+    db_find_payment_by_external_id,
+    db_extend_subscription,
+    db_apply_referral_bonus,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -102,6 +106,17 @@ TRIAL_DAYS = 14            # длина пробного периода
 REFERRAL_REWARD_DAYS = 14  # +дней обоим при первой оплате приглашённого
 SUBSCRIPTION_DAYS_PER_PAYMENT = 30  # сколько дней даёт одна оплата (любым провайдером)
 STARS_MONTHLY_PRICE = 150  # цена в Telegram Stars за SUBSCRIPTION_DAYS_PER_PAYMENT дней (~200 ₽)
+SUBSCRIPTION_RUB_PRICE = 200  # цена в рублях за SUBSCRIPTION_DAYS_PER_PAYMENT дней
+
+# Реквизиты владельца для ручной оплаты (СБП / карта). Не секрет (для приёма платежей).
+MANUAL_PAY = {
+    "sbp_phone": "+79213032918",
+    "sbp_bank": "Т-Банк (Тинькофф)",
+    "card": "2200 7007 6046 4759",
+    "card_bank": "Т-Банк (Тинькофф)",
+    "owner_tg": "nikkronos",
+    "rub": SUBSCRIPTION_RUB_PRICE,
+}
 
 
 def _require_admin_auth(f):
@@ -990,9 +1005,15 @@ def api_account_info():
             "days_left": days_left,
             "grandfathered": grandfathered,
             "trial_used": bool(sub.get("trial_used")),
-            "trial_available": not bool(sub.get("trial_used")),
+            # Триал доступен только новым (expires_at IS NULL) и не использовавшим.
+            # Grandfather/платящие — не видят кнопку, чтобы не путать.
+            "trial_available": (not bool(sub.get("trial_used"))) and (expires_at is None),
             "trial_days": TRIAL_DAYS,
             "has_password": db_has_password(telegram_id),
+            "manual_pay": MANUAL_PAY,
+            "subscription_rub_price": SUBSCRIPTION_RUB_PRICE,
+            "stars_monthly_price": STARS_MONTHLY_PRICE,
+            "subscription_days": SUBSCRIPTION_DAYS_PER_PAYMENT,
             "referral_code": code,
             "referral_link_path": f"/recovery?ref={code}" if code else None,
             "invited_count": db_count_referrals(code) if code else 0,
@@ -1082,6 +1103,190 @@ def api_billing_create_stars_invoice():
     except Exception as e:
         logger.exception("api/billing/create-stars-invoice: %s", e)
         return jsonify({"error": str(e)}), 500
+
+
+_ADMIN_CREDIT_TEMPLATE = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8">
+<title>Подтверждение оплаты — VPN Kronos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #0f1419; color: #e6e6e6; margin: 0; padding: 20px; }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.4em; }
+  form { background: #1a1f2b; padding: 18px; border-radius: 10px;
+         border: 1px solid #2a3243; }
+  label { display: block; margin-top: 12px; font-weight: 600; color: #c0c8d4; }
+  input, select, textarea { width: 100%; box-sizing: border-box; margin-top: 4px;
+    padding: 9px 11px; background: #0f1419; border: 1px solid #2a3243;
+    color: #e6e6e6; border-radius: 7px; font-size: 1em; }
+  .hint { font-size: 0.85em; color: #8b94a3; margin-top: 4px; }
+  button { margin-top: 18px; padding: 11px 16px; background: #4a9eff;
+    color: #fff; border: 0; border-radius: 8px; font-size: 1em;
+    font-weight: 600; cursor: pointer; }
+  button:hover { background: #5dade2; }
+  .ok { background: #1b3a2a; border: 1px solid #2d6a48; color: #8eff9e;
+        padding: 12px; border-radius: 8px; margin-bottom: 14px; }
+  .err { background: #3a1b1b; border: 1px solid #6a2d2d; color: #ff8e8e;
+        padding: 12px; border-radius: 8px; margin-bottom: 14px; }
+  details { margin-top: 16px; color: #8b94a3; }
+  code { background: #0a0d12; padding: 2px 6px; border-radius: 4px; }
+</style></head><body><div class="wrap">
+<h1>💳 Подтверждение ручной оплаты</h1>
+{% if msg_ok %}<div class="ok">{{ msg_ok }}</div>{% endif %}
+{% if msg_err %}<div class="err">{{ msg_err }}</div>{% endif %}
+<form method="POST" action="/admin/credit">
+  <label>Email пользователя <span class="hint">(или telegram_id ниже — что-то одно)</span></label>
+  <input type="email" name="email" placeholder="user@example.com" value="{{ form.email or '' }}">
+
+  <label>Telegram ID <span class="hint">(если знаешь — точнее, чем email)</span></label>
+  <input type="number" name="telegram_id" placeholder="123456789" value="{{ form.telegram_id or '' }}">
+
+  <label>Дней продления</label>
+  <input type="number" name="days" value="{{ form.days or 30 }}" min="1" max="3650" required>
+
+  <label>Сумма оплаты</label>
+  <input type="number" name="amount" step="0.01" value="{{ form.amount or 200 }}" required>
+
+  <label>Валюта</label>
+  <select name="currency">
+    <option value="RUB" {% if form.currency == 'RUB' or not form.currency %}selected{% endif %}>RUB</option>
+    <option value="USD" {% if form.currency == 'USD' %}selected{% endif %}>USD</option>
+    <option value="XTR" {% if form.currency == 'XTR' %}selected{% endif %}>XTR (Stars)</option>
+  </select>
+
+  <label>Провайдер</label>
+  <select name="provider">
+    <option value="manual_sbp" {% if form.provider == 'manual_sbp' or not form.provider %}selected{% endif %}>СБП (ручной)</option>
+    <option value="manual_card" {% if form.provider == 'manual_card' %}selected{% endif %}>Карта (ручной)</option>
+    <option value="manual_crypto" {% if form.provider == 'manual_crypto' %}selected{% endif %}>Крипта (ручной)</option>
+    <option value="manual_other" {% if form.provider == 'manual_other' %}selected{% endif %}>Другое</option>
+  </select>
+
+  <label>External ID <span class="hint">(номер чека / транзакции; для идемпотентности — повторный submit с тем же ID не зачислит дважды)</span></label>
+  <input type="text" name="external_id" value="{{ form.external_id or '' }}" placeholder="напр. tbnk-2025-05-27-12345">
+
+  <label>Заметка <span class="hint">(опционально)</span></label>
+  <textarea name="notes" rows="2" placeholder="напр. перевод от Ивана 2200**4759">{{ form.notes or '' }}</textarea>
+
+  <button type="submit">✅ Зачислить</button>
+</form>
+
+<details><summary>Как пользоваться</summary>
+<p>Когда пользователь сообщил об оплате (СБП/карта) — открой эту форму, введи email <i>или</i> telegram_id, сумму и дни (обычно 30). Submit:</p>
+<ul>
+  <li>создаётся запись в <code>payments</code> (status=<code>succeeded</code>) с указанным <code>external_id</code> для идемпотентности;</li>
+  <li>продлевается подписка на N дней;</li>
+  <li>если у пользователя был <code>referred_by</code> и бонус ещё не начислен — оба получают +{{ referral_days }} дней.</li>
+</ul>
+<p>Повторный submit с тем же <code>external_id</code> вернёт ошибку — двойного зачисления не будет.</p>
+</details>
+
+</div></body></html>"""
+
+
+@app.route("/admin/credit", methods=["GET", "POST"])
+@_require_admin_auth
+def admin_credit():
+    """
+    Админ-форма для ручного подтверждения оплат (СБП / карта / крипта).
+    Защищена @_require_admin_auth (cookie-сессия после /login).
+    POST → db_record_payment + db_extend_subscription + db_apply_referral_bonus.
+    Idempotent по external_id (если задан).
+    """
+    msg_ok = None
+    msg_err = None
+    form = {}
+
+    if request.method == "POST":
+        form = {
+            "email": (request.form.get("email") or "").strip().lower(),
+            "telegram_id": (request.form.get("telegram_id") or "").strip(),
+            "days": (request.form.get("days") or "").strip(),
+            "amount": (request.form.get("amount") or "").strip(),
+            "currency": (request.form.get("currency") or "RUB").strip(),
+            "provider": (request.form.get("provider") or "manual_sbp").strip(),
+            "external_id": (request.form.get("external_id") or "").strip() or None,
+            "notes": (request.form.get("notes") or "").strip(),
+        }
+        try:
+            # Резолвим пользователя
+            telegram_id = None
+            user_email = form["email"] or None
+            if form["telegram_id"]:
+                try:
+                    telegram_id = int(form["telegram_id"])
+                except ValueError:
+                    raise ValueError("telegram_id должен быть числом")
+                row = db_find_user_by_telegram_id(telegram_id)
+                if not row:
+                    raise ValueError(f"Пользователь с telegram_id={telegram_id} не найден")
+                if not user_email:
+                    user_email = (row.get("email") or "").lower() or None
+            elif user_email:
+                row = db_find_user_by_email(user_email)
+                if not row:
+                    raise ValueError(f"Пользователь с email={user_email} не найден")
+                telegram_id = int(row["telegram_id"])
+            else:
+                raise ValueError("Укажи email или telegram_id")
+
+            # Парсим числа
+            try:
+                days = int(form["days"])
+                if days < 1 or days > 3650:
+                    raise ValueError
+            except ValueError:
+                raise ValueError("Дней: число 1–3650")
+            try:
+                amount = float(form["amount"])
+            except ValueError:
+                raise ValueError("Сумма должна быть числом")
+
+            # Идемпотентность по external_id
+            if form["external_id"]:
+                existing = db_find_payment_by_external_id(form["external_id"])
+                if existing:
+                    raise ValueError(
+                        f"Платёж с external_id='{form['external_id']}' уже зачислен "
+                        f"(payment_id={existing.get('id')}, status={existing.get('status')})"
+                    )
+
+            # 1) Запись платежа
+            pay_id = db_record_payment(
+                provider=form["provider"],
+                amount=amount,
+                currency=form["currency"],
+                telegram_id=telegram_id,
+                email=user_email,
+                external_id=form["external_id"],
+                plan=f"manual_{days}d",
+                days=days,
+                status="succeeded",
+            )
+            # 2) Продление подписки
+            new_exp = db_extend_subscription(telegram_id, days=days, plan="paid", status="active")
+            # 3) Реферальный бонус (idempotent)
+            inviter_tid = db_apply_referral_bonus(telegram_id, REFERRAL_REWARD_DAYS)
+
+            msg_ok = (
+                f"✅ Зачислено: payment_id={pay_id}, +{days} дн (до {new_exp}). "
+                + (f"Реферальный бонус +{REFERRAL_REWARD_DAYS} дн обоим (inviter tid={inviter_tid})." if inviter_tid else "")
+            )
+            form = {}  # очистить форму после успеха
+        except ValueError as ve:
+            msg_err = str(ve)
+        except Exception as e:
+            logger.exception("/admin/credit POST: %s", e)
+            msg_err = f"Ошибка: {e}"
+
+    return render_template_string(
+        _ADMIN_CREDIT_TEMPLATE,
+        msg_ok=msg_ok,
+        msg_err=msg_err,
+        form=form,
+        referral_days=REFERRAL_REWARD_DAYS,
+    )
 
 
 @app.route("/api/account/set-password", methods=["POST"])

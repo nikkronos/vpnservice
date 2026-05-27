@@ -465,6 +465,13 @@ footer a:hover {
 
 .acc-subtitle { font-weight: 700; color: var(--text); }
 
+.manual-pay-box {
+    border-top: 1px dashed var(--border2);
+    padding-top: 10px;
+}
+.manual-pay-title { font-size: 0.95em; color: var(--text); margin-top: 4px; }
+.muted { color: var(--text-dim); font-size: 0.9em; font-weight: 400; }
+
 .account-subhead {
     margin-top: 26px;
     margin-bottom: 2px;
