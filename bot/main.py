@@ -184,9 +184,10 @@ def main() -> None:
     try:
         bot.set_my_commands([
             types.BotCommand("start", "Меню"),
+            types.BotCommand("lk", "Личный кабинет"),
             types.BotCommand("status", "Статус подписки"),
         ])
-        logger.info("Bot commands set: /start, /status")
+        logger.info("Bot commands set: /start, /lk, /status")
     except Exception as e:
         logger.warning("set_my_commands failed: %s", e)
 
@@ -1349,20 +1350,39 @@ def main() -> None:
                 days_left = 0
         if not expires_at:
             # Бессрочный (grandfather) — отображаем как «Активна без срока»
-            status_text = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
+            sub_line = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
         else:
             exp_str = expires_at[:10]
             if days_left > 0:
                 kind = "Пробный период" if sub_status == "trial" else "Подписка"
                 icon = "⚠️" if days_left <= 3 else "✅"
-                status_text = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
+                sub_line = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
             else:
-                status_text = (
+                sub_line = (
                     f"🔴 <b>Подписка:</b> неактивна (истекла {exp_str}).\n"
                     f"Нажми «💳 Продлить подписку» в меню."
                 )
 
+        status_text = f"{sub_line}\n\n🌍 <b>Сервер:</b> Германия"
         safe_reply(message, status_text)
+
+    @bot.message_handler(commands=["lk"])
+    def cmd_lk(message: types.Message) -> None:  # type: ignore[override]
+        """Открывает ЛК (Mini App). Доступно из команды-меню бота."""
+        if not message.from_user:
+            return
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton(
+                "🌐 Открыть личный кабинет",
+                web_app=types.WebAppInfo(url=recovery_url),
+            ),
+        )
+        safe_reply(
+            message,
+            "🌐 Личный кабинет VPN Kronos — нажми кнопку ниже, чтобы открыть.",
+            reply_markup=markup,
+        )
 
     @bot.message_handler(commands=["instruction"])
     def cmd_instruction(message: types.Message) -> None:  # type: ignore[override]
