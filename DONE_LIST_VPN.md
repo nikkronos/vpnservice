@@ -1,5 +1,28 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-05-27 — Telegram Stars + ручная СБП/карта + админ-форма зачисления (Phase 3g + 3g+)
+
+Промежуточный платёжный стек до автоматизации. Stars-флоу + рабочий ручной флоу + админ-форма; авто-зачисление платежей вынесено отдельной развилкой в ROADMAP («Автоматизация платежей»).
+
+**Phase 3g — Telegram Stars (одноразовая оплата, commit `d0155e8`):**
+- `web/app.py`: `/api/billing/create-stars-invoice` — `createInvoiceLink` с currency=XTR, payload `stars_sub:{tid}:{days}:{ts}`. Константы `STARS_MONTHLY_PRICE=150`, `SUBSCRIPTION_DAYS_PER_PAYMENT=30`.
+- `bot/main.py`: `pre_checkout_query` (approve all) + `successful_payment` хендлер. Парсит payload → idempotency через `db_find_payment_by_external_id(telegram_payment_charge_id)` → `db_record_payment` (status=succeeded) → `db_extend_subscription(+30 дн)` → `db_apply_referral_bonus(+14 дн обоим)` → уведомления юзеру и пригласившему.
+- `web/static/recovery.js`: кнопка «⭐ Оплатить Telegram Stars (150 ⭐)» в payBlock, `tg.openInvoice` с callback.
+
+**Phase 3g+ — Ручная СБП/карта + админ-форма (commit `8ee3541`):**
+- `web/app.py`: константа `MANUAL_PAY` (СБП `+79213032918` Т-Банк, карта `2200 7007 6046 4759` Т-Банк, owner_tg `nikkronos`, rub `200`). Отдаётся в `/api/account/info`.
+- `web/static/recovery.js`: pay-block теперь показывается всем (убрано `days_left > 730` скрытие — владелец-grandfather мог тестировать). Разворачивающийся блок «💳 Оплатить СБП / картой» с реквизитами (кнопка «Скопировать номер» / «Скопировать номер карты») + шаблон комментария «VPN <email>» + кнопка «✉️ Написать @nikkronos после оплаты» (`openTelegramLink` в TG, новая вкладка в браузере).
+- `web/app.py`: **`/admin/credit`** — HTML-форма ручного зачисления оплаты (за `@_require_admin_auth`, render_template_string). Поля: email **или** telegram_id, дни, сумма, валюта (RUB/USD/XTR), провайдер (manual_sbp/card/crypto/other), external_id (idempotency), заметка. POST → `db_record_payment` (status=succeeded) → `db_extend_subscription` → `db_apply_referral_bonus`. Повторный submit с тем же `external_id` → ошибка, двойного зачисления нет.
+
+**Фикс UX:**
+- `trial_available = (not trial_used) AND (expires_at IS NULL)` — grandfather (`expires_at='2099-01-01'`) больше не видит кнопку триала. Ранее владелец случайно её активировал — статус стал «ПРОБНЫЙ ПЕРИОД», но 26500+ дней (безвредно).
+
+**CSS:** `.manual-pay-box` (пунктирная граница сверху), `.manual-pay-title`, `.muted` — стилизация развёрнутого блока реквизитов.
+
+**Что осталось:** автоматизация платежей — 4 варианта в ROADMAP (Crypto / Stars-subscription / уникальные копейки + парсер / самозанятость + Lava). Владелец думает.
+
+---
+
 ## 2026-05-25 (вечер) — Домен `supportkronos.online`, прямой HTTPS на Fornex, subscription-спайк validated
 
 Пост FSystem88/1717 → решили проверить модель «subscription-URL + HAPP» на нашей инфре (аддитивно).
