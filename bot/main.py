@@ -173,15 +173,22 @@ def main() -> None:
     # При запуске бота через Telegram.WebApp клиент шлёт initData → auto-login по telegram_id.
     # Set глобально (для всех юзеров бота). Идемпотентно — повтор не вреден.
     recovery_url = getattr(config, "vpn_recovery_url", None) or "https://supportkronos.online:8443/recovery"
+    # Левая кнопка input bar — нативное «Меню» с командами бота (set_my_commands).
+    # Mini App остаётся доступным через инлайн-кнопку «🌐 Открыть личный кабинет»
+    # в основном меню /start.
     try:
-        bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(
-            type="web_app",
-            text="🌐 Личный кабинет",
-            web_app=types.WebAppInfo(url=recovery_url),
-        ))
-        logger.info("Menu Button set to WebApp: %s", recovery_url)
+        bot.set_chat_menu_button(menu_button=types.MenuButtonCommands(type="commands"))
+        logger.info("Menu Button set to Commands (left bar)")
     except Exception as e:
         logger.warning("set_chat_menu_button failed: %s", e)
+    try:
+        bot.set_my_commands([
+            types.BotCommand("start", "Меню"),
+            types.BotCommand("status", "Статус подписки"),
+        ])
+        logger.info("Bot commands set: /start, /status")
+    except Exception as e:
+        logger.warning("set_my_commands failed: %s", e)
 
     def safe_reply(message: types.Message, text: str, reply_markup=None) -> bool:
         """Отправляет ответ; при ошибке логирует и возвращает False.
@@ -1313,7 +1320,7 @@ def main() -> None:
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
-        """Показывает статус подписки и VPN-доступа пользователя."""
+        """Показывает статус подписки пользователя."""
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
@@ -1322,9 +1329,7 @@ def main() -> None:
             return
 
         tid = message.from_user.id
-        user = find_user(tid)
 
-        # ── Блок 1: подписка ────────────────────────────────────────────────
         import math
         from datetime import datetime as _dt
         try:
@@ -1344,47 +1349,19 @@ def main() -> None:
                 days_left = 0
         if not expires_at:
             # Бессрочный (grandfather) — отображаем как «Активна без срока»
-            sub_block = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
+            status_text = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
         else:
             exp_str = expires_at[:10]
             if days_left > 0:
                 kind = "Пробный период" if sub_status == "trial" else "Подписка"
                 icon = "⚠️" if days_left <= 3 else "✅"
-                sub_block = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
+                status_text = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
             else:
-                sub_block = (
+                status_text = (
                     f"🔴 <b>Подписка:</b> неактивна (истекла {exp_str}).\n"
                     f"Нажми «💳 Продлить подписку» в меню."
                 )
 
-        # ── Блок 2: VPN peer ────────────────────────────────────────────────
-        preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
-        servers_info = get_available_servers()
-        preferred_server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-
-        peer = find_peer_by_telegram_id(tid, server_id=preferred_server_id)
-        if not peer:
-            peer = find_peer_by_telegram_id(tid, server_id=None)
-
-        if peer and peer.active:
-            actual_server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
-            vpn_block = (
-                f"🔐 <b>VPN-доступ:</b> создан\n"
-                f"   • Сервер: {actual_server_name} ({peer.server_id})\n"
-                f"   • IP в VPN-сети: <code>{peer.wg_ip}</code>"
-            )
-            if peer.server_id != preferred_server_id:
-                vpn_block += (
-                    f"\n   ⚠️ Выбранный сервер: {preferred_server_name} ({preferred_server_id}), "
-                    f"но активный peer на {actual_server_name}."
-                )
-        else:
-            vpn_block = (
-                "🔐 <b>VPN-доступ:</b> не создан\n"
-                "   Нажми «📲 Получить VPN» в меню."
-            )
-
-        status_text = f"{sub_block}\n\n{vpn_block}"
         safe_reply(message, status_text)
 
     @bot.message_handler(commands=["instruction"])
