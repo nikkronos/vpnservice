@@ -1325,14 +1325,23 @@ def main() -> None:
         user = find_user(tid)
 
         # ── Блок 1: подписка ────────────────────────────────────────────────
+        import math
+        from datetime import datetime as _dt
         try:
             sub = db_get_subscription(tid) or {}
         except Exception as e:
             logger.warning("cmd_status: db_get_subscription failed: %s", e)
             sub = {}
         expires_at = sub.get("expires_at")
-        days_left = sub.get("days_left") or 0
         sub_status = sub.get("subscription_status") or "none"
+        # db_get_subscription не возвращает days_left — считаем сами (как в /api/account/info).
+        days_left = 0
+        if expires_at:
+            try:
+                delta = _dt.fromisoformat(expires_at) - _dt.utcnow()
+                days_left = max(0, math.ceil(delta.total_seconds() / 86400.0))
+            except (ValueError, TypeError):
+                days_left = 0
         if not expires_at:
             # Бессрочный (grandfather) — отображаем как «Активна без срока»
             sub_block = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
@@ -1340,10 +1349,7 @@ def main() -> None:
             exp_str = expires_at[:10]
             if days_left > 0:
                 kind = "Пробный период" if sub_status == "trial" else "Подписка"
-                if days_left <= 3:
-                    icon = "⚠️"
-                else:
-                    icon = "✅"
+                icon = "⚠️" if days_left <= 3 else "✅"
                 sub_block = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
             else:
                 sub_block = (
