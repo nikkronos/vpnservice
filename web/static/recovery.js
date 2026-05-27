@@ -36,19 +36,43 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentEmail = '';
   const refCode = new URLSearchParams(location.search).get('ref') || '';
 
-  // ── Telegram Mini App auto-login (если открыто из бота) ──────────────────
-  // В обычном браузере Telegram.WebApp пуст → флоу не меняется (email/пароль).
-  (function tryTelegramAutoLogin() {
-    const tg = window.Telegram && window.Telegram.WebApp;
-    const initData = tg && tg.initData;
-    if (!initData) return;
+  // ── Telegram WebApp context ──────────────────────────────────────────────
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const inTelegram = !!(tg && tg.initData);
+  if (inTelegram) {
+    document.body.classList.add('tg-mode');
     try { tg.ready(); tg.expand(); } catch (e) {}
+  }
+
+  // Нативные TG-диалоги (showAlert) — fallback на browser alert вне TG.
+  function notify(message) {
+    if (inTelegram && tg.showAlert) {
+      try { tg.showAlert(message); return; } catch (e) {}
+    }
+    alert(message);
+  }
+
+  // Тактильный отклик: 'success'|'error'|'warning' (notification) или 'light'|'medium'|'heavy' (impact).
+  function haptic(type) {
+    if (!inTelegram || !tg.HapticFeedback) return;
+    try {
+      if (type === 'success' || type === 'error' || type === 'warning') {
+        tg.HapticFeedback.notificationOccurred(type);
+      } else {
+        tg.HapticFeedback.impactOccurred(type || 'light');
+      }
+    } catch (e) {}
+  }
+
+  // ── Telegram WebApp auto-login (если открыто из бота) ────────────────────
+  // В обычном браузере inTelegram=false → флоу не меняется (email/пароль).
+  if (inTelegram) {
     (async () => {
       try {
         const r = await fetch('/api/auth/tg-webapp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: initData }),
+          body: JSON.stringify({ init_data: tg.initData }),
         });
         if (!r.ok) {
           console.warn('TG WebApp auth failed: HTTP', r.status);
@@ -62,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('TG WebApp auth error:', e);
       }
     })();
-  })();
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function setMsg(el, text, isError) {
@@ -76,6 +100,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (s) s.hidden = true;
     });
     if (step) step.hidden = false;
+    // TG BackButton (нативная стрелка в TG-хроме): на подэкранах от меню — показываем,
+    // на главных (email/otp/menu) — прячем.
+    if (inTelegram && tg.BackButton) {
+      const isSubstep = (step === stepPlatform || step === stepOperator || step === stepProxy);
+      try { isSubstep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (e) {}
+    }
+  }
+
+  // Один раз регистрируем хендлер TG BackButton: всегда возвращает в меню.
+  if (inTelegram && tg.BackButton) {
+    try { tg.BackButton.onClick(() => showStep(stepMenu)); } catch (e) {}
   }
 
   // Заметная кнопка «копировать» + сама ссылка под ней.
@@ -101,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', async () => {
       const ok = await copyToClipboard(link);
       btn.textContent = ok ? '✅ Скопировано!' : '⚠️ Выдели и скопируй вручную';
+      haptic(ok ? 'success' : 'warning');
       if (!ok) selectText(code);
       setTimeout(() => { btn.textContent = label; }, 2200);
     });
@@ -300,12 +336,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const d = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         btn.textContent = prev; btn.disabled = false;
-        alert(d.error || 'Не удалось активировать пробный период.');
+        haptic('error');
+        notify(d.error || 'Не удалось активировать пробный период.');
         return;
       }
+      haptic('success');
       loadAccount();
     } catch (err) {
       btn.textContent = prev; btn.disabled = false;
+      haptic('error');
     }
   }
 
@@ -344,6 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (pw.length < 8) {
         msg.style.color = 'var(--red)';
         msg.textContent = 'Минимум 8 символов.';
+        haptic('warning');
         return;
       }
       save.disabled = true;
@@ -360,16 +400,19 @@ document.addEventListener('DOMContentLoaded', () => {
           msg.style.color = 'var(--red)';
           msg.textContent = d.error || 'Ошибка';
           save.disabled = false;
+          haptic('error');
           return;
         }
         msg.style.color = 'var(--green)';
         msg.textContent = 'Пароль сохранён ✅';
+        haptic('success');
         inp.value = '';
         setTimeout(() => loadAccount(), 800);
       } catch (e) {
         msg.style.color = 'var(--red)';
         msg.textContent = 'Сетевая ошибка';
         save.disabled = false;
+        haptic('error');
       }
     });
 
@@ -705,6 +748,14 @@ document.addEventListener('DOMContentLoaded', () => {
       openA.style.textAlign = 'center';
       openA.style.textDecoration = 'none';
       openA.style.marginBottom = '8px';
+      // В TG WebApp — нативный openTelegramLink (без выхода из Telegram).
+      openA.addEventListener('click', (e) => {
+        haptic('light');
+        if (inTelegram && tg.openTelegramLink) {
+          e.preventDefault();
+          try { tg.openTelegramLink(link); } catch (_) {}
+        }
+      });
       proxyResult.appendChild(openA);
 
       renderLinkBlock(proxyResult, link, '', '📋 Копировать tg://');

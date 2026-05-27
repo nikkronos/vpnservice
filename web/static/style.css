@@ -721,6 +721,9 @@ footer a:hover {
 .msg-ok { color: var(--green); }
 .msg-err { color: var(--red); }
 
+/* В Telegram WebApp используется нативный BackButton в TG-хроме — нашу «« Назад» прячем */
+body.tg-mode .btn-back { display: none; }
+
 /* ── Responsive ── */
 @media (max-width: 600px) {
     body { padding: 10px; }
