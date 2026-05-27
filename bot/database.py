@@ -111,6 +111,21 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT
 );
+
+-- Donation-style payment claims: юзер жмёт «Я оплатил» → строка pending → владелец
+-- решает approve/decline через inline-кнопки в боте. Одна pending-заявка на юзера за раз.
+CREATE TABLE IF NOT EXISTS payment_claims (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id  INTEGER NOT NULL,
+    days         INTEGER NOT NULL DEFAULT 30,
+    status       TEXT NOT NULL DEFAULT 'pending',   -- 'pending'|'approved'|'declined'
+    source       TEXT,                              -- 'webapp'|'bot' — откуда пришла
+    note         TEXT,                              -- свободный текст (например, метод оплаты)
+    claimed_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    decided_at   TEXT,
+    notify_msg_id INTEGER                           -- message_id уведомления владельцу (для edit_message_text)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_claims_tid_status ON payment_claims (telegram_id, status);
 """
 
 
@@ -131,6 +146,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
     _migrate_add_referral_bonus_paid_column()
+    _migrate_add_expiry_notif_columns()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -231,6 +247,23 @@ def _migrate_add_referral_bonus_paid_column() -> None:
                 logger.info("Migration: added referral_bonus_paid column to users")
             except sqlite3.OperationalError as e:
                 logger.info("Migration: skip referral_bonus_paid (%s)", e)
+
+
+def _migrate_add_expiry_notif_columns() -> None:
+    """
+    Флаги отправки напоминаний об окончании подписки (cron expiry_reminder.py):
+    notif_7d_sent / notif_3d_sent / notif_0d_sent.
+    Сбрасываются при каждом продлении подписки → следующий цикл получит свои напоминания.
+    """
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        for col in ("notif_7d_sent", "notif_3d_sent", "notif_0d_sent"):
+            if col not in existing:
+                try:
+                    con.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+                    logger.info("Migration: added %s column to users", col)
+                except sqlite3.OperationalError as e:
+                    logger.info("Migration: skip %s (%s)", col, e)
 
 
 def _migrate_add_vless_columns() -> None:
@@ -842,9 +875,12 @@ def db_extend_subscription(
             except (ValueError, TypeError):
                 pass
         new_exp = (base + timedelta(days=days)).isoformat()
+        # При каждом продлении сбрасываем флаги напоминаний — следующий цикл
+        # должен получить свои T-7 / T-3 / T-0 события заново.
         con.execute(
             "UPDATE users SET expires_at = ?, subscription_status = ?, "
-            "plan = COALESCE(?, plan) WHERE telegram_id = ?",
+            "plan = COALESCE(?, plan), notif_7d_sent = 0, notif_3d_sent = 0, "
+            "notif_0d_sent = 0 WHERE telegram_id = ?",
             (new_exp, status, plan, telegram_id),
         )
     return new_exp
@@ -1109,3 +1145,129 @@ def db_apply_referral_bonus(telegram_id: int, reward_days: int) -> Optional[int]
     db_extend_subscription(telegram_id, days=reward_days, plan="referral_bonus")
     db_extend_subscription(inviter_tid, days=reward_days, plan="referral_bonus")
     return inviter_tid
+
+
+# ── Donation-flow: payment claims ─────────────────────────────────────────────
+
+def db_get_pending_claim(telegram_id: int) -> Optional[Dict]:
+    """Возвращает текущую pending-заявку юзера (или None)."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM payment_claims WHERE telegram_id = ? AND status = 'pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (telegram_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_create_payment_claim(
+    telegram_id: int,
+    days: int = 30,
+    source: str = "webapp",
+    note: Optional[str] = None,
+) -> Optional[int]:
+    """
+    Создаёт новую pending-заявку. Если уже есть pending — возвращает её id
+    (не плодим дубликаты при повторных нажатиях).
+    """
+    _ensure_init()
+    existing = db_get_pending_claim(telegram_id)
+    if existing:
+        return int(existing["id"])
+    with _conn() as con:
+        cur = con.execute(
+            """
+            INSERT INTO payment_claims (telegram_id, days, status, source, note)
+            VALUES (?, ?, 'pending', ?, ?)
+            """,
+            (telegram_id, days, source, note),
+        )
+        return cur.lastrowid
+
+
+def db_get_claim_by_id(claim_id: int) -> Optional[Dict]:
+    """Возвращает заявку по id."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM payment_claims WHERE id = ? LIMIT 1", (claim_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_set_claim_notify_msg(claim_id: int, message_id: int) -> None:
+    """Сохраняет message_id уведомления владельцу (для последующего edit_message_text)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE payment_claims SET notify_msg_id = ? WHERE id = ?",
+            (message_id, claim_id),
+        )
+
+
+def db_decide_claim(claim_id: int, status: str) -> Optional[Dict]:
+    """
+    Помечает claim как approved/declined и возвращает обновлённую запись.
+    Возвращает None если заявка не найдена или уже не pending.
+    """
+    _ensure_init()
+    if status not in ("approved", "declined"):
+        raise ValueError("status must be 'approved' or 'declined'")
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE payment_claims SET status = ?, decided_at = datetime('now') "
+            "WHERE id = ? AND status = 'pending'",
+            (status, claim_id),
+        )
+        if cur.rowcount == 0:
+            return None
+        row = con.execute(
+            "SELECT * FROM payment_claims WHERE id = ?", (claim_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# ── Expiry notifications (cron) ───────────────────────────────────────────────
+
+def db_users_due_for_expiry_notif(days_until: int) -> List[Dict]:
+    """
+    Возвращает юзеров, у которых:
+      - подписка истекает через days_until календарных дней (округление до даты, не часа),
+      - флаг notif_{days_until}d_sent ещё не выставлен,
+      - expires_at IS NOT NULL (не grandfather).
+    Используется cron-скриптом expiry_reminder.py.
+    """
+    _ensure_init()
+    if days_until not in (7, 3, 0):
+        raise ValueError("days_until must be 7, 3, or 0")
+    flag_col = f"notif_{days_until}d_sent"
+    today = datetime.utcnow().date()
+    target = (today + timedelta(days=days_until)).isoformat()
+    next_day = (today + timedelta(days=days_until + 1)).isoformat()
+    with _conn() as con:
+        rows = con.execute(
+            f"SELECT telegram_id, email, expires_at FROM users "
+            f"WHERE expires_at IS NOT NULL "
+            f"AND date(expires_at) = date(?) "
+            f"AND {flag_col} = 0 "
+            f"AND telegram_id IS NOT NULL "
+            f"AND active = 1",
+            (target,),
+        ).fetchall()
+        # next_day помогает быть строгим к дате (на случай зон), но date(expires_at) уже округлит.
+        _ = next_day
+        return [dict(r) for r in rows]
+
+
+def db_mark_expiry_notif_sent(telegram_id: int, days_until: int) -> None:
+    """Помечает что напоминание T-{days_until} отправлено этому юзеру."""
+    _ensure_init()
+    if days_until not in (7, 3, 0):
+        raise ValueError("days_until must be 7, 3, or 0")
+    flag_col = f"notif_{days_until}d_sent"
+    with _conn() as con:
+        con.execute(
+            f"UPDATE users SET {flag_col} = 1 WHERE telegram_id = ?",
+            (telegram_id,),
+        )

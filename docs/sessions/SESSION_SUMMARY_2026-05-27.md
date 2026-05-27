@@ -116,3 +116,47 @@ stepMenu (главная)
 - `web/templates/recovery.html` — script src переключён на локальный путь.
 - `web/static/recovery.js` — рефакторинг auto-login: `setupTelegramFeatures()` + `runAutoLogin()` + поллинг.
 - `web/app.py` — без изменений в финальном виде (debug-логирование вырезано).
+
+---
+
+## Дополнение (вечер 2026-05-27) — Stars Subscription + смена курса монетизации на donation-flow
+
+### Stars Subscription (commit `23cf3c5`)
+Расширил `/api/billing/create-stars-invoice` параметром `recurring:bool`. При `recurring=true` добавляется `subscription_period=2592000` (Bot API 8.0). В ЛК — две кнопки: «⭐ Подписка Stars (150⭐/мес, авто)» и «⭐ Оплатить Stars один раз». Идемпотентность auto-renew уже была в существующем `successful_payment_handler` (через `telegram_payment_charge_id`).
+
+### VLESS-инструкции (commit `23cf3c5`)
+Создал два недостающих файла:
+- `instruction_vless_cdn_short.txt` — для Yota/Мегафон (через main REALITY, SNI=cloud.mail.ru). УТП: «работает при белых списках».
+- `instruction_vless_reality_other_short.txt` — для «не уверен какой оператор» (REALITY через eu1/yc, SNI=microsoft.com).
+Бот подгружает их на лету при выборе «Мобильный резерв».
+
+### Убран блок «Комментарий к переводу» (commit `bc57699`)
+По фидбэку владельца — не нужен (Т-Банк требует только сумму и реквизиты).
+
+### Смена курса монетизации — donation-flow (вечерний коммит, после)
+
+**Контекст:** владелец «устал от бесконечной борьбы с провайдерами». Меняем план на простую donation-схему. Stars остаются как авто-канал.
+
+**Новый поток:**
+1. Юзер видит реквизиты + кнопку «✅ Я перевёл деньги, подтверди».
+2. Жмёт → `payment_claim` pending в БД → владельцу TG-сообщение с inline ✅/❌.
+3. Владелец проверяет в банке, жмёт ✅ → +30 дней (стакается с остатком).
+4. Если ❌ → юзеру «не подтверждено, попробуй ещё раз».
+
+**Cron-напоминания T-7 / T-3 / T-0.** `scripts/expiry_reminder.py` через cron `0 9 * * *` (12:00 МСК). Идемпотентно через флаги `notif_7d_sent` / `notif_3d_sent` / `notif_0d_sent` в `users` (сбрасываются при каждом продлении). Grandfather пропускаются. 403 (юзер заблокировал бота) — флаг ставится всё равно, чтобы не ретраить.
+
+**Файлы:**
+- БД: миграция `_migrate_add_expiry_notif_columns` + таблица `payment_claims` через `_SCHEMA`. Хелперы: `db_create_payment_claim`, `db_get_pending_claim`, `db_get_claim_by_id`, `db_decide_claim`, `db_set_claim_notify_msg`, `db_users_due_for_expiry_notif`, `db_mark_expiry_notif_sent`.
+- Web: новый endpoint `POST /api/billing/claim-payment` — auth по email-токену → создаёт claim → дёргает TG sendMessage напрямую (через urllib, без инстанса бота) → возвращает `{ok, claim_id, pending, reused}`. Возвращает `pending_claim` в `/api/account/info`.
+- Bot: callback-хендлеры `claim_approve:` / `claim_decline:` (только владелец). Кнопка «💳 Продлить подписку» в главном меню → экран реквизитов + «✅ Я перевёл деньги» → создаёт claim из бота, шлёт уведомление владельцу. После решения владельца → бот шлёт юзеру результат + редактирует своё сообщение владельцу (убирает кнопки, добавляет статус «✅ ОДОБРЕНО» / «❌ ОТКЛОНЕНО»).
+- ЛК: `renderPayBlock` переключается в pending-режим если `d.pending_claim` (показывает «Заявка отправлена, жди подтверждения»). Иначе — Stars-кнопки (как раньше) + раскрывающийся «💳 Оплатить СБП/картой» с реквизитами + большой кнопкой «✅ Я перевёл деньги, подтверди» (вместо старой «Написать @nikkronos»).
+- Cron: `scripts/expiry_reminder.py` — отправка через TG API, шаблоны T-7/T-3/T-0, разовая отправка на цикл подписки.
+- Cron entry на Fornex: `0 9 * * * cd /opt/vpnservice && /opt/vpnservice/venv/bin/python scripts/expiry_reminder.py 2>&1 | logger -t expiry-reminder`.
+
+**Чего НЕ делали (durable):**
+- Cryptomus, IMAP-парсер Т-Банка (вариант C из «Автоматизации платежей»), Lava.top + самозанятость — всё отложено, владелец 2026-05-27 явно решил не идти в эту сложность пока.
+
+**Phase C (переезд на @vpnkronos_bot) — план онбординга зафиксирован в ROADMAP:**
+- При `/start` для новых: email → OTP → дисклеймер → «🎁 14 дней бесплатно» → меню.
+- Существующих (`email_verified=1` после миграции) — сразу в меню.
+- Делается, когда владелец готов сделать broadcast в старом боте и подменить токен.

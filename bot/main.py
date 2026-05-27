@@ -26,6 +26,12 @@ from .database import (
     db_extend_subscription,
     db_find_payment_by_external_id,
     db_apply_referral_bonus,
+    db_get_claim_by_id,
+    db_decide_claim,
+    db_get_pending_claim,
+    db_create_payment_claim,
+    db_get_subscription,
+    db_find_user_by_telegram_id,
     init_db,
 )
 from .vless_peers import (
@@ -246,10 +252,11 @@ def main() -> None:
             markup.add(
                 types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_config"),
                 types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
-                types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
+                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
-                types.InlineKeyboardButton("📨 Разблокировка Telegram", callback_data="menu_proxy"),
+                types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📡 VPN при блокировках", callback_data="menu_mobile_vpn"),
+                types.InlineKeyboardButton("📨 Разблокировка Telegram", callback_data="menu_proxy"),
             )
             if is_owner(uid, admin_id):
                 markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
@@ -1912,6 +1919,212 @@ def main() -> None:
                 safe_reply(message, "Платёж получен, но при обработке возникла ошибка. Свяжись с владельцем.")
             except Exception:
                 pass
+
+    # ── Donation-flow: approve/decline inline-кнопки владельца ────────────────
+    @bot.callback_query_handler(func=lambda call: call.data and (
+        call.data.startswith("claim_approve:") or call.data.startswith("claim_decline:")
+    ))
+    def callback_claim_decision(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        # Только владелец может решать заявки.
+        if not call.from_user or call.from_user.id != admin_id:
+            bot.answer_callback_query(call.id, "Нет доступа", show_alert=False)
+            return
+        try:
+            action, claim_id_str = call.data.split(":", 1)
+            claim_id = int(claim_id_str)
+        except (ValueError, AttributeError):
+            bot.answer_callback_query(call.id, "Битые данные")
+            return
+
+        claim = db_get_claim_by_id(claim_id)
+        if not claim:
+            bot.answer_callback_query(call.id, "Заявка не найдена")
+            return
+        if claim.get("status") != "pending":
+            bot.answer_callback_query(call.id, f"Уже {claim.get('status')}")
+            # На всякий случай чистим кнопки если они ещё висят
+            try:
+                bot.edit_message_reply_markup(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+            return
+
+        tid = int(claim["telegram_id"])
+        days = int(claim.get("days") or 30)
+        user_row = db_find_user_by_telegram_id(tid) or {}
+        uname = user_row.get("username") or "—"
+        email = user_row.get("email") or "—"
+
+        if action == "claim_approve":
+            decided = db_decide_claim(claim_id, "approved")
+            if not decided:
+                bot.answer_callback_query(call.id, "Не удалось обновить заявку")
+                return
+            # Идемпотентность платежа — external_id из claim_id (никакого charge_id нет).
+            try:
+                db_record_payment(
+                    provider="manual",
+                    amount=200.0,
+                    currency="RUB",
+                    telegram_id=tid,
+                    external_id=f"claim:{claim_id}",
+                    plan="monthly",
+                    days=days,
+                    status="succeeded",
+                )
+            except Exception as e:
+                logger.warning("db_record_payment failed for claim %s: %s", claim_id, e)
+            new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            inviter_tid = None
+            try:
+                inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
+            except Exception as e:
+                logger.warning("referral bonus failed for claim %s: %s", claim_id, e)
+
+            # Уведомляем юзера
+            exp_str = (new_exp or "")[:10]
+            try:
+                bot.send_message(
+                    tid,
+                    f"✅ Оплата подтверждена. Подписка продлена на {days} дней "
+                    f"(активна до {exp_str}).",
+                )
+            except Exception as e:
+                logger.warning("notify user (approved claim) failed: %s", e)
+            if inviter_tid:
+                try:
+                    bot.send_message(
+                        tid,
+                        f"🎁 Бонус за приглашение: +{REFERRAL_REWARD_DAYS} дней тебе и пригласившему.",
+                    )
+                    bot.send_message(
+                        inviter_tid,
+                        f"🎁 Друг по твоей ссылке оплатил подписку — тебе +{REFERRAL_REWARD_DAYS} дней!",
+                    )
+                except Exception as e:
+                    logger.warning("notify inviter failed: %s", e)
+
+            # Обновляем сообщение владельца — убираем кнопки + ставим статус
+            try:
+                bot.edit_message_text(
+                    f"✅ <b>ОДОБРЕНО</b> — @{uname} (id: <code>{tid}</code>)\n"
+                    f"📧 {email}\n"
+                    f"+{days} дн, активна до {exp_str}",
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.warning("edit owner message (approved) failed: %s", e)
+            bot.answer_callback_query(call.id, "Подтверждено")
+            logger.info("Claim %s approved: tid=%s +%s дн → %s", claim_id, tid, days, exp_str)
+            return
+
+        if action == "claim_decline":
+            decided = db_decide_claim(claim_id, "declined")
+            if not decided:
+                bot.answer_callback_query(call.id, "Не удалось обновить заявку")
+                return
+            try:
+                bot.send_message(
+                    tid,
+                    "❌ Оплата не подтверждена. Проверь перевод и попробуй ещё раз "
+                    "через кнопку «Я перевёл деньги», либо напиши @nikkronos.",
+                )
+            except Exception as e:
+                logger.warning("notify user (declined claim) failed: %s", e)
+            try:
+                bot.edit_message_text(
+                    f"❌ <b>ОТКЛОНЕНО</b> — @{uname} (id: <code>{tid}</code>)\n📧 {email}",
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.warning("edit owner message (declined) failed: %s", e)
+            bot.answer_callback_query(call.id, "Отклонено")
+            logger.info("Claim %s declined: tid=%s", claim_id, tid)
+            return
+
+    # ── Donation-flow: «Я оплатил» как inline-кнопка в ботовском payment-меню ─
+    @bot.callback_query_handler(func=lambda call: call.data == "pay_claim")
+    def callback_pay_claim(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        # Проверим, что юзер вообще зарегистрирован
+        user_row = db_find_user_by_telegram_id(tid)
+        if not user_row:
+            bot.send_message(call.message.chat.id, "Сначала зарегистрируйся через /start.")
+            return
+        existing = db_get_pending_claim(tid)
+        claim_id = db_create_payment_claim(tid, days=30, source="bot")
+        if not claim_id:
+            bot.send_message(call.message.chat.id, "Не удалось создать заявку. Напиши @nikkronos.")
+            return
+
+        # Шлём уведомление владельцу (как и в web flow)
+        sub = db_get_subscription(tid) or {}
+        days_left = sub.get("days_left", 0) or 0
+        expires_at = (sub.get("expires_at") or "")[:10] or "—"
+        if sub.get("grandfathered"):
+            status_line = "Бессрочный (grandfather)"
+        elif days_left > 0:
+            status_line = f"до {expires_at} (осталось {days_left} дн)"
+        else:
+            status_line = "Подписка неактивна"
+        uname = user_row.get("username") or "—"
+        email = user_row.get("email") or "—"
+        text = (
+            f"💳 <b>Новая оплата — 30 дней</b>\n\n"
+            f"👤 @{uname} (id: <code>{tid}</code>)\n"
+            f"📧 {email}\n"
+            f"📅 Сейчас: {status_line}\n"
+            f"🪵 Источник: bot"
+            + ("\n♻️ Переотправка существующей заявки" if existing else "")
+        )
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("✅ Подтвердить +30 дн", callback_data=f"claim_approve:{claim_id}"),
+            types.InlineKeyboardButton("❌ Отклонить", callback_data=f"claim_decline:{claim_id}"),
+        )
+        try:
+            bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=markup)
+        except Exception as e:
+            logger.warning("notify owner (bot claim) failed: %s", e)
+        try:
+            bot.send_message(
+                call.message.chat.id,
+                "✅ Заявка отправлена владельцу. Жди подтверждения — пришлю сюда сообщение, "
+                "как только проверю поступление.",
+            )
+        except Exception:
+            pass
+
+    # ── Donation-flow: показать реквизиты + кнопка «Я оплатил» в боте ─────────
+    @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
+    def callback_pay_show(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        text = (
+            "💳 <b>Продлить подписку — 30 дней</b>\n"
+            "Цена: <b>200 ₽</b>\n\n"
+            "Переведи на Т-Банк любым способом:\n"
+            "📱 СБП по телефону: <code>+79213032918</code>\n"
+            "💳 Карта: <code>2200 7007 6046 4759</code>\n\n"
+            "После перевода нажми кнопку — владелец проверит и зачислит подписку."
+        )
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✅ Я перевёл деньги", callback_data="pay_claim"))
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        try:
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+        except Exception as e:
+            logger.exception("pay_show failed: %s", e)
 
     logger.info("Starting VPN Telegram bot (pyTelegramBotAPI)...")
     bot.infinity_polling(skip_pending=True)

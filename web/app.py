@@ -63,6 +63,10 @@ from bot.database import (
     db_find_payment_by_external_id,
     db_extend_subscription,
     db_apply_referral_bonus,
+    db_get_pending_claim,
+    db_create_payment_claim,
+    db_get_claim_by_id,
+    db_set_claim_notify_msg,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -998,6 +1002,7 @@ def api_account_info():
             except (ValueError, TypeError):
                 days_left = None
 
+        pending_claim = db_get_pending_claim(telegram_id)
         return jsonify({
             "ok": True,
             "status": status,
@@ -1021,6 +1026,11 @@ def api_account_info():
             "sub_link_path": sub_link_path,
             "sub_link": sub_full,
             "sub_qr": sub_qr,
+            "pending_claim": ({
+                "id": pending_claim["id"],
+                "claimed_at": pending_claim["claimed_at"],
+                "days": pending_claim["days"],
+            } if pending_claim else None),
         })
     except Exception as e:
         logger.exception("api/account/info: %s", e)
@@ -1115,6 +1125,112 @@ def api_billing_create_stars_invoice():
         })
     except Exception as e:
         logger.exception("api/billing/create-stars-invoice: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/billing/claim-payment", methods=["POST"])
+def api_billing_claim_payment():
+    """
+    Donation-flow: юзер жмёт «✅ Я перевёл деньги». Создаём pending-заявку
+    и отправляем владельцу уведомление в TG с inline-кнопками approve/decline.
+    Если pending уже есть — переотправляем уведомление (на случай если оно
+    потерялось), без дублирования заявки.
+
+    Auth: email-token. Тело: {token, source?: 'webapp'|'bot'}.
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        row, telegram_id = auth
+        source = (body.get("source") or "webapp").strip()[:32]
+
+        if not ADMIN_ID:
+            return jsonify({"error": "ADMIN_TELEGRAM_ID не настроен"}), 503
+        bot_token = getattr(config, "bot_token", None) if config else None
+        if not bot_token:
+            return jsonify({"error": "Bot token не настроен"}), 503
+
+        # Создаём или возвращаем существующую pending-заявку
+        existing = db_get_pending_claim(telegram_id)
+        claim_id = db_create_payment_claim(
+            telegram_id,
+            days=SUBSCRIPTION_DAYS_PER_PAYMENT,
+            source=source,
+        )
+        if not claim_id:
+            return jsonify({"error": "Не удалось создать заявку"}), 500
+        reused = bool(existing)
+
+        # Готовим текст уведомления владельцу
+        sub = db_get_subscription(telegram_id) or {}
+        username = (row.get("username") if isinstance(row, dict) else None) or "—"
+        email = (row.get("email") if isinstance(row, dict) else None) or "—"
+        days_left = sub.get("days_left", 0) or 0
+        expires_at = (sub.get("expires_at") or "")[:10] or "—"
+        grandfather = sub.get("grandfathered")
+        if grandfather:
+            status_line = "Бессрочный (grandfather)"
+        elif days_left > 0:
+            status_line = f"до {expires_at} (осталось {days_left} дн)"
+        else:
+            status_line = "Подписка неактивна"
+        text = (
+            f"💳 <b>Новая оплата — {SUBSCRIPTION_DAYS_PER_PAYMENT} дней</b>\n\n"
+            f"👤 @{username} (id: <code>{telegram_id}</code>)\n"
+            f"📧 {email}\n"
+            f"📅 Сейчас: {status_line}\n"
+            f"🪵 Источник: {source}"
+            + ("\n♻️ Переотправка существующей заявки" if reused else "")
+        )
+        inline_keyboard = {
+            "inline_keyboard": [[
+                {"text": f"✅ Подтвердить +{SUBSCRIPTION_DAYS_PER_PAYMENT} дн",
+                 "callback_data": f"claim_approve:{claim_id}"},
+                {"text": "❌ Отклонить",
+                 "callback_data": f"claim_decline:{claim_id}"},
+            ]]
+        }
+
+        # Шлём владельцу через TG API напрямую (Flask не имеет инстанса бота)
+        api_body = json.dumps({
+            "chat_id": ADMIN_ID,
+            "text": text,
+            "parse_mode": "HTML",
+            "reply_markup": inline_keyboard,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data=api_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=10)
+            tg_data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.exception("notify owner (claim) failed: %s", e)
+            return jsonify({"ok": True, "claim_id": claim_id, "pending": True,
+                            "notify_failed": True})
+        if tg_data.get("ok"):
+            msg_id = (tg_data.get("result") or {}).get("message_id")
+            if msg_id:
+                try:
+                    db_set_claim_notify_msg(claim_id, int(msg_id))
+                except Exception as e:
+                    logger.warning("save notify_msg_id failed: %s", e)
+        else:
+            logger.warning("Telegram sendMessage failed: %s", tg_data)
+
+        return jsonify({
+            "ok": True,
+            "claim_id": claim_id,
+            "pending": True,
+            "reused": reused,
+        })
+    except Exception as e:
+        logger.exception("api/billing/claim-payment: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

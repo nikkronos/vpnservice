@@ -447,6 +447,19 @@ document.addEventListener('DOMContentLoaded', () => {
     title.textContent = `💳 Продлить подписку — ${days} дней`;
     payBlock.appendChild(title);
 
+    // ── Pending-режим: заявка уже отправлена владельцу, ждём решения ─────────
+    if (d.pending_claim) {
+      const pendingNote = document.createElement('p');
+      pendingNote.className = 'section-hint';
+      pendingNote.innerHTML = (
+        '✅ <b>Заявка на оплату отправлена владельцу.</b> ' +
+        'Жди подтверждения — придёт сообщение в этот бот, как только проверит поступление. ' +
+        'Обычно в течение часа.'
+      );
+      payBlock.appendChild(pendingNote);
+      return;
+    }
+
     const note = document.createElement('p');
     note.className = 'section-hint';
     note.textContent = `Цена: ${rub} ₽ (или ${stars} ⭐ Telegram Stars). Подписка продлевается на ${days} дней.`;
@@ -525,8 +538,9 @@ document.addEventListener('DOMContentLoaded', () => {
     intro.className = 'section-hint';
     intro.style.marginTop = '0';
     intro.innerHTML = (
-      `Переведи <b>${rub} ₽</b> любым удобным способом, затем напиши владельцу — ` +
-      `подтвердит вручную в течение часа (обычно быстрее).`
+      `1. Переведи <b>${rub} ₽</b> на номер или карту ниже.<br>` +
+      `2. Нажми <b>«✅ Я перевёл деньги»</b> — владельцу придёт уведомление.<br>` +
+      `3. Он проверит поступление и зачислит подписку (обычно в течение часа).`
     );
     manualBox.appendChild(intro);
 
@@ -551,41 +565,43 @@ document.addEventListener('DOMContentLoaded', () => {
       renderLinkBlock(manualBox, cardDigits, '', '📋 Скопировать номер карты');
     }
 
-    // Кнопка «Написать владельцу»
-    if (mp.owner_tg) {
-      const ownerLink = `https://t.me/${mp.owner_tg}`;
-      const ownerBtn = document.createElement('a');
-      ownerBtn.href = ownerLink;
-      ownerBtn.target = '_blank';
-      ownerBtn.rel = 'noopener';
-      ownerBtn.className = 'btn-recovery copy-primary';
-      ownerBtn.style.display = 'block';
-      ownerBtn.style.textAlign = 'center';
-      ownerBtn.style.textDecoration = 'none';
-      ownerBtn.style.marginTop = '12px';
-      ownerBtn.textContent = `✉️ Написать @${mp.owner_tg} после оплаты`;
-      // В TG WebApp — нативный openTelegramLink (без выхода из Telegram)
-      ownerBtn.addEventListener('click', (e) => {
-        haptic('light');
-        if (inTelegram && tg.openTelegramLink) {
-          e.preventDefault();
-          try { tg.openTelegramLink(ownerLink); } catch (_) {}
+    // Главная кнопка donation-flow: уведомить владельца, что юзер перевёл.
+    const claimBtn = document.createElement('button');
+    claimBtn.type = 'button';
+    claimBtn.className = 'btn-recovery copy-primary';
+    claimBtn.style.marginTop = '14px';
+    claimBtn.textContent = '✅ Я перевёл деньги, подтверди';
+    claimBtn.addEventListener('click', async () => {
+      claimBtn.disabled = true;
+      haptic('light');
+      const prev = claimBtn.textContent;
+      claimBtn.textContent = 'Отправляем…';
+      try {
+        const r = await fetch('/api/billing/claim-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, source: 'webapp' }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          haptic('error');
+          notify(data.error || 'Не удалось отправить заявку.');
+          claimBtn.textContent = prev;
+          claimBtn.disabled = false;
+          return;
         }
-      });
-      manualBox.appendChild(ownerBtn);
-
-      const myEmail = currentEmail || (d.email || '');
-      const step = document.createElement('p');
-      step.className = 'section-hint';
-      step.style.marginTop = '8px';
-      step.style.opacity = '0.85';
-      step.textContent = (
-        'Что написать: «Оплатил ' + rub + ' ₽ за VPN' +
-        (myEmail ? ' (' + myEmail + ')' : '') +
-        '». Прикрепи скрин чека — так быстрее.'
-      );
-      manualBox.appendChild(step);
-    }
+        haptic('success');
+        notify('Заявка отправлена. Жди подтверждение в этом боте.');
+        // Перезагружаем аккаунт → payBlock переключится в pending-режим
+        loadAccount();
+      } catch (e) {
+        haptic('error');
+        notify('Сетевая ошибка.');
+        claimBtn.textContent = prev;
+        claimBtn.disabled = false;
+      }
+    });
+    manualBox.appendChild(claimBtn);
 
     manualBtn.addEventListener('click', () => {
       haptic('light');
