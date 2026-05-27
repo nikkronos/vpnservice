@@ -389,24 +389,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Управление паролем
     renderPasswordBlock(!!d.has_password);
 
-    // Реферальный блок
+    // Реферальный блок (заглушка «в разработке» — рефералка отложена)
     if (referralBlock) {
-      if (d.referral_code) {
-        referralBlock.hidden = false;
-        referralBlock.innerHTML = '';
-        const t = document.createElement('div');
-        t.className = 'acc-subtitle';
-        t.textContent = '👥 Приглашай друзей';
-        const note = document.createElement('p');
-        note.className = 'section-hint';
-        note.textContent = `Когда друг оплатит — вы оба получите +${d.referral_reward_days} дней. Приглашено: ${d.invited_count}.`;
-        referralBlock.appendChild(t);
-        referralBlock.appendChild(note);
-        const link = location.origin + d.referral_link_path;
-        renderLinkBlock(referralBlock, link, '', '📋 Скопировать ссылку-приглашение');
-      } else {
-        referralBlock.hidden = true;
-      }
+      referralBlock.hidden = false;
+      referralBlock.innerHTML = '';
+      const t = document.createElement('div');
+      t.className = 'acc-subtitle';
+      t.textContent = '👥 Приглашай друзей';
+      const note = document.createElement('p');
+      note.className = 'section-hint';
+      note.innerHTML = '<b>В разработке.</b> Скоро добавим: при оплате друга — бонусные дни обоим.';
+      referralBlock.appendChild(t);
+      referralBlock.appendChild(note);
     }
   }
 
