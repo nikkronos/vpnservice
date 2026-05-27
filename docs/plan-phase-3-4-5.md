@@ -212,19 +212,30 @@
 
 | Задача | Приоритет | Зависит от |
 |---|---|---|
-| 3a — новый бот в BotFather | DONE | — |
-| 3b — меню бота под ЛК + Menu Button web_app | P0 (сейчас) | токен (есть) |
-| 3c — Mini App auth (initData) | P0 (сейчас) | — |
-| 3d — enforcement + grandfather + триал | P0 (сейчас) | — |
+| 3a — новый бот в BotFather | ✅ DONE | — |
+| 3b-light — Menu Button web_app на текущем боте | ✅ DONE | — |
+| 3c — Mini App auth (initData) | ✅ DONE | — |
+| 3d — grandfather + auto-trial | ✅ DONE | — |
+| Mini App polish — BackButton/haptic/showAlert/openTelegramLink | ✅ DONE | — |
+| Метки серверов «🇪🇺 Европа / 🇷🇺 Россия» | ✅ DONE | — |
 | **3i — Публичные страницы (лендинг/оферта/контакты)** | **P0 (блокер 3e)** | ФИО+ИНН+город+email от владельца |
 | 3e — ЮKassa интеграция | P0 (после 3i + регистрации на ЮKassa) | 3i + YOOKASSA_SHOP_ID/SECRET |
 | 3f — реферал-начисление | P1 | 3e |
+| 3b proper — меню текущего бота под ЛК (минимум) + swap токена на `@vpnkronos_bot` | P1 (после 3i) | — |
 | 3g — Stars (вторая кнопка) | P2 (после 3e) | — |
-| 3h — миграция (broadcast) | P0 (после 3b+3e) | владелец |
+| 3h — миграция (broadcast в старом боте) | P0 (после 3b proper + 3e) | владелец |
 | Phase 1b — RU clean-443 host | P1 (для БС-recovery) | деньги + БС-окно для теста |
-| Per-user UUID на main/yc | P1 (для биллинга) | — |
+| Per-user UUID на main/yc (airtight enforcement) | P2 (после первых платящих или abuse) | SSH-ключ к yc + аккуратно с production Xray на main |
 | Мегафон БС-разведка | P2 | БС-окно + друг на Мегафоне |
 | Переименование канала `@vforfriends` → ? | P3 | владелец |
+
+### UX-polish backlog (мелкие задачи на потом)
+
+- **«Альтернативные способы» сложно найти** (2026-05-26 от владельца): секция внизу ЛК после статуса/подписки/триала/пароля/реферала — много прокрутки, юзер не доскролил. Подумать: вынести «Основной VPN / VPN при блокировках / Разблокировка Telegram» в более заметное место, либо сделать collapsible, либо просто перетасовать порядок (например, после подписки сразу).
+- **Trial-кнопка показывается grandfather'ам** (2026-05-26): owner с `expires_at='2099'` видит «🎁 Активировать 14 дней бесплатно» — визуально путает. Безвредно (нажатие = no-op для grandfather, т.к. extend от max(now, 2099)+14 = 2099), но cosmetically. Фикс ~5 минут: `account/info` → `trial_available = not trial_used AND expires_at IS NULL`.
+- **MainButton для главных действий** (не реализовано в polish-проходе 2026-05-26): нативная кнопка в TG-хроме внизу. Хороший кейс — Stars-оплата (Phase 3g) или «Скопировать ссылку подписки» на дашборде. Требует state-management по шагам (показывать/скрывать/перенастраивать). Отложено.
+- **Theme params** (не реализовано): подстраивать UI ЛК под цветовую тему юзера в TG (`tg.themeParams`, `tg.colorScheme`). Наш cyber-neon вид самобытный, не хочется ломать ради синка. Отложено, низкий приоритет.
+- **Бренд переход**: hero `ForFriends VPN → VPN Kronos`, рассылка/welcome в боте — синхронно при swap'е на `@vpnkronos_bot` (Phase 3b proper), чтобы не плодить промежуточные «полу-Kronos» состояния.
 
 ---
 
