@@ -203,7 +203,7 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 |-------|-------|
 | Открытые задачи | `ROADMAP_VPN.md` |
 | История изменений | `DONE_LIST_VPN.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-27.md` |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |

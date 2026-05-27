@@ -3,9 +3,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepEmail    = document.getElementById('stepEmail');
   const stepOtp      = document.getElementById('stepOtp');
   const stepMenu     = document.getElementById('stepMenu');
+  const stepBilling  = document.getElementById('stepBilling');
+  const stepConnect  = document.getElementById('stepConnect');
+  const stepReferral = document.getElementById('stepReferral');
+  const stepSettings = document.getElementById('stepSettings');
   const stepPlatform = document.getElementById('stepPlatform');
   const stepOperator = document.getElementById('stepOperator');
   const stepProxy    = document.getElementById('stepProxy');
+
+  // Карта родительских шагов — для TG BackButton и наших «« Назад».
+  // Шаги без родителя — корни (email/otp/menu) — назад скрывается.
+  const stepParent = new Map();
+  let currentStep = null;
 
   const emailInput    = document.getElementById('authEmail');
   const btnSendOtp    = document.getElementById('btnSendOtp');
@@ -96,22 +105,40 @@ document.addEventListener('DOMContentLoaded', () => {
     el.style.color = isError ? 'var(--red)' : 'var(--green)';
   }
 
+  const allSteps = [
+    stepEmail, stepOtp, stepMenu,
+    stepBilling, stepConnect, stepReferral, stepSettings,
+    stepPlatform, stepOperator, stepProxy,
+  ];
+
+  // Иерархия шагов: главное меню — корень, четыре раздела ведут к нему,
+  // выбор канала/платформы/оператора возвращает в stepConnect.
+  stepParent.set(stepBilling,  stepMenu);
+  stepParent.set(stepConnect,  stepMenu);
+  stepParent.set(stepReferral, stepMenu);
+  stepParent.set(stepSettings, stepMenu);
+  stepParent.set(stepPlatform, stepConnect);
+  stepParent.set(stepOperator, stepConnect);
+  stepParent.set(stepProxy,    stepConnect);
+
   function showStep(step) {
-    [stepEmail, stepOtp, stepMenu, stepPlatform, stepOperator, stepProxy].forEach(s => {
-      if (s) s.hidden = true;
-    });
+    allSteps.forEach(s => { if (s) s.hidden = true; });
     if (step) step.hidden = false;
-    // TG BackButton (нативная стрелка в TG-хроме): на подэкранах от меню — показываем,
-    // на главных (email/otp/menu) — прячем.
+    currentStep = step;
+    try { window.scrollTo(0, 0); } catch (e) {}
+    // TG BackButton (нативная стрелка в TG-хроме): показываем, если у шага есть родитель.
     if (inTelegram && tg.BackButton) {
-      const isSubstep = (step === stepPlatform || step === stepOperator || step === stepProxy);
-      try { isSubstep ? tg.BackButton.show() : tg.BackButton.hide(); } catch (e) {}
+      const hasParent = stepParent.has(step);
+      try { hasParent ? tg.BackButton.show() : tg.BackButton.hide(); } catch (e) {}
     }
   }
 
-  // Один раз регистрируем хендлер TG BackButton: всегда возвращает в меню.
+  // Один раз регистрируем хендлер TG BackButton: возвращает на родительский шаг.
   if (inTelegram && tg.BackButton) {
-    try { tg.BackButton.onClick(() => showStep(stepMenu)); } catch (e) {}
+    try { tg.BackButton.onClick(() => {
+      const p = stepParent.get(currentStep);
+      if (p) showStep(p);
+    }); } catch (e) {}
   }
 
   // Заметная кнопка «копировать» + сама ссылка под ней.
@@ -265,6 +292,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sub) {
       const s = document.createElement('div'); s.className = 'acc-sub'; s.textContent = sub;
       accountStatus.appendChild(s);
+    }
+
+    // Inline «Продлить» — когда срок поджимает или истёк (не показываем grandfather).
+    if (!d.grandfathered && (d.days_left || 0) <= 3) {
+      const renewBtn = document.createElement('button');
+      renewBtn.type = 'button';
+      renewBtn.className = 'btn-recovery copy-primary';
+      renewBtn.style.marginTop = '12px';
+      renewBtn.textContent = '💳 Продлить подписку';
+      renewBtn.addEventListener('click', () => {
+        haptic('light');
+        showStep(stepBilling);
+      });
+      accountStatus.appendChild(renewBtn);
     }
 
     // Пробный период
@@ -714,7 +755,22 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnVerifyOtp) btnVerifyOtp.addEventListener('click', verifyOtp);
   if (codeInput) codeInput.addEventListener('keydown', e => { if (e.key === 'Enter') verifyOtp(); });
 
-  // ── Шаг 3: Меню (выбор канала) ───────────────────────────────────────────
+  // ── Главное меню: 4 раздела (Продлить / Резервные конфиги / Реферал / Настройки)
+  const substepMap = {
+    billing:  stepBilling,
+    connect:  stepConnect,
+    referral: stepReferral,
+    settings: stepSettings,
+  };
+  document.querySelectorAll('[data-substep]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      haptic('light');
+      const target = substepMap[btn.dataset.substep];
+      if (target) showStep(target);
+    });
+  });
+
+  // ── Резервные конфиги: выбор канала (в stepConnect)
   document.querySelectorAll('[data-channel]').forEach(btn => {
     btn.addEventListener('click', () => {
       const ch = btn.dataset.channel;
@@ -731,11 +787,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Кнопки «Назад» в подстраницах
+  // Кнопки «« Назад» в подстраницах — возвращают на родительский шаг.
   document.querySelectorAll('[data-back]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const target = btn.dataset.back;
-      if (target === 'menu') showStep(stepMenu);
+      const p = stepParent.get(currentStep);
+      if (p) showStep(p);
     });
   });
 

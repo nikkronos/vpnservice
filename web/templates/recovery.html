@@ -51,16 +51,44 @@
       <div id="verifyOtpResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
-    <!-- ── Шаг 3: Главное меню (3 канала) ──────────────────────── -->
+    <!-- ── Шаг 3: Главное меню ─────────────────────────────────── -->
     <section class="recovery" id="stepMenu" hidden>
       <h2>👤 Мой аккаунт</h2>
       <div id="accountStatus" class="account-card">Загружаем…</div>
       <div id="subBlock" class="account-card" hidden></div>
-      <div id="payBlock" class="account-card" hidden></div>
       <div id="trialBlock"></div>
-      <div id="passwordBlock"></div>
-      <div id="referralBlock" class="account-card" hidden></div>
-      <h3 class="account-subhead">Альтернативные способы (конкретные конфиги)</h3>
+      <div class="recovery-menu">
+        <button type="button" class="btn-recovery btn-menu" data-substep="billing">
+          💳 Продлить подписку
+          <span class="btn-menu-sub">Telegram Stars или СБП / карта Т-Банк</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-substep="connect">
+          🔌 Резервные конфиги
+          <span class="btn-menu-sub">Отдельные конфиги для каждого канала</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-substep="referral">
+          👥 Пригласить друзей
+          <span class="btn-menu-sub">+14 дней обоим, когда друг оплатит</span>
+        </button>
+        <button type="button" class="btn-recovery btn-menu" data-substep="settings">
+          ⚙️ Пароль и настройки
+          <span class="btn-menu-sub">Добавить или сменить пароль</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Substep: Продлить подписку ──────────────────────────── -->
+    <section class="recovery" id="stepBilling" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2>💳 Продлить подписку</h2>
+      <div id="payBlock" class="account-card"></div>
+    </section>
+
+    <!-- ── Substep: Резервные конфиги (3 канала) ──────────────── -->
+    <section class="recovery" id="stepConnect" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2>🔌 Резервные конфиги</h2>
+      <p class="section-hint">Если основная подписка чем-то не подошла — выбери канал и получи конкретный конфиг.</p>
       <div class="recovery-menu">
         <button type="button" class="btn-recovery btn-menu" data-channel="awg">
           📲 Основной VPN
@@ -77,9 +105,23 @@
       </div>
     </section>
 
+    <!-- ── Substep: Реферал ────────────────────────────────────── -->
+    <section class="recovery" id="stepReferral" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2>👥 Пригласить друзей</h2>
+      <div id="referralBlock" class="account-card"></div>
+    </section>
+
+    <!-- ── Substep: Пароль и настройки ─────────────────────────── -->
+    <section class="recovery" id="stepSettings" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2>⚙️ Пароль и настройки</h2>
+      <div id="passwordBlock" class="account-card"></div>
+    </section>
+
     <!-- ── Шаг 4a: Выбор платформы (для основного VPN) ─────────── -->
     <section class="recovery" id="stepPlatform" hidden>
-      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2>📲 Основной VPN — выбор устройства</h2>
       <p class="section-hint">На какое устройство подключаешься?</p>
       <div class="recovery-menu">
@@ -101,7 +143,7 @@
 
     <!-- ── Шаг 4b: Выбор оператора (для мобильного резерва) ───── -->
     <section class="recovery" id="stepOperator" hidden>
-      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2>📡 VPN при блокировках — выбор оператора</h2>
       <p class="section-hint">Какой у тебя мобильный оператор? У Мегафон/Yota особый канал — он работает при белых списках РКН.</p>
       <div class="recovery-menu">
@@ -118,7 +160,7 @@
 
     <!-- ── Шаг 4c: MTProxy ─────────────────────────────────────── -->
     <section class="recovery" id="stepProxy" hidden>
-      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back="menu">« Назад</button>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2>📨 Разблокировка Telegram</h2>
       <div id="proxyResult" class="recovery-result" aria-live="polite">Загружаем…</div>
     </section>
