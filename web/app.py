@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.request
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -98,7 +99,9 @@ _recovery_lock = threading.Lock()
 
 # ── Биллинг (Фаза 2/4): значения, легко менять ──
 TRIAL_DAYS = 14            # длина пробного периода
-REFERRAL_REWARD_DAYS = 14  # +дней обоим, когда приглашённый оплатит (применяется в Фазе 4)
+REFERRAL_REWARD_DAYS = 14  # +дней обоим при первой оплате приглашённого
+SUBSCRIPTION_DAYS_PER_PAYMENT = 30  # сколько дней даёт одна оплата (любым провайдером)
+STARS_MONTHLY_PRICE = 150  # цена в Telegram Stars за SUBSCRIPTION_DAYS_PER_PAYMENT дней (~200 ₽)
 
 
 def _require_admin_auth(f):
@@ -1021,6 +1024,63 @@ def api_account_start_trial():
         return jsonify({"ok": True, "expires_at": new_exp, "trial_days": TRIAL_DAYS})
     except Exception as e:
         logger.exception("api/account/start-trial: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/billing/create-stars-invoice", methods=["POST"])
+def api_billing_create_stars_invoice():
+    """
+    Создаёт invoice-ссылку для оплаты Telegram Stars (currency=XTR).
+    Auth: email-token. Возвращает {invoice_link, amount, days}.
+    Фронтенд (в Mini App): tg.openInvoice(invoice_link, cb) → on 'paid' → reload account.
+    Бот ловит pre_checkout_query + successful_payment → продлевает подписку.
+    """
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _row, telegram_id = auth
+
+        bot_token = getattr(config, "bot_token", None) if config else None
+        if not bot_token:
+            return jsonify({"error": "Bot token не настроен"}), 503
+
+        # Payload — самоидентифицируется в successful_payment-хендлере бота
+        payload = f"stars_sub:{telegram_id}:{SUBSCRIPTION_DAYS_PER_PAYMENT}:{int(time.time())}"
+
+        api_body = json.dumps({
+            "title": "VPN Kronos — подписка",
+            "description": f"Доступ на {SUBSCRIPTION_DAYS_PER_PAYMENT} дней",
+            "payload": payload,
+            "currency": "XTR",
+            "prices": [{"label": f"{SUBSCRIPTION_DAYS_PER_PAYMENT} дней", "amount": STARS_MONTHLY_PRICE}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/createInvoiceLink",
+            data=api_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            tg_data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            logger.exception("createInvoiceLink HTTP error: %s", e)
+            return jsonify({"error": "Telegram API недоступен"}), 502
+        if not tg_data.get("ok"):
+            logger.warning("Telegram createInvoiceLink failed: %s", tg_data)
+            return jsonify({"error": tg_data.get("description", "Telegram API error")}), 502
+
+        invoice_link = tg_data["result"]
+        return jsonify({
+            "ok": True,
+            "invoice_link": invoice_link,
+            "amount_stars": STARS_MONTHLY_PRICE,
+            "days": SUBSCRIPTION_DAYS_PER_PAYMENT,
+        })
+    except Exception as e:
+        logger.exception("api/billing/create-stars-invoice: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

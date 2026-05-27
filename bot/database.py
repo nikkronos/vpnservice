@@ -130,6 +130,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
+    _migrate_add_referral_bonus_paid_column()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -218,6 +219,18 @@ def _migrate_add_sub_token_column() -> None:
                 logger.info("Migration: added sub_token column to users")
             except sqlite3.OperationalError as e:
                 logger.info("Migration: skip sub_token (%s)", e)
+
+
+def _migrate_add_referral_bonus_paid_column() -> None:
+    """Флаг: реферал-бонус уже выплачен пригласившему за первую оплату этого юзера (idempotent)."""
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "referral_bonus_paid" not in existing:
+            try:
+                con.execute("ALTER TABLE users ADD COLUMN referral_bonus_paid INTEGER NOT NULL DEFAULT 0")
+                logger.info("Migration: added referral_bonus_paid column to users")
+            except sqlite3.OperationalError as e:
+                logger.info("Migration: skip referral_bonus_paid (%s)", e)
 
 
 def _migrate_add_vless_columns() -> None:
@@ -1051,3 +1064,48 @@ def db_update_payment_status(external_id: str, status: str) -> bool:
             (status, external_id),
         )
         return cur.rowcount > 0
+
+
+def db_find_payment_by_external_id(external_id: str) -> Optional[Dict]:
+    """Находит платёж по external_id провайдера (для idempotency)."""
+    _ensure_init()
+    if not external_id:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM payments WHERE external_id = ? LIMIT 1",
+            (external_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_apply_referral_bonus(telegram_id: int, reward_days: int) -> Optional[int]:
+    """
+    Если у telegram_id есть referred_by и бонус ещё не выплачен — продлевает обоим
+    подписку на reward_days дней. Возвращает telegram_id пригласившего или None.
+    Idempotent: при повторном вызове ничего не делает (флаг referral_bonus_paid).
+    """
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT referred_by, referral_bonus_paid FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not row or row["referral_bonus_paid"] or not row["referred_by"]:
+            return None
+        inviter = con.execute(
+            "SELECT telegram_id, active FROM users WHERE referral_code = ?",
+            (row["referred_by"],),
+        ).fetchone()
+        if not inviter or not inviter["active"] or not inviter["telegram_id"]:
+            return None
+        inviter_tid = int(inviter["telegram_id"])
+        # Помечаем как выплаченный СРАЗУ (защита от гонки при дубликате)
+        con.execute(
+            "UPDATE users SET referral_bonus_paid = 1 WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+    # Продлеваем обоим (вне транзакции, чтобы не держать блокировку SQLite)
+    db_extend_subscription(telegram_id, days=reward_days, plan="referral_bonus")
+    db_extend_subscription(inviter_tid, days=reward_days, plan="referral_bonus")
+    return inviter_tid

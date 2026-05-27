@@ -22,6 +22,10 @@ from .database import (
     db_verify_otp,
     db_get_vless_creds,
     db_update_proxy_requested_at,
+    db_record_payment,
+    db_extend_subscription,
+    db_find_payment_by_external_id,
+    db_apply_referral_bonus,
     init_db,
 )
 from .vless_peers import (
@@ -1814,6 +1818,100 @@ def main() -> None:
             "<i>Одновременных подключений по устройствам бот не считает — один конфиг может быть на нескольких устройствах, но одновременно активен только один.</i>",
         ]
         safe_reply(message, "\n".join(lines))
+
+    # ── Telegram Stars payments ────────────────────────────────────────────
+    # Цена/период должны совпадать с web/app.py (SUBSCRIPTION_DAYS_PER_PAYMENT=30,
+    # STARS_MONTHLY_PRICE=150, REFERRAL_REWARD_DAYS=14).
+    REFERRAL_REWARD_DAYS = 14
+
+    @bot.pre_checkout_query_handler(func=lambda q: True)
+    def pre_checkout_handler(query: types.PreCheckoutQuery) -> None:
+        """Аппрувим pre_checkout (TG требует ответ в 10 сек)."""
+        try:
+            bot.answer_pre_checkout_query(query.id, ok=True)
+        except Exception as e:
+            logger.exception("pre_checkout failed: %s", e)
+            try:
+                bot.answer_pre_checkout_query(query.id, ok=False, error_message="Внутренняя ошибка, попробуй позже.")
+            except Exception:
+                pass
+
+    @bot.message_handler(content_types=["successful_payment"])
+    def successful_payment_handler(message: types.Message) -> None:
+        """
+        Обработка успешной оплаты (Telegram Stars currency=XTR).
+        Payload: 'stars_sub:<telegram_id>:<days>:<ts>'.
+        """
+        try:
+            sp = message.successful_payment
+            if not sp or not message.from_user:
+                return
+            payload = sp.invoice_payload or ""
+            currency = sp.currency or ""
+            total_amount = sp.total_amount or 0
+            charge_id = sp.telegram_payment_charge_id or ""
+            tid = message.from_user.id
+
+            # Парсим payload
+            parts = payload.split(":")
+            if len(parts) < 4 or parts[0] != "stars_sub":
+                logger.warning("Unexpected payment payload: %r", payload)
+                safe_reply(message, "Платёж получен, но payload не распознан. Свяжись с владельцем.")
+                return
+            try:
+                days = int(parts[2])
+            except ValueError:
+                days = 30
+
+            # Идемпотентность: если уже обрабатывали этот charge_id — выходим
+            if charge_id and db_find_payment_by_external_id(charge_id):
+                logger.info("Duplicate successful_payment for charge_id=%s, skipping", charge_id)
+                return
+
+            # Записываем платёж и продлеваем подписку
+            db_record_payment(
+                provider="stars",
+                amount=float(total_amount),
+                currency=currency,
+                telegram_id=tid,
+                external_id=charge_id,
+                plan="monthly",
+                days=days,
+                status="succeeded",
+            )
+            new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
+
+            # Реферал-бонус (если есть и ещё не выплачен)
+            inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
+
+            # Уведомление пользователю
+            exp_str = (new_exp or "")[:10]
+            safe_reply(
+                message,
+                f"✅ Оплата получена: {total_amount} ⭐\n"
+                f"Подписка продлена на {days} дней (активна до {exp_str}).",
+            )
+            if inviter_tid:
+                # Юзеру отдельно про реферал-бонус
+                safe_reply(
+                    message,
+                    f"🎁 Бонус за приглашение: +{REFERRAL_REWARD_DAYS} дней тебе и пригласившему.",
+                )
+                # Уведомить пригласившего
+                try:
+                    bot.send_message(
+                        inviter_tid,
+                        f"🎁 Друг по твоей ссылке оплатил подписку — тебе +{REFERRAL_REWARD_DAYS} дней!",
+                    )
+                except Exception as e:
+                    logger.warning("Failed to notify inviter %s: %s", inviter_tid, e)
+        except Exception as e:
+            logger.exception("successful_payment handler failed: %s", e)
+            try:
+                safe_reply(message, "Платёж получен, но при обработке возникла ошибка. Свяжись с владельцем.")
+            except Exception:
+                pass
 
     logger.info("Starting VPN Telegram bot (pyTelegramBotAPI)...")
     bot.infinity_polling(skip_pending=True)

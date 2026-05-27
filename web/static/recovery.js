@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const referralBlock  = document.getElementById('referralBlock');
   const passwordBlock  = document.getElementById('passwordBlock');
   const subBlock       = document.getElementById('subBlock');
+  const payBlock       = document.getElementById('payBlock');
 
   // ── State ─────────────────────────────────────────────────────────────────
   let sessionToken = '';
@@ -279,6 +280,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    // Оплата подписки (продление)
+    renderPayBlock(d);
+
     // Подписка — одна ссылка на все устройства (спайк)
     if (subBlock) {
       if (d.sub_link_path) {
@@ -346,6 +350,89 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.textContent = prev; btn.disabled = false;
       haptic('error');
     }
+  }
+
+  // Блок «Продлить подписку» — Telegram Stars (нативно) + ручной СБП/карта (скоро).
+  function renderPayBlock(d) {
+    if (!payBlock) return;
+    // Скрыть для grandfather (срок > 2 лет — фактически бессрочный)
+    if ((d.days_left || 0) > 730) {
+      payBlock.hidden = true;
+      return;
+    }
+    payBlock.hidden = false;
+    payBlock.innerHTML = '';
+
+    const title = document.createElement('div');
+    title.className = 'acc-subtitle';
+    title.textContent = '💳 Продлить подписку — 30 дней';
+    payBlock.appendChild(title);
+
+    const note = document.createElement('p');
+    note.className = 'section-hint';
+    note.textContent = 'Цена: ~200 ₽ (или 150 ⭐ Telegram Stars). Подписка продлевается на 30 дней.';
+    payBlock.appendChild(note);
+
+    // Telegram Stars (только в TG WebApp — снаружи tg.openInvoice не работает)
+    if (inTelegram) {
+      const starsBtn = document.createElement('button');
+      starsBtn.type = 'button';
+      starsBtn.className = 'btn-recovery copy-primary';
+      starsBtn.textContent = '⭐ Оплатить Telegram Stars (150 ⭐)';
+      starsBtn.addEventListener('click', async () => {
+        starsBtn.disabled = true;
+        haptic('light');
+        try {
+          const r = await fetch('/api/billing/create-stars-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: sessionToken }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok || !data.invoice_link) {
+            haptic('error');
+            notify(data.error || 'Не удалось создать счёт.');
+            starsBtn.disabled = false;
+            return;
+          }
+          if (!tg.openInvoice) {
+            haptic('error');
+            notify('Эта версия Telegram не поддерживает Stars-оплату.');
+            starsBtn.disabled = false;
+            return;
+          }
+          tg.openInvoice(data.invoice_link, (status) => {
+            starsBtn.disabled = false;
+            if (status === 'paid') {
+              haptic('success');
+              notify('Оплата получена. Подписка продлена.');
+              loadAccount();
+            } else if (status === 'cancelled') {
+              haptic('warning');
+            } else if (status === 'failed') {
+              haptic('error');
+              notify('Платёж не прошёл.');
+            }
+          });
+        } catch (e) {
+          haptic('error');
+          starsBtn.disabled = false;
+        }
+      });
+      payBlock.appendChild(starsBtn);
+    }
+
+    // Ручная оплата (СБП / карта) — placeholder, активируется когда добавим реквизиты
+    const manualBtn = document.createElement('button');
+    manualBtn.type = 'button';
+    manualBtn.className = 'btn-recovery btn-recovery-secondary copy-primary';
+    manualBtn.style.marginTop = '8px';
+    manualBtn.textContent = '💳 Оплатить картой / СБП';
+    manualBtn.addEventListener('click', () => {
+      haptic('light');
+      notify('Скоро. Свяжись с владельцем для оплаты картой/СБП напрямую (контакт в канале @vforfriends).');
+    });
+    payBlock.appendChild(manualBtn);
   }
 
   // Блок «Добавить/Изменить пароль» — раскрывает инлайн-форму
