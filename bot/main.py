@@ -32,6 +32,7 @@ from .database import (
     db_create_payment_claim,
     db_get_subscription,
     db_find_user_by_telegram_id,
+    db_ensure_sub_token,
     init_db,
 )
 from .vless_peers import (
@@ -263,12 +264,11 @@ def main() -> None:
                 ),
             )
             markup.add(
-                types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_config"),
+                types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
                 types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
-                types.InlineKeyboardButton("📡 VPN при блокировках", callback_data="menu_mobile_vpn"),
                 types.InlineKeyboardButton("📨 Разблокировка Telegram", callback_data="menu_proxy"),
             )
             if is_owner(uid, admin_id):
@@ -694,9 +694,50 @@ def main() -> None:
         # Все safe_reply внутри команд автоматически добавят кнопку "« Главное меню"
         call.message._back_markup = _back_to_menu_markup()
         action = call.data
-        if action == "menu_get_config":
+        if action == "menu_get_vpn":
+            # Подменю: 3 варианта VPN (Быстрый / Резервный / Мобильный)
+            sub_markup = types.InlineKeyboardMarkup(row_width=1)
+            sub_markup.add(
+                types.InlineKeyboardButton(
+                    "🔗 Быстрый VPN — одна ссылка для всех устройств",
+                    callback_data="vpn_quick",
+                ),
+                types.InlineKeyboardButton(
+                    "📲 Резервный VPN — конфиг для AmneziaWG",
+                    callback_data="menu_get_config",
+                ),
+                types.InlineKeyboardButton(
+                    "📡 Мобильный VPN — при блокировках операторов",
+                    callback_data="menu_mobile_vpn",
+                ),
+                types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+            )
+            sub_text = (
+                "Выбери способ подключения:\n\n"
+                "🔗 <b>Быстрый VPN</b> — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
+                "Приложение само выберет рабочий сервер.\n\n"
+                "📲 <b>Резервный VPN</b> — отдельный конфиг для AmneziaWG/AmneziaVPN. "
+                "Макс. скорость на одном сервере.\n\n"
+                "📡 <b>Мобильный VPN</b> — если оператор режет интернет (Yota / Мегафон при белых списках РКН)."
+            )
+            bot.send_message(call.message.chat.id, sub_text, parse_mode="HTML", reply_markup=sub_markup)
+        elif action == "menu_get_config":
             _show_platform_keyboard(call.message.chat.id, "get_config")
         elif action == "menu_regen":
+            # Подтверждение перед сбросом конфига (добавлено по фидбэку владельца).
+            confirm_markup = types.InlineKeyboardMarkup(row_width=1)
+            confirm_markup.add(
+                types.InlineKeyboardButton("✅ Да, обновить", callback_data="menu_regen_confirm"),
+                types.InlineKeyboardButton("« Отмена", callback_data="go_main_menu"),
+            )
+            confirm_text = (
+                "⚠️ <b>Сбросить и пересоздать конфиг?</b>\n\n"
+                "Все устройства, использующие текущий <code>.conf</code> или ссылку <code>vpn://</code>, отвалятся. "
+                "После пересоздания получишь новый файл — его нужно будет вручную импортировать "
+                "в AmneziaWG/AmneziaVPN на каждом устройстве заново."
+            )
+            bot.send_message(call.message.chat.id, confirm_text, parse_mode="HTML", reply_markup=confirm_markup)
+        elif action == "menu_regen_confirm":
             _show_platform_keyboard(call.message.chat.id, "regen")
         elif action == "menu_instruction":
             cmd_instruction(call.message)
@@ -2118,6 +2159,64 @@ def main() -> None:
             )
         except Exception:
             pass
+
+    # ── Быстрый VPN: subscription URL + QR-картинка ────────────────────────
+    @bot.callback_query_handler(func=lambda call: call.data == "vpn_quick")
+    def callback_vpn_quick(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        if not _is_authorized(call.from_user.id):
+            bot.send_message(call.message.chat.id, "Нет доступа.")
+            return
+        tid = call.from_user.id
+        try:
+            sub_token = db_ensure_sub_token(tid)
+        except Exception as e:
+            logger.exception("db_ensure_sub_token failed for %s: %s", tid, e)
+            sub_token = None
+        if not sub_token:
+            bot.send_message(call.message.chat.id, "Не удалось получить ссылку. Напиши @nikkronos.")
+            return
+        # Базовый URL берём из recovery_url (env), вырезаем суффикс /recovery
+        rec_url = getattr(config, "vpn_recovery_url", None) or "https://supportkronos.online:8443/recovery"
+        sub_base = rec_url.rsplit("/recovery", 1)[0]
+        sub_url = f"{sub_base}/sub/{sub_token}"
+
+        caption = (
+            "🔗 <b>Быстрый VPN — одна ссылка</b>\n\n"
+            f"<code>{sub_url}</code>\n\n"
+            "Импортируй в <b>HAPP / Streisand / V2Box / Hiddify</b>: «+» → по ссылке или из буфера. "
+            "Приложение само выберет рабочий сервер и подтянет обновления."
+        )
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+
+        # QR картинка
+        try:
+            import qrcode
+            from io import BytesIO
+            img = qrcode.make(sub_url)
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            bot.send_photo(
+                call.message.chat.id,
+                photo=buf,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        except Exception as e:
+            logger.exception("vpn_quick QR failed: %s", e)
+            # Фолбэк: текст без картинки
+            bot.send_message(
+                call.message.chat.id,
+                caption,
+                parse_mode="HTML",
+                reply_markup=markup,
+                disable_web_page_preview=True,
+            )
 
     # ── Donation-flow: показать реквизиты + кнопка «Я оплатил» в боте ─────────
     @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
