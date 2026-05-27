@@ -269,7 +269,7 @@ def main() -> None:
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
-                types.InlineKeyboardButton("📨 Разблокировка Telegram", callback_data="menu_proxy"),
+                types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
             )
             if is_owner(uid, admin_id):
                 markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
@@ -1313,48 +1313,72 @@ def main() -> None:
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
-        """Показывает статус доступа пользователя."""
+        """Показывает статус подписки и VPN-доступа пользователя."""
         if not message.from_user:
             safe_reply(message, "Не удалось определить пользователя.")
             return
         if not _is_authorized(message.from_user.id):
             safe_reply(message, "Нет доступа. Войди по email через /start.")
             return
-        user = find_user(message.from_user.id)
-        
+
+        tid = message.from_user.id
+        user = find_user(tid)
+
+        # ── Блок 1: подписка ────────────────────────────────────────────────
+        try:
+            sub = db_get_subscription(tid) or {}
+        except Exception as e:
+            logger.warning("cmd_status: db_get_subscription failed: %s", e)
+            sub = {}
+        expires_at = sub.get("expires_at")
+        days_left = sub.get("days_left") or 0
+        sub_status = sub.get("subscription_status") or "none"
+        if not expires_at:
+            # Бессрочный (grandfather) — отображаем как «Активна без срока»
+            sub_block = "📅 <b>Подписка:</b> активна без срока (legacy-аккаунт)"
+        else:
+            exp_str = expires_at[:10]
+            if days_left > 0:
+                kind = "Пробный период" if sub_status == "trial" else "Подписка"
+                if days_left <= 3:
+                    icon = "⚠️"
+                else:
+                    icon = "✅"
+                sub_block = f"{icon} <b>{kind}:</b> активна до {exp_str} ({days_left} дн осталось)"
+            else:
+                sub_block = (
+                    f"🔴 <b>Подписка:</b> неактивна (истекла {exp_str}).\n"
+                    f"Нажми «💳 Продлить подписку» в меню."
+                )
+
+        # ── Блок 2: VPN peer ────────────────────────────────────────────────
         preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
         servers_info = get_available_servers()
         preferred_server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
 
-        peer = find_peer_by_telegram_id(message.from_user.id, server_id=preferred_server_id)
-        
-        # Если не найден на выбранном, ищем на любом сервере (для обратной совместимости)
+        peer = find_peer_by_telegram_id(tid, server_id=preferred_server_id)
         if not peer:
-            peer = find_peer_by_telegram_id(message.from_user.id, server_id=None)
-        
+            peer = find_peer_by_telegram_id(tid, server_id=None)
+
         if peer and peer.active:
-            # Показываем информацию о реальном peer (может быть на другом сервере)
             actual_server_name = servers_info.get(peer.server_id, {}).get("name", peer.server_id)
-            status_text = (
-                f"VPN доступ <b>активен</b>.\n"
-                f"Сервер: <b>{actual_server_name}</b> ({peer.server_id})\n"
-                f"IP в VPN-сети: <code>{peer.wg_ip}</code>"
+            vpn_block = (
+                f"🔐 <b>VPN-доступ:</b> создан\n"
+                f"   • Сервер: {actual_server_name} ({peer.server_id})\n"
+                f"   • IP в VPN-сети: <code>{peer.wg_ip}</code>"
             )
-            # Если peer на другом сервере, чем выбранный — предупреждаем
             if peer.server_id != preferred_server_id:
-                status_text += (
-                    f"\n\n"
-                    f"⚠️ Твой выбранный сервер: <b>{preferred_server_name}</b> ({preferred_server_id}), "
-                    f"но активный доступ на <b>{actual_server_name}</b>.\n"
-                    f"Чтобы создать доступ на выбранном сервере, используй /get_config."
+                vpn_block += (
+                    f"\n   ⚠️ Выбранный сервер: {preferred_server_name} ({preferred_server_id}), "
+                    f"но активный peer на {actual_server_name}."
                 )
         else:
-            status_text = (
-                f"VPN доступ <b>не создан</b>.\n"
-                f"Выбранный сервер: <b>{preferred_server_name}</b> ({preferred_server_id})\n"
-                f"Используй /get_config чтобы создать доступ."
+            vpn_block = (
+                "🔐 <b>VPN-доступ:</b> не создан\n"
+                "   Нажми «📲 Получить VPN» в меню."
             )
-        
+
+        status_text = f"{sub_block}\n\n{vpn_block}"
         safe_reply(message, status_text)
 
     @bot.message_handler(commands=["instruction"])
@@ -2185,14 +2209,13 @@ def main() -> None:
 
         caption = (
             "🔗 <b>Быстрый VPN — одна ссылка</b>\n\n"
-            f"<code>{sub_url}</code>\n\n"
             "Импортируй в <b>HAPP / Streisand / V2Box / Hiddify</b>: «+» → по ссылке или из буфера. "
             "Приложение само выберет рабочий сервер и подтянет обновления."
         )
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
 
-        # QR картинка
+        # 1. QR картинка с инструкцией
         try:
             import qrcode
             from io import BytesIO
@@ -2205,18 +2228,24 @@ def main() -> None:
                 photo=buf,
                 caption=caption,
                 parse_mode="HTML",
-                reply_markup=markup,
             )
         except Exception as e:
             logger.exception("vpn_quick QR failed: %s", e)
-            # Фолбэк: текст без картинки
             bot.send_message(
                 call.message.chat.id,
                 caption,
                 parse_mode="HTML",
-                reply_markup=markup,
                 disable_web_page_preview=True,
             )
+
+        # 2. Сама ссылка — отдельным сообщением для удобного тап-копирования.
+        # Plain text (без HTML-эскейпа в code-блок) — тап-удержание выделяет всю строку.
+        bot.send_message(
+            call.message.chat.id,
+            sub_url,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
 
     # ── Donation-flow: показать реквизиты + кнопка «Я оплатил» в боте ─────────
     @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
