@@ -108,3 +108,8 @@ WG_DNS=1.1.1.1
 # ENFORCEMENT_ENABLED — гейт «Получить VPN» по db_is_access_active (резать просрочкам).
 ONBOARDING_ENABLED=0
 ENFORCEMENT_ENABLED=0
+
+# Google Sheets sync (опционально). Триггер: бот → ⚙️ Администратор → 📊 Sync Google Sheets.
+# Service Account JSON должен иметь права Editor на конкретный Sheet.
+GOOGLE_SERVICE_ACCOUNT_JSON=/opt/vpnservice/google-sa.json
+GOOGLE_SHEETS_ID=<id-таблицы-из-URL-google-sheet>

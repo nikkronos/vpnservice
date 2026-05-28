@@ -177,6 +177,15 @@ VLESS_REALITY_SHARE_URL=vless://...  # xHTTP+packet-up через YC
 MTPROTO_PROXY_LINK=tg://proxy?...
 MTPROXY_PORT=8444
 MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
+
+# Google Sheets (sync юзеров: tid/email/expires_at/days_left/trial_used/migrated)
+# Триггер: бот → ⚙️ Администратор → 📊 Sync Google Sheets
+GOOGLE_SERVICE_ACCOUNT_JSON=/opt/vpnservice/google-sa.json
+GOOGLE_SHEETS_ID=10HAqnr2-pIB6m4OXMqDOfHSbFVVutsOK9NkOPNpbbKQ
+
+# Флаги переезда (выставлены =1 при swap токена 2026-05-27 ночью)
+ONBOARDING_ENABLED=1     # FSM-онбординг при /start
+ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_active
 ```
 
 ---
@@ -192,6 +201,8 @@ MTPROXY_ROTATE_SCRIPT=/opt/vpnservice/scripts/mtproxy-rotate.sh
 7. **env_vars.txt не коммитить никогда**
 8. **После изменений:** `git add` → `git commit` → `git push` (push обязателен)
 9. **Reboot любого сервера** — проверь после: `systemctl is-active <services>`, `docker ps`, наличие всех peers (особенно AmneziaWG на Fornex: `docker exec amnezia-awg2 awg show awg0 | grep -c '^peer'` должно совпадать с количеством active eu1-peer'ов в peers.json).
+9.1. **Admin-вход на сайт `/admin/credit` и `/login`:** username = `admin` (literal), пароль = `ADMIN_SECRET` (64-char hex из env_vars.txt). НЕ email/пароль владельца.
+9.2. **Flask :5001 биндится на 127.0.0.1** — снаружи закрыт. Доступ только через nginx :8443 с TLS. Для отладки локально можно переопределить `FLASK_HOST=0.0.0.0`.
 10. **Cron на Fornex (root):** `*/5 /opt/amnezia-save-conf.sh` (persist AWG peers) + `*/5 cd /opt/vpnservice && venv/bin/python scripts/traffic_accounting.py` (lifetime-трафик). После reboot проверять `crontab -l` — оба на месте.
 11. **Swap на eu1:** `/swapfile` 2 ГБ, `swappiness=10` (RAM всего 2 ГБ) — не удалять, страховка от OOM.
 

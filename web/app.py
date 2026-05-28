@@ -1799,4 +1799,8 @@ if __name__ == "__main__":
     import os
     debug = os.environ.get("FLASK_ENV") == "development"
     port = int(os.environ.get("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    # Биндим на localhost: nginx (на той же машине) проксирует :8443 → 127.0.0.1:5001.
+    # Снаружи :5001 недоступен — HTTP без шифрования был бы дырой (пароли, токены).
+    # Можно переопределить через FLASK_HOST=0.0.0.0 для отладки.
+    host = os.environ.get("FLASK_HOST", "127.0.0.1")
+    app.run(host=host, port=port, debug=debug)
