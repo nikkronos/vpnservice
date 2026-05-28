@@ -1,16 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
   // ── DOM ───────────────────────────────────────────────────────────────────
-  const stepEmail      = document.getElementById('stepEmail');
-  const stepOtp        = document.getElementById('stepOtp');
-  const stepMenu       = document.getElementById('stepMenu');
-  const stepBilling    = document.getElementById('stepBilling');
-  const stepManualPay  = document.getElementById('stepManualPay');
-  const stepConnect    = document.getElementById('stepConnect');
-  const stepReferral   = document.getElementById('stepReferral');
-  const stepSettings   = document.getElementById('stepSettings');
-  const stepPlatform   = document.getElementById('stepPlatform');
-  const stepOperator   = document.getElementById('stepOperator');
-  const stepProxy      = document.getElementById('stepProxy');
+  const stepEmail        = document.getElementById('stepEmail');
+  const stepOtp          = document.getElementById('stepOtp');
+  const stepMenu         = document.getElementById('stepMenu');
+  const stepBilling      = document.getElementById('stepBilling');
+  const stepManualPay    = document.getElementById('stepManualPay');
+  const stepConnect      = document.getElementById('stepConnect');
+  const stepReferral     = document.getElementById('stepReferral');
+  const stepSettings     = document.getElementById('stepSettings');
+  const stepPlatform     = document.getElementById('stepPlatform');
+  const stepAwgResult    = document.getElementById('stepAwgResult');
+  const stepOperator     = document.getElementById('stepOperator');
+  const stepMobileResult = document.getElementById('stepMobileResult');
+  const stepProxy        = document.getElementById('stepProxy');
+  const awgResultTitle    = document.getElementById('awgResultTitle');
+  const mobileResultTitle = document.getElementById('mobileResultTitle');
 
   // Карта родительских шагов — для TG BackButton и наших «« Назад».
   // Шаги без родителя — корни (email/otp/menu) — назад скрывается.
@@ -153,22 +157,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const allSteps = [
     stepEmail, stepOtp, stepMenu,
     stepBilling, stepManualPay, stepConnect, stepReferral, stepSettings,
-    stepPlatform, stepOperator, stepProxy,
+    stepPlatform, stepAwgResult, stepOperator, stepMobileResult, stepProxy,
   ];
 
-  // Иерархия шагов: главное меню — корень, четыре раздела ведут к нему,
-  // выбор канала/платформы/оператора возвращает в stepConnect,
-  // ручная оплата (substep stepBilling) возвращает в stepBilling.
-  stepParent.set(stepBilling,   stepMenu);
-  stepParent.set(stepManualPay, stepBilling);
-  stepParent.set(stepConnect,   stepMenu);
-  stepParent.set(stepReferral,  stepMenu);
-  stepParent.set(stepSettings,  stepMenu);
-  stepParent.set(stepPlatform,  stepConnect);
-  stepParent.set(stepOperator,  stepConnect);
+  // Иерархия шагов: главное меню — корень, разделы ведут к нему,
+  // выбор канала/платформы/оператора возвращает в stepConnect.
+  // stepAwgResult/stepMobileResult — результат выбора платформы/оператора,
+  // возвращают на step выбора (чтобы можно было выбрать другое устройство/оператора).
+  stepParent.set(stepBilling,      stepMenu);
+  stepParent.set(stepManualPay,    stepBilling);
+  stepParent.set(stepConnect,      stepMenu);
+  stepParent.set(stepReferral,     stepMenu);
+  stepParent.set(stepSettings,     stepMenu);
+  stepParent.set(stepPlatform,     stepConnect);
+  stepParent.set(stepAwgResult,    stepPlatform);
+  stepParent.set(stepOperator,     stepConnect);
+  stepParent.set(stepMobileResult, stepOperator);
   // stepProxy теперь доступен прямо из главного меню (по запросу владельца 2026-05-27),
   // а не через stepConnect — Telegram-прокси логически независим от VPN.
-  stepParent.set(stepProxy,     stepMenu);
+  stepParent.set(stepProxy,        stepMenu);
 
   function showStep(step) {
     allSteps.forEach(s => { if (s) s.hidden = true; });
@@ -381,7 +388,11 @@ document.addEventListener('DOMContentLoaded', () => {
         note.textContent = 'Одна ссылка для всех устройств. Импортируй в HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера обмена. Приложение само выберет рабочий сервер и подтянет обновления.';
         subBlock.appendChild(t);
         subBlock.appendChild(note);
-        renderQr(subBlock, d.sub_qr, 'Сканируй в приложении (HAPP и др.)');
+        // Дополнительный пробел над QR для воздуха
+        const qrSpacer = document.createElement('div');
+        qrSpacer.style.height = '8px';
+        subBlock.appendChild(qrSpacer);
+        renderQr(subBlock, d.sub_qr, 'Сканируй в приложении');
         renderLinkBlock(subBlock, location.origin + d.sub_link_path, '', 'Скопировать ссылку');
       } else {
         subBlock.hidden = true;
@@ -863,18 +874,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ── Шаг 4a: Платформа → AmneziaWG ───────────────────────────────────────
+  // ── Шаг 4a: Платформа → AmneziaWG (открывается в substep stepAwgResult) ──
+  const _platformLabels = { pc: 'ПК', ios: 'iPhone / iPad', android: 'Android' };
   document.querySelectorAll('[data-platform]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const platform = btn.dataset.platform;
       if (!awgResult) return;
+
+      // Переходим на новую страницу-результат, заголовок — по выбранному устройству.
+      if (awgResultTitle) {
+        awgResultTitle.textContent = `📲 Основной VPN — ${_platformLabels[platform] || platform}`;
+      }
+      showStep(stepAwgResult);
       awgResult.innerHTML = '';
       const status = document.createElement('p');
       status.style.color = 'var(--green)';
       status.textContent = 'Генерируем конфиг…';
       awgResult.appendChild(status);
 
-      // Блокируем кнопки на время запроса
       document.querySelectorAll('[data-platform]').forEach(b => b.disabled = true);
       try {
         const resp = await fetch('/api/recovery/awg-config-by-email', {
@@ -892,16 +909,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const filename = data.filename || 'awg_eu1.conf';
 
         if (platform === 'android' && data.vpn_url) {
-          // Android — vpn:// deep link
+          // Android: vpn:// deep link → копи-кнопка + центрированная кнопка «Открыть» + QR
           status.remove();
           const blockHint = (
-            'Нажми на ссылку с устройства с установленным AmneziaVPN — приложение откроется и импортирует конфиг автоматически. ' +
-            'Если AmneziaVPN не установлен — скачай его в Google Play.'
+            'Тапни ссылку — <b>AmneziaVPN</b> откроет и импортирует конфиг автоматически. ' +
+            'Если приложение ещё не установлено — поставь <a href="https://amnezia.org" target="_blank">AmneziaVPN</a> из Google Play.'
           );
-          renderLinkBlock(awgResult, data.vpn_url, blockHint, '📋 Копировать vpn://');
+          renderLinkBlock(awgResult, data.vpn_url, blockHint, 'Копировать vpn://');
 
-          // Опционально — ссылка как кликабельная
           const aWrap = document.createElement('p');
+          aWrap.style.textAlign = 'center';
+          aWrap.style.marginTop = '12px';
           const a = document.createElement('a');
           a.href = data.vpn_url;
           a.textContent = '👆 Открыть в AmneziaVPN';
@@ -909,7 +927,7 @@ document.addEventListener('DOMContentLoaded', () => {
           a.style.display = 'inline-block';
           aWrap.appendChild(a);
           awgResult.appendChild(aWrap);
-          renderQr(awgResult, data.qr, 'Или сканируй QR в приложении AmneziaVPN (импорт конфига)');
+          renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaVPN');
         } else {
           // PC / iOS — скачать файл
           downloadFile(filename, cfg);
@@ -920,30 +938,16 @@ document.addEventListener('DOMContentLoaded', () => {
           hint.className = 'section-hint';
           if (platform === 'ios') {
             hint.innerHTML = (
-              '<b>iPhone / iPad:</b> открой файл → значок «Поделиться» → выбери ' +
-              '<b>AmneziaWG</b> → «Создать из файла». Если AmneziaWG не установлен — поставь его в App Store.'
+              '<b>iPhone / iPad:</b> поставь <b>AmneziaWG</b> из App Store, открой файл → «Поделиться» → AmneziaWG → «Создать из файла» → включи туннель.'
             );
           } else {
             hint.innerHTML = (
-              '<b>ПК:</b> установи <a href="https://amnezia.org" target="_blank">AmneziaVPN</a> ' +
-              'или <a href="https://github.com/amnezia-vpn/amneziawg-windows-client" target="_blank">AmneziaWG</a>, ' +
-              'затем импортируй файл <code>' + filename + '</code>.'
+              '<b>ПК:</b> поставь <a href="https://amnezia.org" target="_blank">AmneziaVPN</a>, в приложении: «+» → «Импорт из файла» → выбери <code>' + filename + '</code> → включи туннель.'
             );
           }
           awgResult.appendChild(hint);
-          renderQr(awgResult, data.qr, 'Или сканируй QR в приложении AmneziaWG (импорт конфига)');
+          renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaWG');
         }
-
-        // Ошибка-103 fallback
-        const fallback = document.createElement('p');
-        fallback.className = 'section-hint';
-        fallback.style.opacity = '0.85';
-        fallback.innerHTML = (
-          '⚠️ <b>Если AmneziaVPN на ПК выдаёт Error 103 «Фоновая служба не запущена»</b> — ' +
-          'запусти приложение «Запуск от имени администратора», либо переустанови AmneziaVPN. ' +
-          'Альтернативный клиент: <a href="https://hiddify.com" target="_blank">Hiddify</a> — поддерживает тот же конфиг.'
-        );
-        awgResult.appendChild(fallback);
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {
@@ -957,6 +961,16 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', async () => {
       const operator = btn.dataset.operator;
       if (!mobileResult) return;
+
+      // Переход на substep с заголовком по оператору.
+      const _operatorLabels = {
+        yota: 'Yota', megafon: 'Мегафон', mts: 'МТС', beeline: 'Билайн',
+        tele2: 'Т2', tmobile: 'Т-Мобайл', other: 'Другой оператор',
+      };
+      if (mobileResultTitle) {
+        mobileResultTitle.textContent = `📡 VPN при блокировках — ${_operatorLabels[operator] || operator}`;
+      }
+      showStep(stepMobileResult);
       mobileResult.innerHTML = '';
       const status = document.createElement('p');
       status.style.color = 'var(--green)';
@@ -977,25 +991,33 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const link = data.vless_url || '';
-        const hint = data.hint || '';
         if (!link) {
           setMsg(status, 'Сервер не вернул ссылку.', true);
           return;
         }
 
         status.remove();
-        renderQr(mobileResult, data.qr, 'Сканируй QR в приложении (Hiddify / v2rayNG)');
-        renderLinkBlock(mobileResult, link, hint, '📋 Копировать ссылку');
+        // Унифицированный порядок и тексты для всех операторов:
+        // 1. QR + caption
+        // 2. spacer
+        // 3. инструкция «Скопируй vless://...»
+        // 4. ссылка-блок
+        renderQr(mobileResult, data.qr, 'Сканируй QR в приложении');
 
-        const apps = document.createElement('p');
-        apps.className = 'section-hint';
-        apps.innerHTML = (
-          '<b>Android:</b> <a href="https://hiddify.com" target="_blank">Hiddify</a> или v2rayNG — «+» → «Импорт из буфера».<br>' +
-          '<b>iOS:</b> <a href="https://apps.apple.com/app/foxray/id6448898396" target="_blank">FoXray</a>, ' +
-          '<a href="https://apps.apple.com/app/v2box/id6446814690" target="_blank">V2Box</a>, ' +
-          '<a href="https://apps.apple.com/app/streisand/id6450534064" target="_blank">Streisand</a> или Hiddify — импорт ссылки.'
+        const spacer = document.createElement('div');
+        spacer.style.height = '12px';
+        mobileResult.appendChild(spacer);
+
+        const inst = document.createElement('p');
+        inst.className = 'section-hint';
+        inst.innerHTML = (
+          'Скопируй <code>vless://</code>... целиком.<br>' +
+          '<b>Android:</b> v2rayNG или Hiddify → «+» → «Импорт из буфера».<br>' +
+          '<b>iOS:</b> Streisand, FoXray, V2Box или Hiddify — импорт ссылки.'
         );
-        mobileResult.appendChild(apps);
+        mobileResult.appendChild(inst);
+
+        renderLinkBlock(mobileResult, link, '', 'Копировать ссылку');
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {

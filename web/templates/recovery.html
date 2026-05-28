@@ -145,6 +145,12 @@
           <span class="btn-menu-sub">Появится ссылка <code>vpn://</code> для AmneziaVPN</span>
         </button>
       </div>
+    </section>
+
+    <!-- ── Substep: Результат для выбранной платформы (AmneziaWG) ─ -->
+    <section class="recovery" id="stepAwgResult" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2 id="awgResultTitle">📲 Основной VPN</h2>
       <div id="awgResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
@@ -152,7 +158,6 @@
     <section class="recovery" id="stepOperator" hidden>
       <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2>📡 VPN при блокировках — выбор оператора</h2>
-      <p class="section-hint">Какой у тебя мобильный оператор? У Мегафон/Yota особый канал — он работает при белых списках РКН.</p>
       <div class="recovery-menu">
         <button type="button" class="btn-recovery btn-menu" data-operator="yota">📱 Yota</button>
         <button type="button" class="btn-recovery btn-menu" data-operator="megafon">📱 Мегафон</button>
@@ -162,6 +167,12 @@
         <button type="button" class="btn-recovery btn-menu" data-operator="tmobile">📱 Т-Мобайл</button>
         <button type="button" class="btn-recovery btn-menu" data-operator="other">❓ Другой / не уверен</button>
       </div>
+    </section>
+
+    <!-- ── Substep: Результат для выбранного оператора (VLESS) ── -->
+    <section class="recovery" id="stepMobileResult" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2 id="mobileResultTitle">📡 VPN при блокировках</h2>
       <div id="mobileResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
