@@ -867,17 +867,26 @@ def main() -> None:
                     preferred_server_id,
                 )
 
-            # Европа (eu1): VLESS+REALITY
+            # Европа (eu1): AmneziaWG (Резервный VPN — отдельный .conf для AmneziaWG/AmneziaVPN).
+            # VLESS+REALITY теперь отдаётся через «Быстрый VPN» (subscription URL), не здесь.
             if preferred_server_id == "eu1":
                 try:
-                    vless_link = create_vless_client_for_user(telegram_id)
-                    _deliver_vless_link(
-                        message, vless_link,
-                        "✅ Создан VPN‑доступ на сервере <b>Европа</b> (VLESS+REALITY)\n"
-                        "Работает на всех платформах: iOS, Android, ПК.",
+                    peer, client_config = create_amneziawg_peer_and_config_for_user(
+                        telegram_id,
+                        android_safe=android_safe,
+                        server_id="eu1",
+                        platform=platform,
+                    )
+                    filename = f"awg_{peer.server_id}.conf"
+                    servers_info = get_available_servers()
+                    server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+                    _deliver_config(
+                        message, client_config, filename, platform,
+                        f"✅ Создан AmneziaWG-доступ на сервере <b>{server_name}</b>.\n"
+                        f"IP в VPN-сети: <code>{peer.wg_ip}</code>",
                     )
                 except WireGuardError as exc:
-                    logger.exception("Ошибка VLESS для %s: %s", telegram_id, exc)
+                    logger.exception("Ошибка AmneziaWG для %s: %s", telegram_id, exc)
                     safe_reply(
                         message,
                         "Не удалось создать VPN‑доступ. Попробуй позже или напиши владельцу.",
@@ -952,17 +961,26 @@ def main() -> None:
         try:
             preferred_server_id = normalize_preferred_server_id(user.preferred_server_id)
 
-            # Европа (eu1): VLESS+REALITY
+            # Европа (eu1): регенерация AmneziaWG peer (новые ключи, тот же IP).
             if preferred_server_id == "eu1":
                 try:
-                    vless_link = regenerate_vless_client_for_user(telegram_id)
-                    _deliver_vless_link(
-                        message, vless_link,
-                        "✅ VPN‑доступ обновлён на сервере <b>Европа</b> (VLESS+REALITY)\n"
-                        "⚠️ Старая ссылка больше не работает — импортируй новую.",
+                    peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
+                        telegram_id,
+                        android_safe=android_safe,
+                        server_id="eu1",
+                        platform=platform,
+                    )
+                    filename = f"awg_{peer.server_id}.conf"
+                    servers_info = get_available_servers()
+                    server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+                    _deliver_config(
+                        message, client_config, filename, platform,
+                        f"✅ AmneziaWG-доступ обновлён на сервере <b>{server_name}</b>.\n"
+                        f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
+                        f"⚠️ Старый конфиг больше не работает — импортируй новый.",
                     )
                 except WireGuardError as exc:
-                    logger.exception("Ошибка регенерации VLESS для %s: %s", telegram_id, exc)
+                    logger.exception("Ошибка регенерации AmneziaWG для %s: %s", telegram_id, exc)
                     safe_reply(
                         message,
                         f"Не удалось обновить VPN‑доступ: {exc}\n"
