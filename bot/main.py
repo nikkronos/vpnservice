@@ -247,6 +247,9 @@ def main() -> None:
     # Состояние ожидания ввода ID пользователя от администратора (для add_user через кнопку)
     _pending_add_user: set[int] = set()
 
+    # Состояние ожидания ввода «tid days [note]» для ручного зачисления дней через кнопку
+    _pending_credit_user: set[int] = set()
+
     # Состояние ожидания ввода ID для генерации AmneziaWG конфига (через кнопку в админке)
     _pending_awg_conf: set[int] = set()
 
@@ -1394,6 +1397,7 @@ def main() -> None:
         markup.add(
             types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
             types.InlineKeyboardButton("👥 Пользователи", callback_data="admin_users"),
+            types.InlineKeyboardButton("💳 Зачислить дней", callback_data="admin_credit_user"),
             types.InlineKeyboardButton("🔄 Ротация прокси", callback_data="admin_proxy_rotate"),
             types.InlineKeyboardButton("➕ Добавить пользователя", callback_data="admin_add_user"),
             types.InlineKeyboardButton("🔓 Whitelist ID", callback_data="admin_whitelist"),
@@ -1731,6 +1735,102 @@ def main() -> None:
         # Подставляем аргумент и вызываем существующую логику /add_user
         message.text = f"/add_user {message.text}"
         cmd_add_user(message)
+
+    # ── Зачислить дней юзеру: кнопка из админ-панели ──────────────────────────
+
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_credit_user")
+    def callback_admin_credit_user(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            return
+        _pending_credit_user.add(call.from_user.id)
+        bot.send_message(
+            call.message.chat.id,
+            "💳 Зачисление дней.\n\n"
+            "Введи одним сообщением: <code>telegram_id дней [метка]</code>\n\n"
+            "Примеры:\n"
+            "<code>151990415 30</code> — добавить 30 дней\n"
+            "<code>151990415 30 СБП Иван 27.05</code> — с меткой\n\n"
+            "Отправь «отмена» чтобы выйти.",
+            parse_mode="HTML",
+        )
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_credit_user
+    )
+    def handle_pending_credit_user(message: types.Message) -> None:  # type: ignore[override]
+        """Парсит '<tid> <days> [note]' и зачисляет."""
+        if not message.from_user:
+            return
+        _pending_credit_user.discard(message.from_user.id)
+        raw = (message.text or "").strip()
+        if raw.lower() in ("отмена", "cancel", "/cancel"):
+            safe_reply(message, "Отменено.")
+            return
+        parts = raw.split(maxsplit=2)
+        if len(parts) < 2:
+            safe_reply(message, "Формат: <code>tid дней [метка]</code>")
+            return
+        try:
+            tid = int(parts[0])
+            days = int(parts[1])
+        except ValueError:
+            safe_reply(message, "tid и дней должны быть числами. Попробуй ещё раз через кнопку.")
+            return
+        if days < 1 or days > 365:
+            safe_reply(message, "Дней должно быть в диапазоне 1–365.")
+            return
+        note = parts[2] if len(parts) > 2 else ""
+
+        user_row = db_find_user_by_telegram_id(tid)
+        if not user_row:
+            safe_reply(message, f"❌ Юзер с tid <code>{tid}</code> не найден в БД.")
+            return
+
+        import time as _time
+        ext_id = f"manual-bot-{tid}-{int(_time.time())}"
+        try:
+            db_record_payment(
+                provider="manual",
+                amount=200.0 * (days / 30.0),
+                currency="RUB",
+                telegram_id=tid,
+                external_id=ext_id,
+                plan="monthly",
+                days=days,
+                status="succeeded",
+            )
+            new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            inviter = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
+        except Exception as e:
+            logger.exception("admin credit failed: %s", e)
+            safe_reply(message, f"❌ Ошибка: {e}")
+            return
+
+        exp_str = (new_exp or "")[:10]
+        uname = user_row.get("username") or "—"
+        email = user_row.get("email") or "—"
+        summary = (
+            f"✅ Зачислено: +{days} дней.\n\n"
+            f"👤 @{uname} (id <code>{tid}</code>)\n"
+            f"📧 {email}\n"
+            f"📅 Активна до <b>{exp_str}</b>"
+        )
+        if note:
+            summary += f"\n📝 {note}"
+        if inviter:
+            summary += f"\n🎁 Реферал-бонус: +{REFERRAL_REWARD_DAYS} дн пригласителю (tid {inviter})"
+        safe_reply(message, summary)
+
+        # Уведомление юзеру
+        try:
+            bot.send_message(
+                tid,
+                f"✅ Подписка продлена на {days} дней — активна до <b>{exp_str}</b>.",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning("notify credited user failed: %s", e)
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]

@@ -911,9 +911,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (platform === 'android' && data.vpn_url) {
           // Android: vpn:// deep link → копи-кнопка + центрированная кнопка «Открыть» + QR
           status.remove();
+          // Plain-text hint (renderLinkBlock использует textContent — HTML-теги бы показались сырым текстом).
           const blockHint = (
-            'Тапни ссылку — <b>AmneziaVPN</b> откроет и импортирует конфиг автоматически. ' +
-            'Если приложение ещё не установлено — поставь <a href="https://amnezia.org" target="_blank">AmneziaVPN</a> из Google Play.'
+            'Тапни ссылку — AmneziaVPN откроет и импортирует конфиг автоматически. ' +
+            'Если приложение ещё не установлено — поставь AmneziaVPN из Google Play (amnezia.org).'
           );
           renderLinkBlock(awgResult, data.vpn_url, blockHint, 'Копировать vpn://');
 
@@ -927,6 +928,12 @@ document.addEventListener('DOMContentLoaded', () => {
           a.style.display = 'inline-block';
           aWrap.appendChild(a);
           awgResult.appendChild(aWrap);
+
+          // Больший пробел между кнопкой и QR
+          const qrSpacer = document.createElement('div');
+          qrSpacer.style.height = '20px';
+          awgResult.appendChild(qrSpacer);
+
           renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaVPN');
         } else {
           // PC / iOS — скачать файл

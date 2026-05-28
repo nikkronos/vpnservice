@@ -30,6 +30,7 @@ _SHEET_NAME = "Users"
 _HEADER = [
     "id", "telegram_id", "username", "email", "role",
     "active", "preferred_server_id", "email_verified",
+    "subscription_status", "expires_at", "days_left", "trial_used", "migrated",
     "has_vless", "peers_count", "created_at", "synced_at",
 ]
 
@@ -52,9 +53,24 @@ def _load_env() -> Dict[str, str]:
 
 def _build_rows(users: List[Dict], peer_count: Dict[int, int], now_iso: str) -> List[List[Any]]:
     """Конвертирует записи users → строки для Sheets (без заголовка)."""
+    import math
     rows: List[List[Any]] = []
     for u in users:
         tid = u.get("telegram_id")
+
+        # Подписка
+        sub_status = u.get("subscription_status") or "none"
+        expires_at = u.get("expires_at") or ""
+        days_left = ""
+        if expires_at:
+            try:
+                delta = datetime.fromisoformat(expires_at) - datetime.utcnow()
+                days_left = max(0, math.ceil(delta.total_seconds() / 86400.0))
+            except (ValueError, TypeError):
+                days_left = ""
+        trial_used = "1" if u.get("trial_used") else "0"
+        migrated = "1" if u.get("migrated_at") else "0"
+
         rows.append([
             u.get("id", ""),
             tid if tid is not None else "",
@@ -64,6 +80,11 @@ def _build_rows(users: List[Dict], peer_count: Dict[int, int], now_iso: str) -> 
             "1" if u.get("active") else "0",
             u.get("preferred_server_id") or "",
             "1" if u.get("email_verified") else "0",
+            sub_status,
+            expires_at[:10] if expires_at else "",
+            days_left,
+            trial_used,
+            migrated,
             "1" if u.get("vless_uuid") else "0",
             peer_count.get(tid, 0) if tid else 0,
             u.get("created_at") or "",
