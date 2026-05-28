@@ -694,41 +694,55 @@ def main() -> None:
         file_obj.name = filename
         bot.send_document(chat_id, file_obj, visible_file_name=filename)
 
+    def _awg_success_text(platform: str) -> str:
+        """Текст-инструкция для AmneziaWG-конфига по платформам."""
+        if platform == "pc":
+            return (
+                "✅ Готово. Файл скачан.\n\n"
+                "📂 <b>Установка:</b>\n"
+                "1. Поставь <a href=\"https://amnezia.org\">AmneziaVPN</a> (или AmneziaWG для Windows).\n"
+                "2. В приложении: <b>«+»</b> → <b>«Импорт из файла»</b> → выбери скачанный <code>.conf</code>.\n"
+                "3. Включи туннель."
+            )
+        if platform == "ios":
+            return (
+                "✅ Готово. Файл скачан.\n\n"
+                "📱 <b>Установка:</b>\n"
+                "1. Поставь <b>AmneziaWG</b> из App Store.\n"
+                "2. Нажми на файл → «Поделиться» → выбери <b>AmneziaWG</b> → «Создать из файла».\n"
+                "3. Включи туннель."
+            )
+        # android
+        return (
+            "✅ Готово.\n\n"
+            "🤖 <b>Установка:</b>\n"
+            "Тапни ссылку ниже — <b>AmneziaVPN</b> откроет и импортирует конфиг автоматически.\n"
+            "Если приложение ещё не установлено — поставь <a href=\"https://amnezia.org\">AmneziaVPN</a> "
+            "из Google Play."
+        )
+
     def _deliver_config(
         message: types.Message,
         config_text: str,
         filename: str,
         platform: str,
-        success_text: str,
+        success_text: str | None = None,
     ) -> None:
         """
-        Доставляет конфиг в зависимости от платформы.
-        pc    → .conf файл (стандартный импорт в AmneziaVPN/AmneziaWG)
-        ios   → конфиг текстом в <code> блоке (копировать → AmneziaWG → Импорт из буфера)
-        android → vpn:// deep link (тап → AmneziaVPN импортирует автоматически)
+        Доставляет AmneziaWG-конфиг в зависимости от платформы.
+        pc/ios → .conf файл, текст-инструкция отдельным сообщением.
+        android → vpn:// deep link + текст-инструкция.
+        success_text=None → используем стандартный _awg_success_text(platform).
         """
-        import html as _html
         chat_id = message.chat.id
+        text = success_text if success_text is not None else _awg_success_text(platform)
         if platform == "android":
             vpn_link = generate_vpn_url(config_text)
-            bot.send_message(chat_id, success_text, parse_mode="HTML")
-            bot.send_message(
-                chat_id,
-                "👇 Нажми на ссылку — <b>AmneziaVPN</b> откроет и импортирует конфиг:",
-                parse_mode="HTML",
-            )
+            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
             bot.send_message(chat_id, vpn_link, parse_mode=None)
-        elif platform == "ios":
+        else:  # pc / ios
             _send_config_file(chat_id, config_text, filename)
-            bot.send_message(
-                chat_id,
-                success_text + "\n\n"
-                "📂 Нажми на файл → иконка «Поделиться» → выбери <b>AmneziaWG</b> → «Создать из файла».",
-                parse_mode="HTML",
-            )
-        else:  # pc
-            _send_config_file(chat_id, config_text, filename)
-            bot.send_message(chat_id, success_text, parse_mode="HTML")
+            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
 
     def _deliver_vless_link(message: types.Message, vless_link: str, success_text: str) -> None:
         """Отправляет vless:// ссылку пользователю: сначала сообщение, потом ссылка в code-блоке."""
@@ -827,31 +841,34 @@ def main() -> None:
                         f"{profile_note}",
                     )
                     return
-                # Peer уже существует, тип профиля совпадает — просто сообщаем
+                # Peer уже существует, тип профиля совпадает.
+                # Для eu1 (AmneziaWG) — регенерируем (тот же IP, новые ключи) и выдаём свежий conf.
+                # Это «получить конфиг повторно» — если юзер потерял или хочет на новое устройство.
                 servers_info = get_available_servers()
                 server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                # Европа (eu1/eu2) — AmneziaWG
                 platform_label = {"pc": "ПК", "ios": "iOS", "android": "Android"}.get(platform, platform)
                 if preferred_server_id == "eu1":
-                    # Пользователь уже имеет VLESS-доступ — отдаём существующую ссылку
                     try:
-                        vless_link = create_vless_client_for_user(telegram_id)
-                        _deliver_vless_link(
-                            message, vless_link,
-                            f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> (VLESS+REALITY).\n"
-                            "Вот твоя ссылка — импортируй в Hiddify / FoXray / V2Box / v2rayNG.\n"
-                            "Если хочешь новую — используй /regen.",
+                        peer, client_config = regenerate_amneziawg_peer_and_config_for_user(
+                            telegram_id,
+                            android_safe=android_safe,
+                            server_id="eu1",
+                            platform=platform,
                         )
+                        filename = f"awg_{peer.server_id}.conf"
+                        _deliver_config(message, client_config, filename, platform)
                     except WireGuardError as exc:
-                        logger.exception("Ошибка получения VLESS для %s: %s", telegram_id, exc)
-                        safe_reply(message, "Не удалось получить ссылку. Попробуй /regen или напиши владельцу.")
+                        logger.exception("AmneziaWG regen for %s: %s", telegram_id, exc)
+                        safe_reply(
+                            message,
+                            "Не удалось получить конфиг. Попробуй позже или напиши владельцу.",
+                        )
                 else:
                     safe_reply(
                         message,
                         f"Для тебя уже создан VPN‑доступ на сервере <b>{server_name}</b> ({preferred_server_id}) "
                         f"для <b>{platform_label}</b>.\n"
-                        "Если у тебя уже импортирован конфиг и всё работает — ничего делать не нужно.\n"
-                        "Если потерял конфиг или нужно обновить, используй /regen.",
+                        "Если потерял конфиг или нужно обновить, используй «🔄 Обновить конфиг» в меню.",
                     )
                 return
             
@@ -868,7 +885,6 @@ def main() -> None:
                 )
 
             # Европа (eu1): AmneziaWG (Резервный VPN — отдельный .conf для AmneziaWG/AmneziaVPN).
-            # VLESS+REALITY теперь отдаётся через «Быстрый VPN» (subscription URL), не здесь.
             if preferred_server_id == "eu1":
                 try:
                     peer, client_config = create_amneziawg_peer_and_config_for_user(
@@ -878,13 +894,7 @@ def main() -> None:
                         platform=platform,
                     )
                     filename = f"awg_{peer.server_id}.conf"
-                    servers_info = get_available_servers()
-                    server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
-                    _deliver_config(
-                        message, client_config, filename, platform,
-                        f"✅ Создан AmneziaWG-доступ на сервере <b>{server_name}</b>.\n"
-                        f"IP в VPN-сети: <code>{peer.wg_ip}</code>",
-                    )
+                    _deliver_config(message, client_config, filename, platform)
                 except WireGuardError as exc:
                     logger.exception("Ошибка AmneziaWG для %s: %s", telegram_id, exc)
                     safe_reply(
@@ -971,13 +981,11 @@ def main() -> None:
                         platform=platform,
                     )
                     filename = f"awg_{peer.server_id}.conf"
-                    servers_info = get_available_servers()
-                    server_name = servers_info.get(preferred_server_id, {}).get("name", preferred_server_id)
+                    # Предупреждение, что старый отвалится — отдельной строкой перед стандартной инструкцией.
+                    warn = "⚠️ Старый конфиг больше не работает — импортируй новый.\n\n"
                     _deliver_config(
                         message, client_config, filename, platform,
-                        f"✅ AmneziaWG-доступ обновлён на сервере <b>{server_name}</b>.\n"
-                        f"IP в VPN-сети: <code>{peer.wg_ip}</code>\n"
-                        f"⚠️ Старый конфиг больше не работает — импортируй новый.",
+                        warn + _awg_success_text(platform),
                     )
                 except WireGuardError as exc:
                     logger.exception("Ошибка регенерации AmneziaWG для %s: %s", telegram_id, exc)
