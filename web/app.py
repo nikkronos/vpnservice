@@ -1019,9 +1019,12 @@ def api_account_info():
             "days_left": days_left,
             "grandfathered": grandfathered,
             "trial_used": bool(sub.get("trial_used")),
-            # Триал доступен только новым (expires_at IS NULL) и не использовавшим.
-            # Grandfather/платящие — не видят кнопку, чтобы не путать.
-            "trial_available": (not bool(sub.get("trial_used"))) and (expires_at is None),
+            # Триал доступен: не использовался И нет активной подписки (expires_at IS NULL или истекла).
+            # Покрывает: новые юзеры; юзеры со «skip» в онбординге (expires_at=NOW); просрочки без активации.
+            # Grandfather с trial_used=1 (после migration reset) — не видят кнопку.
+            "trial_available": (not bool(sub.get("trial_used"))) and (
+                (expires_at is None) or (days_left is not None and days_left == 0)
+            ),
             "trial_days": TRIAL_DAYS,
             "has_password": db_has_password(telegram_id),
             "manual_pay": MANUAL_PAY,

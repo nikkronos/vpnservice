@@ -319,6 +319,31 @@ def main() -> None:
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
             )
+            # Кнопка «Активировать 14 дней» если триал ещё не использован И нет активной подписки.
+            # Видна и после онбординга с «Пропустить», и при истёкшей подписке (если триал не был активирован).
+            try:
+                sub = db_get_subscription(uid) or {}
+                if not sub.get("trial_used"):
+                    expires_at = sub.get("expires_at")
+                    days_left = 0
+                    if expires_at:
+                        import math
+                        from datetime import datetime as _dt
+                        try:
+                            delta = _dt.fromisoformat(expires_at) - _dt.utcnow()
+                            days_left = max(0, math.ceil(delta.total_seconds() / 86400.0))
+                        except (ValueError, TypeError):
+                            days_left = 0
+                    if not expires_at or days_left == 0:
+                        markup.add(
+                            types.InlineKeyboardButton(
+                                "🎁 Активировать 14 дней бесплатно",
+                                callback_data="menu_trial_activate",
+                            ),
+                        )
+            except Exception as e:
+                logger.debug("trial_available check failed: %s", e)
+
             if is_owner(uid, admin_id):
                 markup.add(types.InlineKeyboardButton("⚙️ Администратор", callback_data="admin_panel"))
             elif _needs_email_link(uid):
@@ -428,29 +453,112 @@ def main() -> None:
 
     def _finalize_onboarding(chat_id: int, telegram_id: int) -> None:
         """
-        Завершение онбординга: авто-trial для новых, отметка migrated_at, переход в основное меню.
+        Завершение email-онбординга. Отмечаем migrated_at, дальше предлагаем триал (через onb_trial_choice).
         db_mark_migrated идёт ИМЕННО ЗДЕСЬ (а не в /start) — у новых юзеров запись в users
         появляется только после db_upsert_user в OTP-шаге, до этого UPDATE затрагивает 0 строк.
         """
         _onboarding_state.pop(telegram_id, None)
         try:
-            db_ensure_signup_trial(telegram_id, days=14)
-        except Exception as e:
-            logger.warning("db_ensure_signup_trial failed for %s: %s", telegram_id, e)
-        try:
             db_mark_migrated(telegram_id)
         except Exception as e:
             logger.warning("db_mark_migrated (finalize) failed for %s: %s", telegram_id, e)
-        # Показываем главное меню
+
+        # Если триал ещё не использован и нет активной подписки → даём выбор активировать или пропустить.
+        sub = db_get_subscription(telegram_id) or {}
+        if not sub.get("trial_used") and not sub.get("expires_at"):
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton("🎁 Активировать 14 дней бесплатно", callback_data="onb_trial_yes"),
+                types.InlineKeyboardButton("⏭ Пропустить", callback_data="onb_trial_skip"),
+            )
+            bot.send_message(
+                chat_id,
+                "✅ Email подтверждён.\n\n"
+                "🎁 Тебе доступна <b>бесплатная подписка на 14 дней</b> — активировать сейчас? "
+                "Можно пропустить и активировать позже из меню.",
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+            return
+
+        # У юзера уже есть подписка (grandfather после reset, активный платящий) → сразу в меню.
         bot.send_message(chat_id, "✅ Готово! Открываю меню.")
+        _send_main_menu_for_tid(chat_id, telegram_id)
+
+    def _send_main_menu_for_tid(chat_id: int, telegram_id: int) -> None:
+        """Хелпер: показывает главное меню по telegram_id (без объекта from_user)."""
         from types import SimpleNamespace
-        # Эмулируем from_user — у нас есть telegram_id и можно достать username из БД
         user_row = db_find_user_by_telegram_id(telegram_id) or {}
         fake_from_user = SimpleNamespace(
             id=telegram_id,
             username=user_row.get("username"),
         )
         _send_main_menu(chat_id, fake_from_user)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "onb_trial_yes")
+    def callback_onb_trial_yes(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        new_exp = db_ensure_signup_trial(tid, days=14)
+        if new_exp:
+            exp_str = new_exp[:10]
+            bot.send_message(
+                call.message.chat.id,
+                f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
+                parse_mode="HTML",
+            )
+        _send_main_menu_for_tid(call.message.chat.id, tid)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "onb_trial_skip")
+    def callback_onb_trial_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        # Помечаем подписку как «истёкшую сейчас» — иначе expires_at IS NULL = grandfather =
+        # бесплатный безграничный доступ. Триал остаётся доступным (trial_used не трогаем).
+        try:
+            from .database import _conn
+            with _conn() as con:
+                con.execute(
+                    "UPDATE users SET expires_at = datetime('now'), subscription_status = 'expired' "
+                    "WHERE telegram_id = ? AND expires_at IS NULL",
+                    (tid,),
+                )
+        except Exception as e:
+            logger.warning("onb_trial_skip set-expired failed: %s", e)
+        bot.send_message(
+            call.message.chat.id,
+            "⏭ Триал не активирован. Можешь активировать его в любой момент через меню → «🎁 Активировать 14 дней».",
+        )
+        _send_main_menu_for_tid(call.message.chat.id, tid)
+
+    # Кнопка «🎁 Активировать 14 дней» из главного меню бота (если триал доступен).
+    @bot.callback_query_handler(func=lambda call: call.data == "menu_trial_activate")
+    def callback_menu_trial_activate(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        tid = call.from_user.id
+        # db_start_trial: проверяет только trial_used (не требует expires_at IS NULL).
+        # Это позволяет активировать триал и после "Пропустить" в онбординге (где expires_at=NOW).
+        from .database import db_start_trial
+        new_exp = db_start_trial(tid, days=14)
+        if new_exp:
+            exp_str = new_exp[:10]
+            bot.send_message(
+                call.message.chat.id,
+                f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
+                parse_mode="HTML",
+            )
+        else:
+            bot.send_message(
+                call.message.chat.id,
+                "Триал уже был использован раньше или у тебя уже активна подписка.",
+            )
+        _send_main_menu_for_tid(call.message.chat.id, tid)
 
     @bot.callback_query_handler(func=lambda call: call.data == "onb_ack")
     def callback_onb_ack(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -995,11 +1103,11 @@ def main() -> None:
             )
             sub_text = (
                 "Выбери способ подключения:\n\n"
-                "🔗 <b>Быстрый VPN</b> — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
+                "🔗 Быстрый VPN — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
                 "Приложение само выберет рабочий сервер.\n\n"
-                "📲 <b>Резервный VPN</b> — отдельный конфиг для AmneziaWG/AmneziaVPN. "
+                "📲 Резервный VPN — отдельный конфиг для AmneziaWG/AmneziaVPN. "
                 "Макс. скорость на одном сервере.\n\n"
-                "📡 <b>Мобильный VPN</b> — если оператор режет интернет (Yota / Мегафон при белых списках РКН)."
+                "📡 Мобильный VPN — если оператор режет интернет."
             )
             bot.send_message(call.message.chat.id, sub_text, parse_mode="HTML", reply_markup=sub_markup)
         elif action == "menu_get_config":
