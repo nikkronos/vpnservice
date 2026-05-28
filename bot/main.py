@@ -700,7 +700,7 @@ def main() -> None:
             return (
                 "✅ Готово. Файл скачан.\n\n"
                 "📂 <b>Установка:</b>\n"
-                "1. Поставь <a href=\"https://amnezia.org\">AmneziaVPN</a> (или AmneziaWG для Windows).\n"
+                "1. Поставь <a href=\"https://amnezia.org\">AmneziaVPN</a>.\n"
                 "2. В приложении: <b>«+»</b> → <b>«Импорт из файла»</b> → выбери скачанный <code>.conf</code>.\n"
                 "3. Включи туннель."
             )
@@ -1804,7 +1804,7 @@ def main() -> None:
         markup.add(
             types.InlineKeyboardButton("📱 iOS", callback_data="instr_ios"),
             types.InlineKeyboardButton("🤖 Android", callback_data="instr_android"),
-            types.InlineKeyboardButton("💻 Windows", callback_data="instr_windows"),
+            types.InlineKeyboardButton("💻 ПК", callback_data="instr_pc"),
         )
         markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         bot.reply_to(
@@ -1818,7 +1818,8 @@ def main() -> None:
         """Отправляет инструкцию для выбранной платформы."""
         bot.answer_callback_query(call.id)
         platform = call.data.replace("instr_", "")
-        name_map = {"ios": "ios", "android": "android", "windows": "windows"}
+        # Принимаем как новые ("pc"), так и legacy ("windows") callbacks — оба → файл instruction_pc_short.txt.
+        name_map = {"ios": "ios", "android": "android", "pc": "pc", "windows": "pc"}
         file_key = name_map.get(platform)
         if not file_key:
             bot.send_message(call.message.chat.id, "Неизвестная платформа.")
@@ -1828,7 +1829,7 @@ def main() -> None:
         markup.add(
             types.InlineKeyboardButton("📱 iOS", callback_data="instr_ios"),
             types.InlineKeyboardButton("🤖 Android", callback_data="instr_android"),
-            types.InlineKeyboardButton("💻 Windows", callback_data="instr_windows"),
+            types.InlineKeyboardButton("💻 ПК", callback_data="instr_pc"),
         )
         markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         bot.send_message(call.message.chat.id, instr, parse_mode="HTML", reply_markup=markup)

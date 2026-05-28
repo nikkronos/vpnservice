@@ -1,19 +1,22 @@
 📱 <b>iPhone / iPad</b>
 
-У нас два варианта VPN — у каждого <u>своё приложение</u>:
+В боте: <b>«📲 Получить VPN»</b> — три способа подключения.
 
-<b>① Основной VPN (AmneziaWG)</b>
-Приложение: <b>AmneziaWG</b> (или AmneziaVPN) — из App Store.
-• Проще всего: открой <b>Личный кабинет</b> → «Основной VPN» → iPhone/iPad → <b>отсканируй QR</b> прямо в приложении AmneziaWG.
-• Или: скачай файл <code>.conf</code> → приложение «Файлы» → нажми на файл → «Поделиться» → AmneziaWG.
+<b>🔗 Быстрый VPN (рекомендуется)</b>
+1. Поставь <b>Streisand</b>, <b>Happ</b> или <b>V2Box</b> (App Store).
+2. В боте: «Получить VPN» → «Быстрый VPN» → отсканируй QR в приложении (или скопируй ссылку → «+» → «Импорт из буфера»).
+3. Приложение само выберет рабочий сервер.
 
-<b>② VPN при блокировках (VLESS)</b> — если основной не идёт по LTE/5G.
-Приложение: <b>Streisand</b>, <b>Happ</b> или <b>V2Box</b> — из App Store.
-• Личный кабинет → «VPN при блокировках» → выбери оператора → <b>отсканируй QR</b> в приложении (или скопируй ссылку <code>vless://</code> и вставь: «+» → «Импорт из буфера»).
+<b>📲 Резервный VPN (AmneziaWG)</b>
+1. Поставь <b>AmneziaWG</b> из App Store.
+2. В боте: «Получить VPN» → «Резервный VPN» → iOS → получишь файл <code>.conf</code>.
+3. Нажми на файл → «Поделиться» → <b>AmneziaWG</b> → «Создать из файла».
+4. Включи туннель.
 
-⚠️ <b>Куда что вставлять:</b>
-• ссылка <code>vless://</code> → только Streisand / Happ / V2Box (НЕ в AmneziaWG)
-• конфиг или QR AmneziaWG → только в AmneziaWG (НЕ в V2Box)
+<b>📡 Мобильный VPN</b>
+Если оператор режет интернет — «Получить VPN» → «Мобильный VPN» → выбери оператора. Получишь <code>vless://</code> для Streisand / Happ / V2Box.
+
+⚠️ Не путать форматы: <code>vless://</code> → только Streisand/Happ/V2Box; файл <code>.conf</code> → только AmneziaWG.
 
 🌐 Личный кабинет: <code>https://supportkronos.online:8443/recovery</code>
-📨 Telegram не открывается? В Личном кабинете есть кнопка MTProxy.
+📨 Telegram не работает? «📨 Proxy для Telegram» в главном меню.

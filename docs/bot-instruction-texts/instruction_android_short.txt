@@ -1,19 +1,22 @@
 🤖 <b>Android</b>
 
-Два варианта VPN — у каждого <u>своё приложение</u>:
+В боте: <b>«📲 Получить VPN»</b> — три способа подключения.
 
-<b>① Основной VPN (AmneziaWG)</b>
-Приложение: <b>AmneziaVPN</b> — из Google Play.
-• Проще всего: <b>Личный кабинет</b> → «Основной VPN» → Android → кнопка «Открыть в AmneziaVPN» (импортирует сам). Или отсканируй QR в приложении.
-• В боте: «Получить VPN» → Android → придёт ссылка <code>vpn://</code> — нажми на неё, AmneziaVPN импортирует автоматически.
+<b>🔗 Быстрый VPN (рекомендуется)</b>
+1. Поставь <b>Happ</b>, <b>Hiddify</b> или <b>v2rayNG</b> (Google Play).
+2. В боте: «Получить VPN» → «Быстрый VPN» → отсканируй QR в приложении (или скопируй ссылку → «+» → «Импорт из буфера»).
+3. Приложение само выберет рабочий сервер.
 
-<b>② VPN при блокировках (VLESS)</b> — если основной не идёт по LTE/5G.
-Приложение: <b>Hiddify</b> или <b>v2rayNG</b>.
-• Личный кабинет → «VPN при блокировках» → отсканируй QR (или скопируй ссылку <code>vless://</code> → «+» → «Импорт из буфера»).
+<b>📲 Резервный VPN (AmneziaWG)</b>
+1. Поставь <b>AmneziaVPN</b> (Google Play или <a href="https://amnezia.org">amnezia.org</a>).
+2. В боте: «Получить VPN» → «Резервный VPN» → Android → придёт <code>vpn://</code> ссылка.
+3. Тапни на ссылку — AmneziaVPN откроет и импортирует автоматически.
+4. Включи туннель.
 
-⚠️ <b>Куда что вставлять:</b>
-• ссылка <code>vless://</code> → только Hiddify / v2rayNG
-• ссылка <code>vpn://</code> или конфиг AmneziaWG → только AmneziaVPN
+<b>📡 Мобильный VPN</b>
+Если оператор режет интернет — «Получить VPN» → «Мобильный VPN» → выбери оператора. Получишь <code>vless://</code> для Happ / Hiddify / v2rayNG.
+
+⚠️ Не путать форматы: <code>vless://</code> → только Happ/Hiddify/v2rayNG; <code>vpn://</code> или <code>.conf</code> → только AmneziaVPN.
 
 🌐 Личный кабинет: <code>https://supportkronos.online:8443/recovery</code>
-📨 Telegram не открывается? В Личном кабинете есть кнопка MTProxy.
+📨 Telegram не работает? «📨 Proxy для Telegram» в главном меню.
