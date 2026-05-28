@@ -333,7 +333,7 @@ def main() -> None:
                 types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
                 types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
-                types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
+                types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
                 types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"),
