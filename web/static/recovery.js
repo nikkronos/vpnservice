@@ -851,6 +851,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ── Кнопка «🆘 Поддержка» в главном меню → открывает бот с deeplink ?start=support
+  const btnSupportLink = document.getElementById('btnSupportLink');
+  if (btnSupportLink) {
+    btnSupportLink.addEventListener('click', () => {
+      haptic('light');
+      const supportLink = 'https://t.me/vpnkronos_bot?start=support';
+      // В TG WebApp используем openTelegramLink — переход внутри Telegram, без выхода.
+      if (inTelegram && tg.openTelegramLink) {
+        try { tg.openTelegramLink(supportLink); return; } catch (e) {}
+      }
+      // В браузере — обычный переход.
+      window.open(supportLink, '_blank');
+    });
+  }
+
   // ── Резервные конфиги: выбор канала (в stepConnect) — только VPN-каналы.
   // MTProxy переехал в главное меню (см. data-substep="proxy").
   document.querySelectorAll('[data-channel]').forEach(btn => {

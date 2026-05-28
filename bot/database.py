@@ -112,6 +112,28 @@ CREATE TABLE IF NOT EXISTS payments (
     updated_at   TEXT
 );
 
+-- Support: тикеты от юзеров. Variant B (двусторонняя переписка через бот).
+-- Тикет открывается когда юзер пишет в support; закрывается owner-ом или авто-эскалацией.
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id     INTEGER NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'open',     -- 'open' | 'closed'
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    last_message_at TEXT,
+    closed_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_tid_status ON support_tickets (telegram_id, status);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id     INTEGER NOT NULL,
+    sender        TEXT NOT NULL,                       -- 'user' | 'owner'
+    text          TEXT,
+    photo_file_id TEXT,                                -- TG file_id если прикреплено фото
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages (ticket_id);
+
 -- Donation-style payment claims: юзер жмёт «Я оплатил» → строка pending → владелец
 -- решает approve/decline через inline-кнопки в боте. Одна pending-заявка на юзера за раз.
 CREATE TABLE IF NOT EXISTS payment_claims (
@@ -1334,6 +1356,103 @@ def db_clear_vless_uuid(telegram_id: int) -> None:
             "UPDATE users SET vless_uuid = NULL, vless_short_id = NULL WHERE telegram_id = ?",
             (telegram_id,),
         )
+
+
+# ── Support tickets ───────────────────────────────────────────────────────────
+
+def db_get_open_ticket(telegram_id: int) -> Optional[Dict]:
+    """Возвращает текущий открытый тикет юзера (или None если нет)."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM support_tickets WHERE telegram_id = ? AND status = 'open' "
+            "ORDER BY id DESC LIMIT 1",
+            (telegram_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_create_ticket(telegram_id: int) -> int:
+    """Создаёт новый тикет. Если уже есть открытый — возвращает его id (idempotent)."""
+    _ensure_init()
+    existing = db_get_open_ticket(telegram_id)
+    if existing:
+        return int(existing["id"])
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT INTO support_tickets (telegram_id, status) VALUES (?, 'open')",
+            (telegram_id,),
+        )
+        return cur.lastrowid
+
+
+def db_get_ticket_by_id(ticket_id: int) -> Optional[Dict]:
+    """Возвращает тикет по id."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM support_tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def db_close_ticket(ticket_id: int) -> None:
+    """Закрывает тикет."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE support_tickets SET status = 'closed', closed_at = datetime('now') "
+            "WHERE id = ? AND status = 'open'",
+            (ticket_id,),
+        )
+
+
+def db_add_support_message(
+    ticket_id: int,
+    sender: str,
+    text: Optional[str] = None,
+    photo_file_id: Optional[str] = None,
+) -> int:
+    """Добавляет сообщение в тикет. sender = 'user' | 'owner'. Возвращает id сообщения."""
+    _ensure_init()
+    if sender not in ("user", "owner"):
+        raise ValueError("sender must be 'user' or 'owner'")
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT INTO support_messages (ticket_id, sender, text, photo_file_id) "
+            "VALUES (?, ?, ?, ?)",
+            (ticket_id, sender, text, photo_file_id),
+        )
+        con.execute(
+            "UPDATE support_tickets SET last_message_at = datetime('now') WHERE id = ?",
+            (ticket_id,),
+        )
+        return cur.lastrowid
+
+
+def db_get_ticket_messages(ticket_id: int, limit: int = 50) -> List[Dict]:
+    """Возвращает сообщения тикета по возрастанию created_at."""
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM support_messages WHERE ticket_id = ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (ticket_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def db_get_open_tickets() -> List[Dict]:
+    """Список всех открытых тикетов (для /support_list админа)."""
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT t.*, u.username, u.email "
+            "FROM support_tickets t LEFT JOIN users u ON u.telegram_id = t.telegram_id "
+            "WHERE t.status = 'open' "
+            "ORDER BY COALESCE(t.last_message_at, t.created_at) DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def db_mark_expiry_notif_sent(telegram_id: int, days_until: int) -> None:

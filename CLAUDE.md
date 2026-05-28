@@ -219,6 +219,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
 | **План фаз 3–4–5 (master)** | **`docs/plan-phase-3-4-5.md`** — читать первым при потере контекста |
+| Support tickets (Variant B) | `support_tickets` + `support_messages` в SQLite. Команды: `/support_list /support_view N /support_close N`. Юзер: меню → «🆘 Поддержка» (или ЛК → openTelegramLink → `?start=support`). Owner: inline-кнопки [✉️ Ответить / ✅ Закрыть / 📜 История] на каждом входящем. |
 | ЮKassa setup (владельцу) | `docs/yookassa-setup-instruction.md` |
 | Yandex Cloud REALITY | `docs/yandex-cloud-reality-setup.md` |
 | Бэкап/восстановление | `docs/backup-restore.md` |

@@ -3,6 +3,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 import telebot
 from telebot import types
@@ -40,6 +41,13 @@ from .database import (
     db_clear_sub_token,
     db_clear_vless_uuid,
     db_ensure_signup_trial,
+    db_get_open_ticket,
+    db_create_ticket,
+    db_get_ticket_by_id,
+    db_close_ticket,
+    db_add_support_message,
+    db_get_ticket_messages,
+    db_get_open_tickets,
     init_db,
 )
 from .vless_peers import (
@@ -250,6 +258,13 @@ def main() -> None:
     # Состояние ожидания ввода «tid days [note]» для ручного зачисления дней через кнопку
     _pending_credit_user: set[int] = set()
 
+    # Support: юзер ввёл сообщение в режим support (после нажатия «🆘 Поддержка»).
+    # {tid: {step: 'awaiting_message', ticket_id: int}}
+    _support_user_state: dict[int, dict] = {}
+
+    # Support: owner-режим ответа на тикет. {admin_id: {ticket_id, user_tid}}
+    _support_reply_state: dict[int, dict] = {}
+
     # Состояние ожидания ввода ID для генерации AmneziaWG конфига (через кнопку в админке)
     _pending_awg_conf: set[int] = set()
 
@@ -321,6 +336,7 @@ def main() -> None:
                 types.InlineKeyboardButton("📊 Мой статус", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
+                types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"),
             )
             # Кнопка «Активировать 14 дней» если триал ещё не использован И нет активной подписки.
             # Видна и после онбординга с «Пропустить», и при истёкшей подписке (если триал не был активирован).
@@ -666,7 +682,14 @@ def main() -> None:
 
         tid = message.from_user.id
 
+        # Deeplink: /start support → сразу в Support-флоу (минуя меню), если онбординг пройден.
+        # Юзер из ЛК (Mini App) тыкает «🆘 Поддержка» → tg.openTelegramLink(t.me/bot?start=support).
+        start_arg = ""
+        if message.text and " " in message.text:
+            start_arg = message.text.split(maxsplit=1)[1].strip().lower()
+
         # Если онбординг включён и юзер ещё не «прошёл» — запускаем FSM, не показывая обычное меню.
+        # Support deeplink имеет приоритет ТОЛЬКО для уже-онбордившихся юзеров.
         if _onboarding_needed(tid):
             try:
                 # Помечаем юзера как мигрировавшего сразу при первом /start (даже если он дисклеймер не дочитает —
@@ -675,6 +698,10 @@ def main() -> None:
             except Exception as e:
                 logger.warning("db_mark_migrated on /start failed: %s", e)
             _start_onboarding(message.chat.id, tid)
+            return
+
+        if start_arg == "support":
+            _open_support_flow(message.chat.id, tid)
             return
 
         _send_main_menu(message.chat.id, message.from_user)
@@ -1171,6 +1198,8 @@ def main() -> None:
             cmd_mobile_vpn(call.message)
         elif action == "menu_status":
             cmd_status(call.message)
+        elif action == "menu_support":
+            _open_support_flow(call.message.chat.id, call.from_user.id)
 
     # ──────────────────────────────────────────────────────────────
     # Callbacks: выбор платформы для получения / обновления конфига
@@ -2883,6 +2912,368 @@ def main() -> None:
             bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
         except Exception as e:
             logger.exception("pay_show failed: %s", e)
+
+    # ── Support: Variant B — двусторонняя переписка через бот ──────────────────
+
+    def _open_support_flow(chat_id: int, telegram_id: int) -> None:
+        """
+        Стартует support-флоу: если есть открытый тикет — просит просто написать сообщение,
+        иначе создаёт новый тикет и просит первое сообщение.
+        """
+        existing = db_get_open_ticket(telegram_id)
+        if existing:
+            # У юзера уже открыт тикет — переводим его в режим продолжения переписки.
+            ticket_id = int(existing["id"])
+            _support_user_state[telegram_id] = {"step": "awaiting_message", "ticket_id": ticket_id}
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✕ Отмена", callback_data="support_cancel"))
+            bot.send_message(
+                chat_id,
+                f"🆘 У тебя уже открыт тикет #{ticket_id}.\n\n"
+                "Просто напиши новое сообщение в этот чат — оно дойдёт до владельца.\n"
+                "Прикрепить можно одно фото с подписью.",
+                reply_markup=markup,
+            )
+            return
+        # Новый тикет (создаём по факту первого сообщения, чтобы не плодить пустых).
+        _support_user_state[telegram_id] = {"step": "awaiting_message", "ticket_id": None}
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✕ Отмена", callback_data="support_cancel"))
+        bot.send_message(
+            chat_id,
+            "🆘 <b>Поддержка</b>\n\n"
+            "Опиши проблему одним сообщением. Прикрепить можно одно фото с подписью.\n"
+            "Ответ придёт в этот чат.",
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "support_cancel")
+    def callback_support_cancel(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            _support_user_state.pop(call.from_user.id, None)
+        bot.send_message(call.message.chat.id, "Отменено.")
+
+    def _notify_owner_about_support_message(
+        ticket_id: int,
+        user_tid: int,
+        msg_text: Optional[str],
+        photo_file_id: Optional[str],
+    ) -> None:
+        """Шлёт owner-у уведомление о новом сообщении в тикете + inline-кнопки."""
+        user_row = db_find_user_by_telegram_id(user_tid) or {}
+        uname = user_row.get("username") or "—"
+        email = user_row.get("email") or "—"
+        sub = db_get_subscription(user_tid) or {}
+        expires_at = (sub.get("expires_at") or "")[:10] or "—"
+        if sub.get("grandfathered") or not sub.get("expires_at"):
+            sub_line = "Бессрочный (grandfather)"
+        else:
+            sub_line = f"до {expires_at}"
+
+        text = (
+            f"🆘 <b>Тикет #{ticket_id}</b> — новое сообщение\n\n"
+            f"👤 @{uname} (id: <code>{user_tid}</code>)\n"
+            f"📧 {email}\n"
+            f"📅 Подписка: {sub_line}\n\n"
+        )
+        if msg_text:
+            # Обрезаем длинные сообщения для inline-уведомления
+            preview = msg_text[:1500] + ("…" if len(msg_text) > 1500 else "")
+            import html as _html
+            text += f"<b>Текст:</b>\n{_html.escape(preview)}"
+        else:
+            text += "<i>(только фото)</i>"
+
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("✉️ Ответить", callback_data=f"support_reply:{ticket_id}"),
+            types.InlineKeyboardButton("✅ Закрыть тикет", callback_data=f"support_close:{ticket_id}"),
+            types.InlineKeyboardButton("📜 История", callback_data=f"support_history:{ticket_id}"),
+        )
+
+        try:
+            if photo_file_id:
+                # Фото с caption-уведомлением
+                bot.send_photo(
+                    admin_id,
+                    photo=photo_file_id,
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
+            else:
+                bot.send_message(admin_id, text, parse_mode="HTML", reply_markup=markup)
+        except Exception as e:
+            logger.warning("notify owner support: %s", e)
+
+    # Текстовые/фото сообщения от юзера в режиме support.
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _support_user_state,
+        content_types=["text", "photo"],
+    )
+    def handle_support_user_message(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        tid = message.from_user.id
+        state = _support_user_state.pop(tid, None) or {}
+        ticket_id = state.get("ticket_id")
+
+        # Парсим текст и фото
+        text_part: Optional[str] = None
+        photo_part: Optional[str] = None
+        if message.content_type == "photo":
+            # Берём фото наибольшего размера
+            if message.photo:
+                photo_part = message.photo[-1].file_id
+            text_part = (message.caption or "").strip() or None
+        else:
+            text_part = (message.text or "").strip() or None
+
+        if not text_part and not photo_part:
+            # Пустое сообщение — возвращаем юзера в режим ожидания
+            _support_user_state[tid] = state
+            safe_reply(message, "Пустое сообщение. Напиши текст или прикрепи фото с подписью.")
+            return
+
+        # Создаём тикет, если ещё нет (lazy create)
+        if not ticket_id:
+            ticket_id = db_create_ticket(tid)
+
+        db_add_support_message(ticket_id, "user", text=text_part, photo_file_id=photo_part)
+
+        # ack юзеру + одна reply-кнопка чтобы продолжить
+        ack_markup = types.InlineKeyboardMarkup()
+        ack_markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        safe_reply(
+            message,
+            f"✅ Сообщение отправлено в поддержку (тикет #{ticket_id}).\n"
+            f"Ответ придёт в этот чат. Можешь сразу написать ещё — будет добавлено в тот же тикет.",
+            reply_markup=ack_markup,
+        )
+
+        # Оставляем юзера в state ожидания продолжения (чтобы next message сразу шёл в этот же ticket)
+        _support_user_state[tid] = {"step": "awaiting_message", "ticket_id": ticket_id}
+
+        # Форвардим owner-у
+        _notify_owner_about_support_message(ticket_id, tid, text_part, photo_part)
+
+    # Owner: «✉️ Ответить» → переводим в состояние awaiting reply text/photo.
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("support_reply:"))
+    def callback_support_reply(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user or call.from_user.id != admin_id:
+            return
+        try:
+            ticket_id = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        ticket = db_get_ticket_by_id(ticket_id)
+        if not ticket:
+            bot.send_message(admin_id, "Тикет не найден.")
+            return
+        _support_reply_state[admin_id] = {"ticket_id": ticket_id, "user_tid": int(ticket["telegram_id"])}
+        bot.send_message(
+            admin_id,
+            f"✉️ Ответ на тикет #{ticket_id} (юзер id: <code>{ticket['telegram_id']}</code>).\n\n"
+            "Напиши текст или прикрепи фото с подписью. /cancel — отмена.",
+            parse_mode="HTML",
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("support_close:"))
+    def callback_support_close(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user or call.from_user.id != admin_id:
+            return
+        try:
+            ticket_id = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        ticket = db_get_ticket_by_id(ticket_id)
+        if not ticket:
+            bot.send_message(admin_id, "Тикет не найден.")
+            return
+        if ticket["status"] != "open":
+            bot.send_message(admin_id, f"Тикет #{ticket_id} уже закрыт.")
+            return
+        db_close_ticket(ticket_id)
+        user_tid = int(ticket["telegram_id"])
+        # Уведомление юзеру
+        try:
+            bot.send_message(
+                user_tid,
+                f"✅ Тикет #{ticket_id} закрыт. Если что-то ещё — напиши «🆘 Поддержка» в меню, "
+                f"открою новый.",
+            )
+        except Exception as e:
+            logger.warning("notify user about close: %s", e)
+        bot.send_message(admin_id, f"✅ Тикет #{ticket_id} закрыт.")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("support_history:"))
+    def callback_support_history(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user or call.from_user.id != admin_id:
+            return
+        try:
+            ticket_id = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        msgs = db_get_ticket_messages(ticket_id, limit=30)
+        if not msgs:
+            bot.send_message(admin_id, "История пуста.")
+            return
+        import html as _html
+        lines = [f"📜 <b>История тикета #{ticket_id}</b>\n"]
+        for m in msgs:
+            who = "👤" if m["sender"] == "user" else "💬"
+            ts = (m.get("created_at") or "")[:16]
+            body = (m.get("text") or "").strip()
+            if m.get("photo_file_id"):
+                body = (body + " [+фото]").strip()
+            lines.append(f"{who} <i>{ts}</i>\n{_html.escape(body)[:500]}\n")
+        bot.send_message(admin_id, "\n".join(lines), parse_mode="HTML")
+
+    # Owner: ответ на тикет (текст/фото)
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _support_reply_state,
+        content_types=["text", "photo"],
+    )
+    def handle_support_owner_reply(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        if message.from_user.id != admin_id:
+            return
+        # /cancel — отмена
+        if message.content_type == "text" and (message.text or "").strip().lower() in ("/cancel", "отмена"):
+            _support_reply_state.pop(admin_id, None)
+            safe_reply(message, "Отменено.")
+            return
+        state = _support_reply_state.pop(admin_id, None) or {}
+        ticket_id = state.get("ticket_id")
+        user_tid = state.get("user_tid")
+        if not ticket_id or not user_tid:
+            return
+
+        text_part: Optional[str] = None
+        photo_part: Optional[str] = None
+        if message.content_type == "photo":
+            if message.photo:
+                photo_part = message.photo[-1].file_id
+            text_part = (message.caption or "").strip() or None
+        else:
+            text_part = (message.text or "").strip() or None
+
+        if not text_part and not photo_part:
+            _support_reply_state[admin_id] = state
+            safe_reply(message, "Пусто. Напиши текст или прикрепи фото с подписью. /cancel — отмена.")
+            return
+
+        # Сохраняем сообщение в тикет
+        db_add_support_message(ticket_id, "owner", text=text_part, photo_file_id=photo_part)
+
+        # Доставляем юзеру
+        prefix = f"💬 <b>Ответ от поддержки</b> (тикет #{ticket_id}):"
+        try:
+            if photo_part:
+                caption = f"{prefix}\n\n" + (text_part or "")
+                bot.send_photo(user_tid, photo=photo_part, caption=caption, parse_mode="HTML")
+            else:
+                bot.send_message(
+                    user_tid,
+                    f"{prefix}\n\n{text_part}",
+                    parse_mode="HTML",
+                )
+        except Exception as e:
+            logger.warning("deliver reply to user %s: %s", user_tid, e)
+            safe_reply(message, f"⚠️ Не удалось доставить юзеру: {e}")
+            return
+
+        safe_reply(message, f"✅ Ответ доставлен юзеру (тикет #{ticket_id}).")
+        # Возвращаем юзера в режим ожидания продолжения треда (если он не закрыл/менял состояние)
+        if user_tid not in _support_user_state:
+            _support_user_state[user_tid] = {"step": "awaiting_message", "ticket_id": ticket_id}
+
+    # ── Owner commands ────────────────────────────────────────────────────────
+
+    @bot.message_handler(commands=["support_list"])
+    def cmd_support_list(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user or not is_owner(message.from_user.id, admin_id):
+            return
+        tickets = db_get_open_tickets()
+        if not tickets:
+            safe_reply(message, "Открытых тикетов нет.")
+            return
+        lines = [f"📋 <b>Открытые тикеты ({len(tickets)}):</b>\n"]
+        for t in tickets[:20]:
+            uname = t.get("username") or "—"
+            last = (t.get("last_message_at") or t.get("created_at") or "")[:16]
+            lines.append(f"#{t['id']} — @{uname} (id <code>{t['telegram_id']}</code>) — {last}")
+        if len(tickets) > 20:
+            lines.append(f"\n…и ещё {len(tickets) - 20}")
+        safe_reply(message, "\n".join(lines))
+
+    @bot.message_handler(commands=["support_view"])
+    def cmd_support_view(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user or not is_owner(message.from_user.id, admin_id):
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip().isdigit():
+            safe_reply(message, "Формат: <code>/support_view N</code> (где N — номер тикета)")
+            return
+        ticket_id = int(parts[1].strip())
+        ticket = db_get_ticket_by_id(ticket_id)
+        if not ticket:
+            safe_reply(message, "Тикет не найден.")
+            return
+        msgs = db_get_ticket_messages(ticket_id, limit=50)
+        import html as _html
+        head = (
+            f"📜 <b>Тикет #{ticket_id}</b> ({ticket['status']})\n"
+            f"Юзер id: <code>{ticket['telegram_id']}</code>\n"
+            f"Создан: {ticket['created_at']}\n"
+        )
+        if ticket.get("closed_at"):
+            head += f"Закрыт: {ticket['closed_at']}\n"
+        head += f"Сообщений: {len(msgs)}\n"
+
+        body_lines = []
+        for m in msgs:
+            who = "👤 юзер" if m["sender"] == "user" else "💬 owner"
+            ts = (m.get("created_at") or "")[:16]
+            t = (m.get("text") or "").strip()
+            if m.get("photo_file_id"):
+                t = (t + " [+фото]").strip()
+            body_lines.append(f"<b>{who}</b> <i>{ts}</i>\n{_html.escape(t)[:500]}\n")
+
+        safe_reply(message, head + "\n" + "\n".join(body_lines))
+
+    @bot.message_handler(commands=["support_close"])
+    def cmd_support_close(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user or not is_owner(message.from_user.id, admin_id):
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip().isdigit():
+            safe_reply(message, "Формат: <code>/support_close N</code>")
+            return
+        ticket_id = int(parts[1].strip())
+        ticket = db_get_ticket_by_id(ticket_id)
+        if not ticket:
+            safe_reply(message, "Тикет не найден.")
+            return
+        if ticket["status"] != "open":
+            safe_reply(message, f"Тикет #{ticket_id} уже закрыт.")
+            return
+        db_close_ticket(ticket_id)
+        user_tid = int(ticket["telegram_id"])
+        try:
+            bot.send_message(
+                user_tid,
+                f"✅ Тикет #{ticket_id} закрыт. Если что-то ещё — «🆘 Поддержка» в меню.",
+            )
+        except Exception:
+            pass
+        safe_reply(message, f"✅ Тикет #{ticket_id} закрыт.")
 
     logger.info("Starting VPN Telegram bot (pyTelegramBotAPI)...")
     bot.infinity_polling(skip_pending=True)
