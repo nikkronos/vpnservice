@@ -3,25 +3,16 @@
 В боте: <b>«📲 Получить VPN»</b> — три способа подключения.
 
 <b>🔗 Быстрый VPN (рекомендуется)</b>
-1. Поставь <b>Hiddify</b>: <a href="https://hiddify.com">hiddify.com</a>.
+1. Поставь <b>Hiddify</b>: <a href="https://hiddify.com/">hiddify.com</a>.
 2. В боте: «Получить VPN» → «Быстрый VPN» → скопируй ссылку.
 3. В Hiddify: «+» → «Импорт из буфера» → вставь ссылку.
 4. Приложение само выберет рабочий сервер.
 
 <b>📲 Резервный VPN (AmneziaWG)</b>
-1. Поставь <b>AmneziaVPN</b>: <a href="https://amnezia.org">amnezia.org</a>.
+1. Поставь <b>AmneziaVPN</b>: <a href="https://amnezia.org/">amnezia.org</a>.
 2. В боте: «Получить VPN» → «Резервный VPN» → ПК → получишь файл <code>.conf</code>.
 3. В AmneziaVPN: «+» → «Импорт из файла» → выбери конфиг.
 4. Включи туннель.
-
-<b>📡 Мобильный VPN</b>
-Обычно нужен только на мобильных. На ПК <code>vless://</code> также можно импортировать в Hiddify, если нужен резерв.
-
-⚠️ <b>AmneziaVPN на Windows: Error 103 «Фоновая служба не запущена»:</b>
-1. Закрой AmneziaVPN полностью (Диспетчер задач → заверши все процессы Amnezia*).
-2. Запусти AmneziaVPN <b>«Запуск от имени администратора»</b> (правой кнопкой по ярлыку).
-3. Не помогло — перезагрузи Windows и снова запусти от админа.
-4. Всё ещё нет — переустанови AmneziaVPN. Либо временно используй «Быстрый VPN» через Hiddify — это отдельная ссылка, не тот же конфиг.
 
 🌐 Личный кабинет: <code>https://supportkronos.online:8443/recovery</code>
 📨 Telegram не работает? «📨 Proxy для Telegram» в главном меню.
