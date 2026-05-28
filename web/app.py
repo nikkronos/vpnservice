@@ -821,7 +821,13 @@ def _verify_email_session(body: dict) -> tuple:
 
     telegram_id = user_row.get("telegram_id")
     if not telegram_id:
-        return None, (jsonify({"error": "Учётная запись не привязана к Telegram. Обратись к владельцу бота."}), 403)
+        return None, (jsonify({
+            "error": (
+                "Этот email пока не связан с Telegram-аккаунтом. "
+                "Открой @vpnkronos_bot, нажми /start и пройди короткую регистрацию — "
+                "после этого ЛК заработает."
+            )
+        }), 403)
 
     return (user_row, int(telegram_id)), None
 
