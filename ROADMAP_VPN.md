@@ -337,6 +337,13 @@
 - [x] ~~**Бот: Error-103 fallback**~~ — **СДЕЛАНО 2026-05-21**
   - Добавлен блок в `docs/bot-instruction-texts/instruction_windows_short.txt`: задиспетчерь Amnezia*, запуск от админа, переустановка либо Hiddify.
 
+- [ ] **Расширить health-check на main + yc** (заметили 2026-05-29 при апгрейде всех 3 серверов):
+  - Сейчас `scripts/health_check.py` бежит только на Fornex. Если main (Timeweb, Xray для Мегафон/Yota) или yc (Yandex Cloud, Xray для T2/МТС/Билайн) упадут — узнаем только по жалобам юзеров.
+  - **Варианты:**
+    1. **Cross-server from Fornex** — `health_check.py` через SSH ходит на main/yc (у нас есть `ssh fornex` → `ssh -i ... main` и `ssh yc` jump), запускает там минимальную проверку (`systemctl is-active xray`, `ss -tlnp :443`, диск, ядро). Плюс: одна точка алертов, не дублируем cron. Минус: если упадёт Fornex, мы не узнаем что main/yc упал тоже.
+    2. **Self-hosted на каждом сервере** — копия `health_check.py` на main и yc, свой cron, свой state-файл. Шлёт TG-алерт напрямую через `BOT_TOKEN` (его придётся раздать на все 3 сервера). Плюс: независимые алерты, выживут падение Fornex. Минус: дублирование, нужны env_vars на каждом сервере.
+  - Рекомендую **вариант 1** (cross-server). Объём: ~30 мин.
+
 - [ ] **Персональные UUIDs для main REALITY (Мегафон/Yota)** (предложено 2026-05-21):
   - Сейчас на main REALITY один универсальный UUID для всех Мегафон/Yota юзеров. Для биллинга/трекинга — нужно перейти на per-user UUID (как сейчас на eu1 REALITY).
   - Нужно: при выдаче ссылки через `/api/recovery/mobile-link-by-email` для оператора megafon/yota — генерировать персональный UUID, добавлять в Xray на main через `xray api inbounduser` (или через config reload), хранить в `users.vless_uuid_main` (новая колонка).

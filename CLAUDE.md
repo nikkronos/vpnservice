@@ -55,7 +55,10 @@ git log --oneline -3
 | **Timeweb main** (RU + Мегафон/Yota) | `81.200.146.32` | **Xray VLESS+REALITY на 443** (SNI=cloud.mail.ru, для Мегафон/Yota при БС, см. SESSION_SUMMARY_2026-05-21). Также WireGuard wg0 на UDP/51820 для 1 legacy user. SSH: `ssh -i ~/.ssh/id_ed25519_main root@81.200.146.32` (или через Fornex jump) |
 | **Yandex Cloud vrprnt** (T2/МТС/Билайн) | `158.160.236.147` | Xray VLESS+REALITY xHTTP (порт 443, SNI: www.microsoft.com) |
 
-**SSH:** `ssh fornex` (алиас) или `ssh -i ~/.ssh/id_ed25519_fornex root@185.21.8.91`
+**SSH:**
+- Fornex: `ssh fornex` (алиас) или `ssh -i ~/.ssh/id_ed25519_fornex root@185.21.8.91`
+- Timeweb (main): через Fornex jump — `ssh fornex "ssh -i /root/.ssh/id_ed25519_main root@81.200.146.32 ..."`
+- Yandex Cloud (yc): через Fornex jump — `ssh fornex "ssh yc ..."` (alias настроен в `/root/.ssh/config` на Fornex, ключ `/root/.ssh/id_ed25519_yc`, user `ubuntu` с passwordless sudo)
 
 **Тариф eu1:** Cloud NVMe 2 — 2 ядра / 2 ГБ RAM / 20 ГБ NVMe, 936 ₽/мес. Канал **~100 Мбит/с** (порт VPS; диагностика 2026-05-24, ждём уточнение в тикете). + swap 2 ГБ (swappiness=10). Узкое место скорости — порт, не CPU/RAM.
 

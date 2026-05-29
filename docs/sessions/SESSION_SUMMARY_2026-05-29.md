@@ -407,3 +407,50 @@ Sh4gHaXonhu4N11D…  allowed_ips=10.8.1.1/32  endpoint=94.19.223.132:60636
 |---|---|---|---|
 | Fornex (20 GB) | 8.7 GB (47%) | 10 GB | 🟢 12/12 OK |
 | Main (15 GB) | 8.1 GB (55%) | 6.7 GB | health-check только на Fornex; на main отдельно не делали |
+
+---
+
+## Дополнение (вечер 2026-05-29) — Apt upgrade всех 3 серверов + SSH jump для yc
+
+После чистки дисков пользователь решил привести в порядок все 3 сервера (Ubuntu 24.04 LTS).
+
+### Fornex (eu1) — ядро + docker
+
+- Snapshot: `/root/dpkg.before-upgrade.<ts>` + `/root/apt-installed.<ts>`.
+- 8 пакетов: containerd.io 2.2.3→2.2.4, docker-buildx-plugin, docker-model-plugin, 5 ядерных (linux-generic, linux-image-generic, linux-headers-generic, linux-libc-dev, linux-tools-common). Ядро 6.8.0-117→6.8.0-124.
+- `apt upgrade -y`: контейнеры **НЕ перезапускались** (docker daemon restart прошёл прозрачно — "No containers need to be restarted"), peer count 19→19.
+- Reboot (выполнен владельцем командой `ssh fornex "reboot"`). После reboot: новое ядро 6.8.0-124, все 4 systemd-сервиса active, оба docker-контейнера Up 48s (auto-restart policy), peer count 19→19, swap 0% (после ребута чистый), 12/12 health-check OK.
+
+### Timeweb (main) — только пакеты
+
+- Snapshot: тот же паттерн.
+- 3 пакета (linux-libc-dev, linux-tools-common, snapd). Ядро не обновляется (не было `linux-image-*` в апгрейдах).
+- `apt upgrade -y`: reboot **не нужен**, все сервисы (xray, wg-quick@wg0, nginx) active после.
+
+### Yandex Cloud (yc) — ядро без containerd
+
+- **Сначала настроили SSH jump через Fornex:** новый ключ `/root/.ssh/id_ed25519_yc` на Fornex, public-часть добавлена в `~/.ssh/authorized_keys` на yc, alias `ssh yc` в `/root/.ssh/config` на Fornex. `ubuntu` user с passwordless sudo. Зафиксировано в CLAUDE.md.
+- Snapshot + `sudo apt upgrade -y`.
+- 6 ядерных пакетов + 1 (google-compute-engine-oslogin не взялся, phased upgrade — оставлен).
+- Xray **не рестартанулся** во время apt (нет containerd на yc, Xray установлен напрямую в `/usr/local/bin/`).
+- Reboot (владельцем). После: ядро 6.8.0-124, Xray active, listening на 443, **юзер уже подключился через 1 минуту после старта** (виден в xray journal).
+
+### Превентивно — журнал больше не разрастётся
+
+`SystemMaxUse=500M` в `/etc/systemd/journald.conf` поставлен **на оба** Fornex+main (yc не делали — там диск 9 ГБ и журнал не успел разрастись, можно добавить позже).
+
+### Замечание про мониторинг — добавлено в ROADMAP
+
+Сегодня обнаружили: **`health_check.py` бежит только на Fornex**. Main и yc — без алертов. Если они упадут, узнаем только по жалобам юзеров. Добавлена задача в ROADMAP (P2) — «Расширить health-check на main + yc» с рекомендованным вариантом cross-server (с Fornex, через ssh jump, без копирования cron/env на каждый сервер).
+
+### Финальные ядра
+
+| Сервер | Было | Стало |
+|---|---|---|
+| Fornex (eu1) | 6.8.0-117 | **6.8.0-124** ✅ |
+| Timeweb (main) | 6.8.0-31 | **6.8.0-31** (не обновлялось) |
+| yc | 6.8.0-117 | **6.8.0-124** ✅ |
+
+### Восстановление окружения у владельца
+
+Параллельно владелец установил Git for Windows (был удалён). После установки `git`/`bash` снова доступны в моём окружении, коммиты пошли.
