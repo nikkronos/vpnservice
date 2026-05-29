@@ -119,15 +119,46 @@ def main() -> int:
     else:
         print("    (нет — все JSON peer-ы существуют в AWG runtime)")
 
-    # В awg show есть, в peers.json — нет (orphans on server)
-    orphans_on_server = awg_pubkeys - json_pubkeys
-    print(f"\n[?] peer в awg show, но НЕТ в peers.json ({len(orphans_on_server)}):")
-    if orphans_on_server:
-        for pk in sorted(orphans_on_server):
+    # В awg show есть, в peers.json — нет. РАЗДЕЛЯЕМ на live и unused.
+    # КРИТИЧНО (инцидент 2026-05-29): отсутствие в peers.json НЕ ЗНАЧИТ orphan.
+    # Legacy/admin/owner peer-ы создавались до перехода на peers.json и тоже
+    # отсутствуют в нём, но активно работают. Удаление таких peer-ов рвёт
+    # рабочее подключение.
+    not_in_json = awg_pubkeys - json_pubkeys
+    live_outside_json: List[str] = []
+    unused_outside_json: List[str] = []
+    for pk in not_in_json:
+        d = awg_details.get(pk, {})
+        has_endpoint = d.get("endpoint", "(none)") != "(none)"
+        has_traffic = (d.get("rx", 0) > 0) or (d.get("tx", 0) > 0)
+        has_handshake = (d.get("last_handshake", 0) or 0) > 0
+        if has_endpoint or has_traffic or has_handshake:
+            live_outside_json.append(pk)
+        else:
+            unused_outside_json.append(pk)
+
+    print(f"\n[⚠] LIVE peer-ы вне peers.json ({len(live_outside_json)})  —  НЕ УДАЛЯТЬ без анализа:")
+    if live_outside_json:
+        for pk in sorted(live_outside_json):
             d = awg_details.get(pk, {})
-            print(f"    {pk[:16]}…  allowed_ips={d.get('allowed_ips', '?')}  endpoint={d.get('endpoint', '?')}")
+            hs = d.get("last_handshake", 0) or 0
+            hs_str = f"last_hs={hs}" if hs else "last_hs=0"
+            print(
+                f"    {pk[:16]}…  ips={d.get('allowed_ips', '?')}  "
+                f"endpoint={d.get('endpoint', '?')}  rx={d.get('rx', 0)}  tx={d.get('tx', 0)}  {hs_str}"
+            )
+        print("    ↳ это legacy/owner/admin peers — отражение в peers.json не обязательно, они РАБОТАЮТ.")
     else:
-        print("    (нет — все runtime peer-ы отражены в JSON)")
+        print("    (нет — все живые runtime peer-ы отражены в peers.json)")
+
+    print(f"\n[?] unused peer-ы вне peers.json ({len(unused_outside_json)})  —  можно зачистить:")
+    if unused_outside_json:
+        for pk in sorted(unused_outside_json):
+            d = awg_details.get(pk, {})
+            print(f"    {pk[:16]}…  ips={d.get('allowed_ips', '?')}  endpoint={d.get('endpoint', '?')}")
+        print("    ↳ ВСЕГДА: сохрани pubkey + PSK в backup до `awg set ... remove`.")
+    else:
+        print("    (нет)")
 
     # Юзеры в БД без peer-а (онбординг или сброшенные)
     print(f"\n[?] users в БД БЕЗ AWG peer-а ({len(db_no_peer)}):")
@@ -158,7 +189,12 @@ def main() -> int:
     print(f"  peer-ов в awg runtime: {len(awg_pubkeys)}")
     print(f"  users без AWG peer-а : {len(db_no_peer)}")
     print(f"  lost after reboot    : {len(lost_after_reboot)}")
-    print(f"  orphans on server    : {len(orphans_on_server)}")
+    print(f"  LIVE вне peers.json  : {len(live_outside_json)} — НЕ ТРОГАТЬ")
+    print(f"  unused вне peers.json: {len(unused_outside_json)} — можно чистить")
+    print()
+    print("ПРЕДУПРЕЖДЕНИЕ: при любом удалении peer обязательно сохрани")
+    print("в backup: pubkey, allowed-ips, ENDPOINT, PSK (из /opt/amnezia/awg/")
+    print("wireguard_psk.key — общий PSK на все peers интерфейса).")
 
     return 0
 

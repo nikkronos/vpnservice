@@ -242,3 +242,38 @@ total_users=36
 - `ROADMAP_VPN.md` — задача про orphan-peer-ов
 
 Серверно (вне git): бэкапы `app.py`/`index.html`/`main.js`/`style.css` на Fornex с timestamp 1780049355.
+
+---
+
+## Инцидент orphan-удаления (день 2026-05-29) — урок
+
+### Что произошло
+После Этапа 1 диагностики (нашёл 3 peer-а в `awg show`, которых нет в `peers.json`) я предложил «зачистить их за 5 минут как косметику» и получил `да` от владельца. Удалил все три через `awg set awg0 peer <pk> remove` + `amnezia-save-conf.sh`. **VPN владельца оборвался прямо во время работы со мной** — он сидел через тот же сервис и был вынужден переключиться на сторонний VPN.
+
+### Почему оборвалось
+Один из удалённых peer-ов — `Sh4gHaXonhu4N11D…` — был **рабочим owner-peer-ом** владельца с 27 GB rx / 57 GB tx трафика и свежим last_handshake. Просто legacy: peer создавался до того, как `peers.json` стал источником истины для peer-метаданных. Отсутствие в JSON ≠ orphan.
+
+В исходной диагностике этот peer показывался как:
+```
+Sh4gHaXonhu4N11D…  allowed_ips=10.8.1.1/32  endpoint=94.19.223.132:60636
+```
+— и endpoint, и нестандартный `allowed-ips`, и реальный объём трафика **сразу должны были остановить delete**. Я этого не сделал.
+
+### Восстановление (~10 мин)
+1. Из `/root/awg-orphans-removed-20260529-102349.log` достал public keys + полный AWG dump до удаления (была `endpoint:port`, `allowed-ips`).
+2. Re-add peer-ов: `docker exec amnezia-awg2 awg set awg0 peer <pk> allowed-ips <ips>`.
+3. Запустил `/opt/amnezia-save-conf.sh` для persist.
+4. **Handshake не пошёл** — у восстановленных peer-ов отсутствовал PSK (в дампе он показывался как `(hidden)` и я его не сохранил). Сравнил с работающими peer-ами — у тех PSK был.
+5. Нашёл общий PSK в `/opt/amnezia/awg/wireguard_psk.key` — для AmneziaWG один PSK используется для всех peer-ов интерфейса. Установил через `awg set awg0 peer <pk> preshared-key /tmp/psk.txt` для всех 3 восстановленных.
+6. Владелец переподключился — handshake прошёл, туннель поднялся.
+
+### Защитные правки
+- **`scripts/peers_sync_check.py` обновлён** — категория `orphans on server` разбита на две:
+  - `[⚠] LIVE peer-ы вне peers.json` — есть endpoint ИЛИ rx/tx > 0 ИЛИ last_handshake > 0 → «НЕ ТРОГАТЬ без анализа».
+  - `[?] unused peer-ы вне peers.json` — всё на нулях → можно безопасно зачищать (с обязательным backup PSK).
+  - Итоговая сводка показывает счётчики раздельно. В конце предупреждение про PSK в `/opt/amnezia/awg/wireguard_psk.key`.
+- **Memory `feedback_no_delete_runtime_blind.md`** — зафиксирован durable урок: «не удалять runtime-объекты только на основании отсутствия в одном источнике; признаки жизни (endpoint/traffic/handshake) важнее консистентности с БД». Применимо ко всему — peer-ам, systemd units, nginx vhosts, cron entries.
+- **ROADMAP_VPN.md** — задача «Зачистка orphan-peer-ов» снята; вместо неё `[~]` пометка «Legacy peer-ы вне peers.json — НЕ ТРОГАТЬ».
+
+### Извлечённое правило для будущих сессий
+**Один человек = два подтверждения для delete-операций.** Read-only диагностика и destructive cleanup не должны идти «одной серией» — между ними обязан быть явный stop-light. Когда показал что собираюсь удалить — ждать пока пользователь не скажет «да», даже если он уже сказал «да делай» на более раннюю задачу.
