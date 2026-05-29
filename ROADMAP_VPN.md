@@ -339,6 +339,15 @@
 
 - [x] ~~**Расширить health-check на main + yc**~~ — **DONE 2026-05-29** (вечер). Выбран вариант 1 (cross-server из Fornex через SSH jump). `scripts/health_check.py` теперь делает 22 проверки: 12 локальных (как было) + 6 на main + 4 на yc. Покрытие: на main — xray, wg-quick@wg0, :443/tcp, :51820/udp, диск; на yc — xray, :443/tcp, диск. Reachable-gate: при FAIL `<host>:reachable` остальные проверки этого хоста скипаются, их state не трогается — один сетевой провал не даёт каскад из 5+ алертов. Remote state-ключи префиксованы `<host>:` (например `yc:xray.service`). Тест FAIL→RESOLVE прошёл на yc (xray stop/start, 2 алерта + 2 resolve, downtime ~30 сек, T2/МТС/Билайн REALITY-сессии переустановились без жалоб). Ограничение: если падает сам Fornex — алерт уйти не сможет (та же дыра что и до этого, лечится только external uptime monitor).
 
+- [ ] **External uptime monitor для Fornex** (отложено 2026-05-29 по решению владельца):
+  - Дыра: если падает сам Fornex (хост целиком) — `scripts/health_check.py` cron не запустится, TG-алерта не будет. Узнаёшь только по жалобам юзеров (от 30 мин до нескольких часов, ночью — до утра).
+  - Варианты:
+    1. **UptimeRobot** — бесплатно (50 мониторов), HTTPS-monitor на `https://supportkronos.online:8443/` каждые 5 мин, алерт через TG-бот `@uptimerobotbot`. Setup ~2 мин (требует регистрации с email + привязки TG к аккаунту).
+    2. **Healthchecks.io** — dead-man's switch: `health_check.py` пингует их URL каждые 15 мин, если они не получили ping за N мин — алерт. Ловит ещё и зависший cron (не только падение nginx). Setup ~5 мин.
+    3. **Better Uptime** — бесплатно (10 мониторов), 3-мин интервал, красивый дашборд.
+  - Рекомендация: UptimeRobot — простейший. Делает владелец сам (нужен его email + привязка TG-бота).
+  - Время: 2-5 мин setup, ноль кода.
+
 - [ ] **Персональные UUIDs для main REALITY (Мегафон/Yota)** (предложено 2026-05-21):
   - Сейчас на main REALITY один универсальный UUID для всех Мегафон/Yota юзеров. Для биллинга/трекинга — нужно перейти на per-user UUID (как сейчас на eu1 REALITY).
   - Нужно: при выдаче ссылки через `/api/recovery/mobile-link-by-email` для оператора megafon/yota — генерировать персональный UUID, добавлять в Xray на main через `xray api inbounduser` (или через config reload), хранить в `users.vless_uuid_main` (новая колонка).
