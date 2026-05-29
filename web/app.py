@@ -67,6 +67,7 @@ from bot.database import (
     db_create_payment_claim,
     db_get_claim_by_id,
     db_set_claim_notify_msg,
+    db_update_vless_requested_at,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -641,14 +642,34 @@ def api_traffic():
                     if platform is None:
                         platform = peer.platform or "pc"
 
+            # --- vless proof-of-life ---
+            # Сигнал что юзер пользуется VLESS (вместо/в дополнение к AWG).
+            # Пишется в bot/web при выдаче vless:// и при subscription URL hit
+            # (см. db_update_vless_requested_at). Это компенсирует отсутствие
+            # AWG-handshake до тех пор пока не сделаем per-user UUID + Xray stats.
+            vless_req = u.get("vless_requested_at")
+            vless_ts = 0
+            if vless_req:
+                try:
+                    vless_ts = int(datetime.strptime(vless_req, "%Y-%m-%d %H:%M:%S").timestamp())
+                except (ValueError, TypeError):
+                    pass
+            recent_vless = vless_ts and (now_ts - vless_ts) < 7 * 86400
+
             # --- status ---
             has_peer = bool(user_peers)
             recent_hs = last_hs and (now_ts - last_hs) < 7 * 86400
             if not has_peer:
-                status_key = "onboarding" if u.get("migrated_at") else "no_config"
+                # Без AWG-peer'а юзер всё ещё может пользоваться VLESS
+                # (Быстрый VPN через subscription URL не требует AWG-peer'а).
+                # Это переводит статус из «без конфига» в «VLESS-only активный».
+                if recent_vless:
+                    status_key = "active"
+                else:
+                    status_key = "onboarding" if u.get("migrated_at") else "no_config"
             elif not is_grandfather and days_left is not None and days_left < 0:
                 status_key = "expired"
-            elif recent_hs:
+            elif recent_hs or recent_vless:
                 status_key = "active"
             else:
                 status_key = "idle"
@@ -667,6 +688,7 @@ def api_traffic():
                 "total_bytes": total_bytes,
                 "last_handshake": last_hs,
                 "proxy_requested_at": u.get("proxy_requested_at"),
+                "vless_requested_at": u.get("vless_requested_at"),
                 "migrated_at": u.get("migrated_at"),
                 "subscription_status": u.get("subscription_status"),
                 "days_left": days_left,
@@ -1045,6 +1067,14 @@ def api_recovery_mobile_link_by_email():
 
         if not vless_url:
             return jsonify({"error": "VLESS link is not configured on server"}), 503
+
+        # Proof-of-life для VLESS — компенсирует отсутствие AWG-handshake.
+        # Ставим после успешной выдачи; если что-то упадёт в обновлении —
+        # это не должно ломать саму выдачу конфига.
+        try:
+            db_update_vless_requested_at(telegram_id)
+        except Exception:
+            logger.warning("vless_requested_at update failed for tid=%s", telegram_id)
 
         return jsonify({
             "ok": True,
@@ -1587,6 +1617,16 @@ def api_subscription(token):
         if tid and not db_is_access_active(int(tid)):
             # enforcement: нет доступа → пустая подписка (нет серверов)
             return Response("", mimetype="text/plain")
+
+        # Proof-of-life для VLESS — каждый hit /sub/<token> означает что у юзера
+        # есть VPN-клиент с настроенной подпиской (HAPP/Streisand/...) который
+        # автоматически проверяет URL каждые ~12 ч (Profile-Update-Interval).
+        # Это ЛУЧШИЙ proof-of-life сигнал: клиент жив → юзер пользуется.
+        if tid:
+            try:
+                db_update_vless_requested_at(int(tid))
+            except Exception:
+                logger.warning("vless_requested_at update failed for sub tid=%s", tid)
 
         links = _build_subscription_links()
         body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")

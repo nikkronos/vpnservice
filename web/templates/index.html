@@ -90,12 +90,13 @@
                             <th class="th-sort" data-sort="traffic" title="↓ Принято / ↑ Отправлено — текущая сессия AmneziaWG (обнуляется при перезапуске контейнера)">Трафик</th>
                             <th class="th-sort" data-sort="total" title="Накопленный трафик за всё время (переживает перезагрузки и обновление конфига)">Всего</th>
                             <th class="th-sort" data-sort="device">Устройство</th>
-                            <th class="th-sort" data-sort="last">Последний сеанс</th>
+                            <th class="th-sort" data-sort="last" title="Последний AmneziaWG handshake (для VLESS-юзеров — `никогда`, см. колонку VLESS)">Последний сеанс</th>
+                            <th class="th-sort" data-sort="vless" title="Когда последний раз клиент VLESS дёргал нашу инфру (выдача ссылки в боте/ЛК или авто-refresh subscription URL клиентом HAPP/Streisand)">VLESS</th>
                             <th class="th-sort" data-sort="proxy" title="Когда последний раз запрашивал MTProxy">Прокси</th>
                         </tr>
                     </thead>
                     <tbody id="users-tbody">
-                        <tr><td colspan="9" class="loading">Загрузка...</td></tr>
+                        <tr><td colspan="10" class="loading">Загрузка...</td></tr>
                     </tbody>
                 </table>
             </div>

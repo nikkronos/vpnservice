@@ -23,6 +23,7 @@ from .database import (
     db_verify_otp,
     db_get_vless_creds,
     db_update_proxy_requested_at,
+    db_update_vless_requested_at,
     db_record_payment,
     db_extend_subscription,
     db_find_payment_by_external_id,
@@ -2158,6 +2159,13 @@ def main() -> None:
             )
             return
 
+        # Proof-of-life для VLESS — компенсирует отсутствие AWG-handshake в
+        # админ-панели (см. SESSION_SUMMARY_2026-05-29 «vless-телеметрия Вариант C»).
+        try:
+            db_update_vless_requested_at(call.from_user.id)
+        except Exception:
+            pass
+
         _send_mobile_vless(call.message.chat.id, url, instruction_key)
 
     @bot.message_handler(commands=["server_exec"])
@@ -2848,6 +2856,15 @@ def main() -> None:
         if not sub_token:
             bot.send_message(call.message.chat.id, "Не удалось получить ссылку. Напиши @nikkronos.")
             return
+
+        # Proof-of-life для VLESS — subscription URL = VLESS-канал. Авто-refresh
+        # самого URL клиентом дублирует отметку в web/app.py (/sub/<token>),
+        # эта же ставится в момент manual-выдачи через бот.
+        try:
+            db_update_vless_requested_at(tid)
+        except Exception:
+            pass
+
         # Базовый URL берём из recovery_url (env), вырезаем суффикс /recovery
         rec_url = getattr(config, "vpn_recovery_url", None) or "https://supportkronos.online:8443/recovery"
         sub_base = rec_url.rsplit("/recovery", 1)[0]

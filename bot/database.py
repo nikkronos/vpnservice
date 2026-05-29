@@ -164,6 +164,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_vless_columns()
     _migrate_add_servers_table()
     _migrate_add_proxy_column()
+    _migrate_add_vless_column()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
@@ -203,6 +204,26 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_vless_column() -> None:
+    """
+    Добавляет vless_requested_at в таблицу users (идемпотентно).
+
+    Используется как proof-of-life сигнал для VLESS-юзеров — в админ-панели
+    статус `idle` ставится по AWG handshake (которого у VLESS-юзеров не бывает).
+    Эта отметка пишется при любом hit'е, который означает что клиент юзера
+    дёрнул нашу инфру за VLESS:
+      - bot/main.py: после выдачи vless:// в `callback_mobile_operator`
+      - web/app.py: после выдачи `/api/recovery/mobile-link-by-email`
+      - web/app.py: subscription URL `/sub/<sub_token>` hit (включая авто-refresh
+        клиентами HAPP/Streisand каждые N часов — это и есть лучший proof-of-life).
+    """
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        if "vless_requested_at" not in existing:
+            con.execute("ALTER TABLE users ADD COLUMN vless_requested_at TEXT")
+            logger.info("Migration: added vless_requested_at column to users")
 
 
 def _migrate_add_subscription_columns() -> None:
@@ -509,6 +530,23 @@ def db_update_proxy_requested_at(telegram_id: int) -> None:
     with _conn() as con:
         con.execute(
             "UPDATE users SET proxy_requested_at = datetime('now') WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+
+
+def db_update_vless_requested_at(telegram_id: int) -> None:
+    """
+    Записывает время последнего hit'а связанного с VLESS пользователем.
+
+    Срабатывает при выдаче vless:// ссылки в боте/ЛК и при subscription URL hit
+    (включая авто-refresh HAPP/Streisand-клиентами). Используется в админ-панели
+    как `vless_last_seen` сигнал — компенсирует отсутствие AWG-handshake для
+    VLESS-юзеров до тех пор пока не сделаем per-user UUID + Xray stats API.
+    """
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET vless_requested_at = datetime('now') WHERE telegram_id = ?",
             (telegram_id,),
         )
 

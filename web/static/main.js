@@ -93,10 +93,10 @@ function renderStatus(u) {
 let _sortState = { key: null, dir: 'asc' };
 let _lastUsers = [];
 
-function _proxyTs(u) {
-    if (!u.proxy_requested_at) return 0;
+function _sqliteTs(s) {
+    if (!s) return 0;
     // SQLite-формат "YYYY-MM-DD HH:MM:SS" → unix; не критично что timezone.
-    const t = Date.parse(u.proxy_requested_at.replace(' ', 'T') + 'Z') / 1000;
+    const t = Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
     return isFinite(t) ? t : 0;
 }
 
@@ -109,7 +109,8 @@ function _keyFn(key) {
         case 'total':   return u => u.total_bytes || 0;
         case 'device':  return u => u.platform || '';
         case 'last':    return u => u.last_handshake || 0;
-        case 'proxy':   return u => _proxyTs(u);
+        case 'vless':   return u => _sqliteTs(u.vless_requested_at);
+        case 'proxy':   return u => _sqliteTs(u.proxy_requested_at);
         default:        return () => 0;
     }
 }
@@ -147,7 +148,7 @@ function _onHeaderClick(ev) {
     } else {
         _sortState = { key, dir: 'asc' };
         // Для числовых колонок логичнее стартовать с desc (большие сверху).
-        if (['traffic', 'total', 'last', 'proxy', 'email'].includes(key)) {
+        if (['traffic', 'total', 'last', 'vless', 'proxy', 'email'].includes(key)) {
             _sortState.dir = 'desc';
         }
     }
@@ -179,6 +180,14 @@ function _renderUsers(users) {
         const proxy = u.proxy_requested_at
             ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
             : '<span class="hs-never">—</span>';
+        // VLESS: рендер аналогично прокси. Свежий hit (за 24 ч) — ярче.
+        let vlessHtml = '<span class="hs-never">—</span>';
+        if (u.vless_requested_at) {
+            const ts = _sqliteTs(u.vless_requested_at);
+            const diff = Math.floor(Date.now() / 1000) - ts;
+            const cls = diff < 86400 ? 'hs-now' : (diff < 7 * 86400 ? 'hs-recent' : 'hs-old');
+            vlessHtml = `<span class="${cls}" title="${u.vless_requested_at}">✓ ${relDate(u.vless_requested_at)}</span>`;
+        }
         const email = u.email_verified
             ? '<span class="hs-now" title="Авторизован по email">✓</span>'
             : '<span class="hs-never">—</span>';
@@ -191,6 +200,7 @@ function _renderUsers(users) {
             <td class="td-total">${totalAll}</td>
             <td class="td-platform">${platform}</td>
             <td class="td-hs">${relTime(u.last_handshake)}</td>
+            <td class="td-vless">${vlessHtml}</td>
             <td class="td-proxy">${proxy}</td>
         </tr>`;
     }).join('');
@@ -213,7 +223,7 @@ async function loadTraffic() {
         const r = await fetch('/api/traffic', { cache: 'no-store' });
         const data = await r.json();
         if (data.error) {
-            tbody.innerHTML = `<tr><td colspan="9" class="err">Ошибка: ${data.error}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" class="err">Ошибка: ${data.error}</td></tr>`;
             return;
         }
         if (note && data.last_update) {
@@ -222,13 +232,13 @@ async function loadTraffic() {
         }
         const users = data.users || [];
         if (!users.length) {
-            tbody.innerHTML = '<tr><td colspan="9" class="loading">Нет данных</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" class="loading">Нет данных</td></tr>';
             return;
         }
         _lastUsers = users;
         _renderUsers(users);
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="9" class="err">Ошибка загрузки</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="err">Ошибка загрузки</td></tr>`;
     }
 }
 
