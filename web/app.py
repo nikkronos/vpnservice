@@ -545,74 +545,133 @@ def api_users():
 
 @app.route("/api/traffic")
 def api_traffic():
-    """API: трафик по пользователям с last_handshake."""
+    """
+    API: единая сводка по всем пользователям в БД (не только с AWG peer-ом).
+
+    Для каждого юзера возвращает:
+      - identity (username / telegram_id / email_verified)
+      - peer-данные (wg_ip, platform, last_handshake, rx/tx) — None если peer-а нет
+      - подписка (subscription_status, days_left, is_grandfather)
+      - status: одно из {active, idle, onboarding, no_config, expired}
+      - proxy_requested_at
+
+    Сортировка: активные (свежий handshake) → тихие с peer-ом → онбординг →
+    без конфига → истёкшие. Внутри группы — по активности desc.
+    """
     try:
         peers = get_all_peers()
         dump_stdout = _get_awg_dump_eu1()
         full_data = _parse_wg_dump_full(dump_stdout) if dump_stdout else {}
 
         db_users = db_get_all_users()
-        proxy_ts: Dict[int, Optional[str]] = {
-            u["telegram_id"]: u.get("proxy_requested_at")
-            for u in db_users
-            if u.get("telegram_id")
-        }
-        email_verified_map: Dict[int, bool] = {
-            u["telegram_id"]: bool(u.get("email_verified"))
-            for u in db_users
-            if u.get("telegram_id")
-        }
+        now_dt = datetime.now()
+        now_ts = int(now_dt.timestamp())
 
-        by_user: Dict[int, Dict] = {}
+        # Индексируем peer-ы по telegram_id (только active eu1).
+        peers_by_uid: Dict[int, List] = {}
         samples: List[Dict] = []
         for peer in peers:
             if peer.server_id != "eu1" or not peer.active:
                 continue
+            peers_by_uid.setdefault(peer.telegram_id, []).append(peer)
             pk = (peer.public_key or "").strip()
-            d = full_data.get(pk) or {"rx": 0, "tx": 0, "last_handshake": 0}
             if pk in full_data:
+                d = full_data[pk]
                 samples.append({
                     "public_key": pk,
                     "telegram_id": peer.telegram_id,
                     "rx": d["rx"],
                     "tx": d["tx"],
                 })
-            uid = peer.telegram_id
-            if uid not in by_user:
-                user = find_user(uid)
-                by_user[uid] = {
-                    "telegram_id": uid,
-                    "username": user.username if user else None,
-                    "wg_ip": peer.wg_ip,
-                    "rx_bytes": 0,
-                    "tx_bytes": 0,
-                    "last_handshake": 0,
-                    "platform": peer.platform or "pc",
-                    "proxy_requested_at": proxy_ts.get(uid),
-                    "email_verified": email_verified_map.get(uid, False),
-                }
-            by_user[uid]["rx_bytes"] += d["rx"]
-            by_user[uid]["tx_bytes"] += d["tx"]
-            # Платформа — та, у которой самый свежий last_handshake
-            if d["last_handshake"] > by_user[uid]["last_handshake"]:
-                by_user[uid]["last_handshake"] = d["last_handshake"]
-                by_user[uid]["platform"] = peer.platform or "pc"
 
-        # Накопительный учёт (reset-aware) + lifetime-итог по пользователю.
-        # Накапливаем на каждом просмотре панели; cron-сэмплер дублирует это
-        # в фоне, чтобы трафик не терялся между просмотрами.
+        # Накопительный учёт (reset-aware) — должен сработать ДО построения
+        # users_list, чтобы lifetime_map был актуальным.
         try:
             db_accumulate_traffic(samples)
             lifetime_map = db_get_lifetime_by_user()
         except Exception as e:
             logger.warning("Traffic accounting failed: %s", e)
             lifetime_map = {}
-        for u in by_user.values():
-            lt = lifetime_map.get(u["telegram_id"])
-            u["total_bytes"] = lt["total"] if lt else (u["rx_bytes"] + u["tx_bytes"])
 
-        # Сортировка: сначала по последней активности (handshake ИЛИ нажатие прокси),
-        # потом по трафику. Так "только-прокси-юзеры" поднимаются вверх и видны.
+        users_list: List[Dict] = []
+        for u in db_users:
+            uid = u.get("telegram_id")
+            if not uid:
+                continue
+            uid = int(uid)
+
+            # --- subscription ---
+            expires_at = u.get("expires_at")
+            is_grandfather = not expires_at
+            days_left: Optional[int] = None
+            if expires_at:
+                try:
+                    exp_dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+                    days_left = (exp_dt - now_dt).days
+                except (ValueError, TypeError):
+                    pass
+
+            # --- peer aggregate ---
+            user_peers = peers_by_uid.get(uid, [])
+            rx = tx = last_hs = 0
+            wg_ip: Optional[str] = None
+            platform: Optional[str] = None
+            for peer in user_peers:
+                pk = (peer.public_key or "").strip()
+                d = full_data.get(pk) or {"rx": 0, "tx": 0, "last_handshake": 0}
+                rx += d["rx"]
+                tx += d["tx"]
+                if d["last_handshake"] > last_hs:
+                    last_hs = d["last_handshake"]
+                    platform = peer.platform or "pc"
+                if wg_ip is None:
+                    wg_ip = peer.wg_ip
+                    if platform is None:
+                        platform = peer.platform or "pc"
+
+            # --- status ---
+            has_peer = bool(user_peers)
+            recent_hs = last_hs and (now_ts - last_hs) < 7 * 86400
+            if not has_peer:
+                status_key = "onboarding" if u.get("migrated_at") else "no_config"
+            elif not is_grandfather and days_left is not None and days_left < 0:
+                status_key = "expired"
+            elif recent_hs:
+                status_key = "active"
+            else:
+                status_key = "idle"
+
+            lt = lifetime_map.get(uid)
+            total_bytes = lt["total"] if lt else (rx + tx)
+
+            users_list.append({
+                "telegram_id": uid,
+                "username": u.get("username"),
+                "email_verified": bool(u.get("email_verified")),
+                "wg_ip": wg_ip,
+                "platform": platform,
+                "rx_bytes": rx,
+                "tx_bytes": tx,
+                "total_bytes": total_bytes,
+                "last_handshake": last_hs,
+                "proxy_requested_at": u.get("proxy_requested_at"),
+                "migrated_at": u.get("migrated_at"),
+                "subscription_status": u.get("subscription_status"),
+                "days_left": days_left,
+                "is_grandfather": is_grandfather,
+                "status": status_key,
+                "has_peer": has_peer,
+            })
+
+        # Сортировка: priority группа → внутри по последней активности desc.
+        _STATUS_PRIORITY = {
+            "active": 0,
+            "idle": 1,
+            "onboarding": 2,
+            "no_config": 3,
+            "expired": 4,
+        }
+
         def _activity_ts(u: Dict) -> int:
             hs = u.get("last_handshake") or 0
             proxy_ts = u.get("proxy_requested_at") or ""
@@ -624,11 +683,14 @@ def api_traffic():
                     pass
             return max(hs, proxy_unix)
 
-        users_list = sorted(
-            by_user.values(),
-            key=lambda x: (_activity_ts(x), x["rx_bytes"] + x["tx_bytes"]),
-            reverse=True,
+        users_list.sort(
+            key=lambda x: (
+                _STATUS_PRIORITY.get(x["status"], 9),
+                -_activity_ts(x),
+                -(x["rx_bytes"] + x["tx_bytes"]),
+            )
         )
+
         resp = jsonify({
             "users": users_list,
             "last_update": datetime.now().isoformat(),

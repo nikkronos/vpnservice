@@ -163,3 +163,82 @@
 2026-05-29 00:48  300f1e4  roadmap: расширил «скорость падает»
 2026-05-29 00:53  9776c19  competitors: + 5 новых + кейс «Fornex сам»
 ```
+
+---
+
+## Дополнение (день 2026-05-29) — видимость инфраструктуры
+
+По запросу владельца: «нужно видеть кто использует VPN, кто прокси, где нагрузка, чтобы поддерживать инфру». Сделано тремя этапами.
+
+### Этап 1 — Диагностика рассинхрона peer-данных (read-only)
+
+Создан `scripts/peers_sync_check.py` — сравнивает три источника:
+1. БД (`db_get_all_users`)
+2. `peers.json` (`get_all_peers()`, фильтр `eu1`)
+3. Runtime AWG (`docker exec amnezia-awg2 awg show awg0 dump`)
+
+**Запуск:** `cd /opt/vpnservice && venv/bin/python scripts/peers_sync_check.py`.
+
+**Результат прогона 2026-05-29:**
+- `peers.json`: 15 eu1 active peers.
+- `awg show`: 18 peers.
+- БД: 37 users (36 с telegram_id).
+- ✅ `lost after reboot: 0` — persistent state работает, все JSON peer-ы существуют в AWG.
+- ⚠️ 3 orphan-peer-а в AWG runtime без записи в peers.json (legacy/тестовые, безвредны). Зафиксировано как задача в ROADMAP «Зачистка orphan-peer-ов».
+- 26 users в БД без AWG peer-а: 8 с `migrated_at` (онбординг-стейдж, прошли FSM, не нажали «Получить VPN»), остальные — старые без `migrated_at`. Конверсия `онбординг → конфиг` после миграции ≈ 30%.
+
+### Этап 2 — Админ-панель показывает всех юзеров
+
+Раньше `/api/traffic` фильтровал только тех, у кого есть AWG peer → 11+ юзеров с онбординга невидимы. Теперь видны все.
+
+**Файлы:**
+- `web/app.py` — `/api/traffic` переписан: итерация по `db_get_all_users()`, peers индексируются по telegram_id. Для каждого юзера считается:
+  - `status` ∈ {`active`, `idle`, `onboarding`, `no_config`, `expired`}
+  - `days_left` (NULL = grandfather, маркер `∞`)
+  - peer-данные (или None для без-peer-а)
+  - Сортировка по статус-приоритету + последней активности.
+- `web/templates/index.html` — добавлена колонка **«Статус»** между Email и IP, `colspan` 8 → 9.
+- `web/static/main.js` — `renderStatus(u)` с бейджем + суффиксом по дням (`активен · 12д`, `истёк · −3д`, `активен · ∞`). Юзеры без peer-а получают CSS-класс `row-no-peer` (приглушены, на hover видны полностью).
+- `web/static/style.css` — `.status-badge` + 5 вариантов (`.st-active/idle/onb/noconf/expired`) + `.row-no-peer`.
+
+**Smoke-test после деплоя:**
+```
+total_users=36
+  no_config: 18
+  idle: 9
+  onboarding: 8
+  active: 1
+```
+
+`vpn-web.service` active, без 500.
+
+### Этап 3 — Auto-sync Google Sheets каждые 6 часов
+
+Раньше Sheets обновлялся только по ручному триггеру через бота. Теперь — крон.
+
+**Файлы:**
+- `scripts/sheets_sync_cron.py` — обёртка над `bot.google_sheets.sync_users_to_sheets`. Логирование через `logger -t sheets-sync` (как остальные кроны).
+- Cron entry на Fornex: `0 */6 * * * cd /opt/vpnservice && /opt/vpnservice/venv/bin/python scripts/sheets_sync_cron.py 2>&1 | logger -t sheets-sync`.
+
+**Тестовый запуск:** `Sheets sync OK: updated=37`. Sheets свежий.
+
+Ручной триггер в боте «📊 Sync Google Sheets» **оставлен** как fallback / refresh-по-запросу.
+
+### Что закрепилось в документации
+
+- `CLAUDE.md` — в правиле №10 теперь все 4 cron'а (раньше упоминались только 2 из них).
+- `CLAUDE.md` — расширен список `scripts/`.
+- `ROADMAP_VPN.md` — добавлена задача «Зачистка orphan-peer-ов» (Приоритет 2).
+
+### Файлы / коммит
+
+- `scripts/peers_sync_check.py` (новый)
+- `scripts/sheets_sync_cron.py` (новый)
+- `web/app.py` — `/api/traffic` (рефакторинг)
+- `web/templates/index.html` — колонка «Статус», colspan 9
+- `web/static/main.js` — `renderStatus()` + поддержка без-peer строк
+- `web/static/style.css` — `.status-badge` + 5 цветов + `.row-no-peer`
+- `CLAUDE.md` — список cron'ов и скриптов
+- `ROADMAP_VPN.md` — задача про orphan-peer-ов
+
+Серверно (вне git): бэкапы `app.py`/`index.html`/`main.js`/`style.css` на Fornex с timestamp 1780049355.

@@ -66,6 +66,25 @@ async function loadStats() {
     } catch (e) {}
 }
 
+const STATUS_META = {
+    active:     { label: 'активен',    cls: 'st-active' },
+    idle:       { label: 'тихий',      cls: 'st-idle' },
+    onboarding: { label: 'онбординг',  cls: 'st-onb' },
+    no_config:  { label: 'без конфига', cls: 'st-noconf' },
+    expired:    { label: 'истёк',      cls: 'st-expired' },
+};
+
+function renderStatus(u) {
+    const meta = STATUS_META[u.status] || { label: u.status || '—', cls: 'st-unknown' };
+    let suffix = '';
+    if (u.is_grandfather) {
+        suffix = ' · ∞';
+    } else if (typeof u.days_left === 'number') {
+        suffix = u.days_left >= 0 ? ` · ${u.days_left}д` : ` · −${Math.abs(u.days_left)}д`;
+    }
+    return `<span class="status-badge ${meta.cls}">${meta.label}${suffix}</span>`;
+}
+
 async function loadTraffic() {
     const tbody = document.getElementById('users-tbody');
     const note = document.getElementById('traffic-note');
@@ -74,7 +93,7 @@ async function loadTraffic() {
         const r = await fetch('/api/traffic', { cache: 'no-store' });
         const data = await r.json();
         if (data.error) {
-            tbody.innerHTML = `<tr><td colspan="8" class="err">Ошибка: ${data.error}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="err">Ошибка: ${data.error}</td></tr>`;
             return;
         }
         if (note && data.last_update) {
@@ -83,7 +102,7 @@ async function loadTraffic() {
         }
         const users = data.users || [];
         if (!users.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="loading">Нет данных</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="loading">Нет данных</td></tr>';
             return;
         }
         const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');
@@ -91,7 +110,10 @@ async function loadTraffic() {
             const name = u.username ? `@${u.username}` : `ID ${u.telegram_id}`;
             const ip = (u.wg_ip || '').replace('/32', '').replace('/24', '');
             const total = u.rx_bytes + u.tx_bytes;
-            const rowClass = total > 0 ? '' : ' class="row-idle"';
+            const rowClasses = [];
+            if (!u.has_peer) rowClasses.push('row-no-peer');
+            else if (total === 0) rowClasses.push('row-idle');
+            const rowAttr = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
             const traffic = total > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
             const totalAll = u.total_bytes ? fmt(u.total_bytes) : '—';
             const platform = u.platform ? `${platformIcon(u.platform)} ${u.platform}` : '—';
@@ -101,9 +123,10 @@ async function loadTraffic() {
             const email = u.email_verified
                 ? '<span class="hs-now" title="Авторизован по email">✓</span>'
                 : '<span class="hs-never">—</span>';
-            return `<tr${rowClass}>
+            return `<tr${rowAttr}>
                 <td class="td-name">${name}</td>
                 <td class="td-email">${email}</td>
+                <td class="td-status">${renderStatus(u)}</td>
                 <td class="td-ip">${ip || '—'}</td>
                 <td class="td-traffic">${traffic}</td>
                 <td class="td-total">${totalAll}</td>
@@ -113,7 +136,7 @@ async function loadTraffic() {
             </tr>`;
         }).join('');
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="8" class="err">Ошибка загрузки</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="err">Ошибка загрузки</td></tr>`;
     }
 }
 

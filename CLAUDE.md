@@ -82,6 +82,9 @@ bot/data/
   mtproto_proxy_link.txt — текущая MTProxy ссылка (не в git)
 scripts/
   traffic_accounting.py — cron-сэмплер lifetime-трафика (*/5)
+  expiry_reminder.py    — напоминания T-7/3/0 (cron 0 9 * * *, 12:00 МСК)
+  sheets_sync_cron.py   — auto-sync БД → Google Sheets (cron 0 */6 * * *)
+  peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
 ```
 
 ### Ключевые концепции
@@ -203,7 +206,12 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 9. **Reboot любого сервера** — проверь после: `systemctl is-active <services>`, `docker ps`, наличие всех peers (особенно AmneziaWG на Fornex: `docker exec amnezia-awg2 awg show awg0 | grep -c '^peer'` должно совпадать с количеством active eu1-peer'ов в peers.json).
 9.1. **Admin-вход на сайт `/admin/credit` и `/login`:** username = `admin` (literal), пароль = `ADMIN_SECRET` (64-char hex из env_vars.txt). НЕ email/пароль владельца.
 9.2. **Flask :5001 биндится на 127.0.0.1** — снаружи закрыт. Доступ только через nginx :8443 с TLS. Для отладки локально можно переопределить `FLASK_HOST=0.0.0.0`.
-10. **Cron на Fornex (root):** `*/5 /opt/amnezia-save-conf.sh` (persist AWG peers) + `*/5 cd /opt/vpnservice && venv/bin/python scripts/traffic_accounting.py` (lifetime-трафик). После reboot проверять `crontab -l` — оба на месте.
+10. **Cron на Fornex (root):**
+    - `*/5 * * * *` `/opt/amnezia-save-conf.sh` — persist AWG peers (safety net).
+    - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime-трафик.
+    - `0 9 * * *` `scripts/expiry_reminder.py` — напоминания T-7/3/0 (12:00 МСК).
+    - `0 */6 * * *` `scripts/sheets_sync_cron.py` — auto-sync Google Sheets (каждые 6 ч). Ручной триггер в боте «📊 Sync Google Sheets» остаётся как fallback.
+    После reboot проверять `crontab -l` — все четыре на месте.
 11. **Swap на eu1:** `/swapfile` 2 ГБ, `swappiness=10` (RAM всего 2 ГБ) — не удалять, страховка от OOM.
 
 ---
