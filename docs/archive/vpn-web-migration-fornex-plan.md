@@ -68,7 +68,7 @@
 
 ## Фаза 6 — Документация в репозитории
 
-- [x] Обновлены **`README_FOR_NEXT_AGENT.md`**, **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`SESSION_SUMMARY`**, **`DONE_LIST`**, **`ROADMAP`**, **`Main_docs`**, **`docs/server-timeweb.md`** (по мере коммита в `Cursor_Projects` / `vpnservice`).
+- [x] Обновлены **`README_FOR_NEXT_AGENT.md`**, **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`SESSION_SUMMARY`**, **`DONE_LIST`**, **`ROADMAP`**, **`Main_docs`**, **`docs/server-timeweb.md`** (по мере коммита в `AI_Projects` / `vpnservice`).
 
 ---
 

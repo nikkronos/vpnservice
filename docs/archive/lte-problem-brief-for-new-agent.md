@@ -113,6 +113,6 @@ vless://359e23cc-f90c-4e43-97af-bd1b662ff043@sub.vpnnkrns.ru:443?encryption=none
 ## Состояние кодовой базы
 
 Репозиторий: `github.com/nikkronos/vpnservice`  
-Локально: `C:\Users\krono\OneDrive\Рабочий стол\Cursor_Projects\Projects\VPN\`
+Локально: `C:\Users\krono\OneDrive\Рабочий стол\AI_Projects\Projects\VPN\`
 
 Все изменения этой сессии **не закоммичены в git** — только изменён `env_vars.txt` на сервере Fornex напрямую (через SSH).

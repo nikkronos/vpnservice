@@ -12,7 +12,7 @@
 - Сгенерирован из `Main_docs/PROFILE.md` через npm-пакет `docx`
 - Позднее удалён из репозитория по решению владельца (не нужен в git)
 
-### 2. Рефакторинг документации монорепо (`nikkronos/Cursor_Projects`)
+### 2. Рефакторинг документации монорепо (`nikkronos/AI_Projects`)
 
 - **`CLAUDE.md`** — создан в корне монорепо, автоматически читается Claude Code при старте сессии
 - **`RULES_CURSOR.md` → `RULES.md`** — переименован, убрана ссылка на Cursor IDE
@@ -51,5 +51,5 @@
 
 ## Технические детали
 
-- Все изменения запушены в `nikkronos/vpnservice` (HEAD: `60b2c08`) и `nikkronos/Cursor_Projects` (HEAD: `33be5ac`)
+- Все изменения запушены в `nikkronos/vpnservice` (HEAD: `60b2c08`) и `nikkronos/AI_Projects` (HEAD: `33be5ac`)
 - Новый приветственный промпт для LLM-агентов: читать `Main_docs/PROFILE.md`, для VPN — `Projects/VPN/CLAUDE.md` + `ROADMAP_VPN.md` + последний SESSION_SUMMARY

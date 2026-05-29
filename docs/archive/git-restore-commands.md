@@ -7,9 +7,9 @@
 ## Где выполнять
 
 - **На своём ПК (где открыт проект):** в папке репо, например  
-  `c:\Users\krono\OneDrive\Рабочий стол\Cursor_Projects\Projects\VPN`  
+  `c:\Users\krono\OneDrive\Рабочий стол\AI_Projects\Projects\VPN`  
   Открыть терминал (PowerShell или cmd) и перейти в эту папку:  
-  `cd "c:\Users\krono\OneDrive\Рабочий стол\Cursor_Projects\Projects\VPN"`
+  `cd "c:\Users\krono\OneDrive\Рабочий стол\AI_Projects\Projects\VPN"`
 
 - **На сервере бота (Timeweb):** в папке, откуда запускается бот, например  
   `/opt/vpnservice`  
