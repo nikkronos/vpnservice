@@ -605,11 +605,23 @@ def api_traffic():
             is_grandfather = not expires_at
             days_left: Optional[int] = None
             if expires_at:
+                # У части юзеров expires_at записан как ISO 8601 с T-разделителем
+                # и микросекундами (`2026-07-10T15:51:14.040134`), у других — в
+                # формате SQLite (`2026-06-10 22:48:20`). fromisoformat принимает
+                # оба варианта; если придёт что-то ещё — пробуем strptime fallback.
                 try:
-                    exp_dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
-                    days_left = (exp_dt - now_dt).days
+                    exp_dt = datetime.fromisoformat(expires_at)
                 except (ValueError, TypeError):
-                    pass
+                    try:
+                        exp_dt = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+                    except (ValueError, TypeError):
+                        exp_dt = None
+                if exp_dt is not None:
+                    # fromisoformat может вернуть aware datetime если в строке есть
+                    # tz-offset; приводим к naive, чтобы вычесть now_dt без TypeError.
+                    if exp_dt.tzinfo is not None:
+                        exp_dt = exp_dt.replace(tzinfo=None)
+                    days_left = (exp_dt - now_dt).days
 
             # --- peer aggregate ---
             user_peers = peers_by_uid.get(uid, [])

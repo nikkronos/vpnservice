@@ -260,6 +260,38 @@ header {
     white-space: nowrap;
 }
 
+/* Sortable headers — клик переключает sort key/direction (см. main.js). */
+.users-table th.th-sort {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    transition: color 0.1s;
+}
+.users-table th.th-sort:hover {
+    color: var(--text);
+}
+.users-table th.th-sort.sort-asc::after,
+.users-table th.th-sort.sort-desc::after {
+    content: '';
+    display: inline-block;
+    margin-left: 6px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    vertical-align: middle;
+}
+.users-table th.th-sort.sort-asc::after  { border-bottom: 5px solid var(--accent); }
+.users-table th.th-sort.sort-desc::after { border-top:    5px solid var(--accent); }
+
+.users-table th.th-num,
+.users-table td.td-num {
+    text-align: right;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    padding-right: 8px;
+    width: 1%;
+    white-space: nowrap;
+}
+
 .users-table td {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);

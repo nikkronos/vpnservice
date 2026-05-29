@@ -83,15 +83,15 @@
                 <table class="users-table" id="users-table">
                     <thead>
                         <tr>
-                            <th>Пользователь</th>
-                            <th title="Авторизован по email">Email</th>
-                            <th title="active = handshake свежий; idle = есть конфиг, но не активен; онбординг = прошёл FSM, не получил конфиг; без конфига = старый/не активирован; истёк = подписка закончилась">Статус</th>
-                            <th>IP</th>
-                            <th title="↓ Принято / ↑ Отправлено">Трафик</th>
-                            <th title="Накопленный трафик за всё время (переживает перезагрузки и обновление конфига)">Всего</th>
-                            <th>Устройство</th>
-                            <th>Последний сеанс</th>
-                            <th title="Когда последний раз запрашивал MTProxy">Прокси</th>
+                            <th class="th-sort th-num" data-sort="num" title="Порядковый номер в текущей сортировке">№</th>
+                            <th class="th-sort" data-sort="name">Пользователь</th>
+                            <th class="th-sort" data-sort="email" title="Авторизован по email">Email</th>
+                            <th class="th-sort" data-sort="status" title="active = handshake свежий; idle = есть конфиг, но не активен; онбординг = прошёл FSM, не получил конфиг; без конфига = старый/не активирован; истёк = подписка закончилась. Суффикс «· Nд» — осталось дней до окончания подписки, «· ∞» — grandfather (без срока)">Статус</th>
+                            <th class="th-sort" data-sort="traffic" title="↓ Принято / ↑ Отправлено — текущая сессия AmneziaWG (обнуляется при перезапуске контейнера)">Трафик</th>
+                            <th class="th-sort" data-sort="total" title="Накопленный трафик за всё время (переживает перезагрузки и обновление конфига)">Всего</th>
+                            <th class="th-sort" data-sort="device">Устройство</th>
+                            <th class="th-sort" data-sort="last">Последний сеанс</th>
+                            <th class="th-sort" data-sort="proxy" title="Когда последний раз запрашивал MTProxy">Прокси</th>
                         </tr>
                     </thead>
                     <tbody id="users-tbody">

@@ -339,6 +339,19 @@
 
 - [x] ~~**Расширить health-check на main + yc**~~ — **DONE 2026-05-29** (вечер). Выбран вариант 1 (cross-server из Fornex через SSH jump). `scripts/health_check.py` теперь делает 22 проверки: 12 локальных (как было) + 6 на main + 4 на yc. Покрытие: на main — xray, wg-quick@wg0, :443/tcp, :51820/udp, диск; на yc — xray, :443/tcp, диск. Reachable-gate: при FAIL `<host>:reachable` остальные проверки этого хоста скипаются, их state не трогается — один сетевой провал не даёт каскад из 5+ алертов. Remote state-ключи префиксованы `<host>:` (например `yc:xray.service`). Тест FAIL→RESOLVE прошёл на yc (xray stop/start, 2 алерта + 2 resolve, downtime ~30 сек, T2/МТС/Билайн REALITY-сессии переустановились без жалоб). Ограничение: если падает сам Fornex — алерт уйти не сможет (та же дыра что и до этого, лечится только external uptime monitor).
 
+- [ ] **VLESS-телеметрия (per-user lifetime + last_seen) через Xray stats API** (открыто 2026-05-29 во время UX-аудита админ-панели):
+  - **Симптом:** на скрине админки много юзеров с статусом «тихий», хотя они пользуются VPN. Причина: статус `idle` ставится при отсутствии свежего AmneziaWG handshake, но для VLESS-юзеров handshake = 0 всегда (VLESS не использует WireGuard). В БД нет колонки `vless_used_at` или эквивалентной — нет способа знать пользуется ли юзер VLESS.
+  - **Что есть для квази-фикса:** `proxy_requested_at` — отметка о запросе MTProxy, частично сигналит активность.
+  - **Правильное решение:** Xray statsoutbound / statsuser API даёт per-uuid rx/tx и timestamps. Скрипт `scripts/vless_traffic_accounting.py` (cron */5) подключается к eu1/main/yc Xray, забирает stats per-uuid, накапливает в новую таблицу `vless_traffic_accounting` + обновляет `users.vless_last_seen`. В `/api/traffic` использовать `max(last_handshake, vless_last_seen)` для определения active/idle.
+  - **Зависимости:** в Xray-конфиге на трёх серверах добавить `"stats": {}` блок и API listener; через SSH из Fornex (как cross-server health-check) забирать stats каждые 5 мин.
+  - **Объём:** ~2–3 часа.
+
+- [ ] **`/api/services` через health-check state (а не своя проверка)** (открыто 2026-05-29):
+  - **Симптом был:** на админ-панели VLESS «серый» (status=unknown). Quick-fix: добавил `VLESS_YC_HOST=158.160.236.147` в env — точка позеленела.
+  - **Правильное решение:** `/api/services` сейчас делает свой TCP-ping (`check_port`), который дублирует функциональность `scripts/health_check.py`. Логичнее читать `/var/lib/vpn-health/state.json` и отдавать оттуда — тогда панель покажет реальный статус AmneziaWG + VLESS на всех трёх серверах (eu1/main/yc) без дублирования логики и без env-переменных.
+  - **Бонус:** в шапке можно вместо двух точек (AWG / VLESS) показывать иконку каждого канала отдельно (Быстрый / Резервный / Мобильный / Telegram-прокси) — точная карта инфраструктуры с одного взгляда.
+  - **Объём:** ~1 час.
+
 - [ ] **External uptime monitor для Fornex** (отложено 2026-05-29 по решению владельца):
   - Дыра: если падает сам Fornex (хост целиком) — `scripts/health_check.py` cron не запустится, TG-алерта не будет. Узнаёшь только по жалобам юзеров (от 30 мин до нескольких часов, ночью — до утра).
   - Варианты:

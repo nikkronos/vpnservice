@@ -61,8 +61,8 @@ async function loadStats() {
         set('act-30d', d.active_30d);
         set('act-email', d.email_verified_users);
         set('act-proxy', d.proxy_requests_30d);
-        const total = (d.total_rx_bytes || 0) + (d.total_tx_bytes || 0);
-        set('act-traffic', total > 0 ? fmt(total) : '—');
+        // act-traffic не ставим здесь — он считается из total_bytes в loadTraffic
+        // (резет-aware lifetime, см. SESSION_SUMMARY_2026-05-29 фикс #6).
     } catch (e) {}
 }
 
@@ -73,6 +73,9 @@ const STATUS_META = {
     no_config:  { label: 'без конфига', cls: 'st-noconf' },
     expired:    { label: 'истёк',      cls: 'st-expired' },
 };
+const STATUS_PRIORITY = {
+    active: 0, idle: 1, onboarding: 2, no_config: 3, expired: 4,
+};
 
 function renderStatus(u) {
     const meta = STATUS_META[u.status] || { label: u.status || '—', cls: 'st-unknown' };
@@ -82,7 +85,124 @@ function renderStatus(u) {
     } else if (typeof u.days_left === 'number') {
         suffix = u.days_left >= 0 ? ` · ${u.days_left}д` : ` · −${Math.abs(u.days_left)}д`;
     }
-    return `<span class="status-badge ${meta.cls}">${meta.label}${suffix}</span>`;
+    return `<span class="status-badge ${meta.cls}" title="${meta.label}${suffix}">${meta.label}${suffix}</span>`;
+}
+
+// ── Сортировка ─────────────────────────────────────────────────────────
+// Глобальное состояние; null = серверная сортировка (priority группа → handshake desc).
+let _sortState = { key: null, dir: 'asc' };
+let _lastUsers = [];
+
+function _proxyTs(u) {
+    if (!u.proxy_requested_at) return 0;
+    // SQLite-формат "YYYY-MM-DD HH:MM:SS" → unix; не критично что timezone.
+    const t = Date.parse(u.proxy_requested_at.replace(' ', 'T') + 'Z') / 1000;
+    return isFinite(t) ? t : 0;
+}
+
+function _keyFn(key) {
+    switch (key) {
+        case 'name':    return u => (u.username || `id${u.telegram_id}`).toLowerCase();
+        case 'email':   return u => u.email_verified ? 1 : 0;
+        case 'status':  return u => STATUS_PRIORITY[u.status] ?? 9;
+        case 'traffic': return u => (u.rx_bytes || 0) + (u.tx_bytes || 0);
+        case 'total':   return u => u.total_bytes || 0;
+        case 'device':  return u => u.platform || '';
+        case 'last':    return u => u.last_handshake || 0;
+        case 'proxy':   return u => _proxyTs(u);
+        default:        return () => 0;
+    }
+}
+
+function _sortUsers(users) {
+    if (_sortState.key === null || _sortState.key === 'num') return users;
+    const k = _keyFn(_sortState.key);
+    const sign = _sortState.dir === 'asc' ? 1 : -1;
+    return [...users].sort((a, b) => {
+        const ka = k(a), kb = k(b);
+        if (ka < kb) return -1 * sign;
+        if (ka > kb) return  1 * sign;
+        return 0;
+    });
+}
+
+function _updateSortIndicators() {
+    document.querySelectorAll('th.th-sort').forEach(th => {
+        const key = th.dataset.sort;
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (_sortState.key === key) {
+            th.classList.add(_sortState.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
+function _onHeaderClick(ev) {
+    const th = ev.currentTarget;
+    const key = th.dataset.sort;
+    if (!key || key === 'num') {
+        // Клик по «№» сбрасывает к серверной сортировке.
+        _sortState = { key: null, dir: 'asc' };
+    } else if (_sortState.key === key) {
+        _sortState.dir = _sortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _sortState = { key, dir: 'asc' };
+        // Для числовых колонок логичнее стартовать с desc (большие сверху).
+        if (['traffic', 'total', 'last', 'proxy', 'email'].includes(key)) {
+            _sortState.dir = 'desc';
+        }
+    }
+    _renderUsers(_lastUsers);
+}
+
+function _bindSortHeaders() {
+    document.querySelectorAll('th.th-sort').forEach(th => {
+        th.addEventListener('click', _onHeaderClick);
+    });
+}
+
+function _renderUsers(users) {
+    const tbody = document.getElementById('users-tbody');
+    if (!tbody) return;
+    const sorted = _sortUsers(users);
+    const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');
+
+    tbody.innerHTML = sorted.map((u, idx) => {
+        const name = u.username ? `@${u.username}` : `ID ${u.telegram_id}`;
+        const sessionBytes = (u.rx_bytes || 0) + (u.tx_bytes || 0);
+        const rowClasses = [];
+        if (!u.has_peer) rowClasses.push('row-no-peer');
+        else if (sessionBytes === 0) rowClasses.push('row-idle');
+        const rowAttr = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
+        const traffic = sessionBytes > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
+        const totalAll = u.total_bytes ? fmt(u.total_bytes) : '—';
+        const platform = u.platform ? `${platformIcon(u.platform)} ${u.platform}` : '—';
+        const proxy = u.proxy_requested_at
+            ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
+            : '<span class="hs-never">—</span>';
+        const email = u.email_verified
+            ? '<span class="hs-now" title="Авторизован по email">✓</span>'
+            : '<span class="hs-never">—</span>';
+        return `<tr${rowAttr}>
+            <td class="td-num">${idx + 1}</td>
+            <td class="td-name">${name}</td>
+            <td class="td-email">${email}</td>
+            <td class="td-status">${renderStatus(u)}</td>
+            <td class="td-traffic">${traffic}</td>
+            <td class="td-total">${totalAll}</td>
+            <td class="td-platform">${platform}</td>
+            <td class="td-hs">${relTime(u.last_handshake)}</td>
+            <td class="td-proxy">${proxy}</td>
+        </tr>`;
+    }).join('');
+
+    _updateSortIndicators();
+
+    // Общий трафик в шапке считаем как сумму lifetime total_bytes.
+    // Раньше /api/stats суммировал только rx+tx текущей AWG-сессии (resetable
+    // при рестарте контейнера), что давало в 10+ раз меньше реальности.
+    const totalLifetime = users.reduce((s, u) => s + (u.total_bytes || 0), 0);
+    const act = document.getElementById('act-traffic');
+    if (act) act.textContent = totalLifetime > 0 ? fmt(totalLifetime) : '—';
 }
 
 async function loadTraffic() {
@@ -105,36 +225,8 @@ async function loadTraffic() {
             tbody.innerHTML = '<tr><td colspan="9" class="loading">Нет данных</td></tr>';
             return;
         }
-        const platformIcon = p => ({ ios: '🍎', android: '🤖', pc: '💻' }[p] || '💻');
-        tbody.innerHTML = users.map(u => {
-            const name = u.username ? `@${u.username}` : `ID ${u.telegram_id}`;
-            const ip = (u.wg_ip || '').replace('/32', '').replace('/24', '');
-            const total = u.rx_bytes + u.tx_bytes;
-            const rowClasses = [];
-            if (!u.has_peer) rowClasses.push('row-no-peer');
-            else if (total === 0) rowClasses.push('row-idle');
-            const rowAttr = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
-            const traffic = total > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
-            const totalAll = u.total_bytes ? fmt(u.total_bytes) : '—';
-            const platform = u.platform ? `${platformIcon(u.platform)} ${u.platform}` : '—';
-            const proxy = u.proxy_requested_at
-                ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
-                : '<span class="hs-never">—</span>';
-            const email = u.email_verified
-                ? '<span class="hs-now" title="Авторизован по email">✓</span>'
-                : '<span class="hs-never">—</span>';
-            return `<tr${rowAttr}>
-                <td class="td-name">${name}</td>
-                <td class="td-email">${email}</td>
-                <td class="td-status">${renderStatus(u)}</td>
-                <td class="td-ip">${ip || '—'}</td>
-                <td class="td-traffic">${traffic}</td>
-                <td class="td-total">${totalAll}</td>
-                <td class="td-platform">${platform}</td>
-                <td class="td-hs">${relTime(u.last_handshake)}</td>
-                <td class="td-proxy">${proxy}</td>
-            </tr>`;
-        }).join('');
+        _lastUsers = users;
+        _renderUsers(users);
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="9" class="err">Ошибка загрузки</td></tr>`;
     }
@@ -153,5 +245,8 @@ async function loadAll() {
     if (btn) { btn.textContent = '↺ Обновить'; btn.disabled = false; }
 }
 
-document.addEventListener('DOMContentLoaded', loadAll);
+document.addEventListener('DOMContentLoaded', () => {
+    _bindSortHeaders();
+    loadAll();
+});
 setInterval(loadAll, 60 * 1000);

@@ -39,6 +39,7 @@ def main() -> int:
     init_db()
     dump = _awg_dump()
     if not dump.strip():
+        print("traffic_accounting: empty awg dump, skip", flush=True)
         return 0
 
     # pubkey -> (rx, tx); первая строка dump — интерфейс, пропускаем
@@ -51,9 +52,11 @@ def main() -> int:
             except (ValueError, IndexError):
                 continue
     if not transfer:
+        print("traffic_accounting: no peers in awg dump, skip", flush=True)
         return 0
 
     samples = []
+    total_bytes_this_run = 0
     for peer in get_all_peers():
         if peer.server_id != "eu1" or not peer.active:
             continue
@@ -66,8 +69,16 @@ def main() -> int:
                 "rx": rx,
                 "tx": tx,
             })
+            total_bytes_this_run += rx + tx
 
     db_accumulate_traffic(samples)
+    # Видимая лог-строка — чтобы `journalctl -t traffic-accounting` не молчал
+    # и было легко увидеть что cron жив и какое-то значение отщёлкивает.
+    print(
+        f"traffic_accounting: sampled {len(samples)} peers, "
+        f"session rx+tx={total_bytes_this_run / 1024**2:.1f} MB",
+        flush=True,
+    )
     return 0
 
 
