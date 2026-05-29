@@ -34,6 +34,7 @@ ENV (через bot/config.py): BOT_TOKEN, ADMIN_TELEGRAM_ID
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import logging
 import os
@@ -69,6 +70,7 @@ HTTPS_URL = "https://supportkronos.online:8443/"
 EXPECTED_HTTP_CODES = {200, 301, 302, 401, 403}
 
 STATE_PATH = pathlib.Path("/var/lib/vpn-health/state.json")
+LOCK_PATH = pathlib.Path("/var/lock/vpn-health.lock")
 SYSTEMCTL = "/bin/systemctl"
 DOCKER = "/usr/bin/docker"
 
@@ -509,6 +511,22 @@ def main() -> int:
         help="Только печать на stdout, без state и без TG-алертов",
     )
     args = parser.parse_args()
+
+    # Single-instance guard: при overlap cron + manual run (или двух cron'ов
+    # если предыдущий прогон затянулся из-за SSH-таймаутов) race condition
+    # приводил к двойным алертам — два процесса читали один state, оба
+    # отправляли RESOLVE/ALERT. Lock закрывает.
+    # Dry-run пропускает блокировку — он безопасен (не пишет state, не шлёт).
+    lock_fp = None
+    if not args.dry_run:
+        LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_fp = open(LOCK_PATH, "w")
+        try:
+            fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.warning("Another health_check instance is running, exiting cleanly")
+            lock_fp.close()
+            return 0
 
     state = {} if args.dry_run else load_state()
     results, state_extras = run_all_checks(state)
