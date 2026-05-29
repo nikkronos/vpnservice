@@ -63,6 +63,22 @@ async function loadStats() {
         set('act-proxy', d.proxy_requests_30d);
         // act-traffic не ставим здесь — он считается из total_bytes в loadTraffic
         // (резет-aware lifetime, см. SESSION_SUMMARY_2026-05-29 фикс #6).
+
+        // VLESS трафик (per-server summary, scripts/vless_summary_accounting.py).
+        const vlessTotal = d.vless_total_bytes || 0;
+        const vlessEl = document.getElementById('act-vless-traffic');
+        if (vlessEl) vlessEl.textContent = vlessTotal > 0 ? fmt(vlessTotal) : '—';
+        // В подпись добавим разбивку по серверам если данные есть.
+        const vlessLabel = document.getElementById('act-vless-label');
+        if (vlessLabel && d.vless_by_server) {
+            const parts = Object.entries(d.vless_by_server)
+                .filter(([, v]) => v > 0)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([srv, v]) => `${srv}: ${fmt(v)}`);
+            if (parts.length) {
+                vlessLabel.title = 'Per-inbound через Xray stats. По серверам: ' + parts.join(' · ');
+            }
+        }
     } catch (e) {}
 }
 

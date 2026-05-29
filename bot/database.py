@@ -165,6 +165,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_servers_table()
     _migrate_add_proxy_column()
     _migrate_add_vless_column()
+    _migrate_add_vless_server_traffic_table()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
@@ -204,6 +205,36 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_vless_server_traffic_table() -> None:
+    """
+    Создаёт таблицу vless_server_traffic для per-server summary VLESS-трафика
+    через Xray stats API (см. scripts/vless_summary_accounting.py).
+
+    Per-USER телеметрия невозможна пока используются общие UUIDs на серверах
+    (см. ROADMAP P2 — «Персональные UUIDs»). Per-INBOUND же доступна сразу
+    через `xray api statsquery -pattern=inbound>>>vless` — этого хватает на
+    вопрос «через какой сервер сколько прокачано».
+
+    Структура аналогична traffic_accounting для AWG, но первичный ключ
+    (server_id, inbound_tag): reset-aware accumulation на каждый Xray-рестарт.
+    """
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vless_server_traffic (
+                server_id   TEXT NOT NULL,
+                inbound_tag TEXT NOT NULL,
+                lifetime_rx INTEGER NOT NULL DEFAULT 0,
+                lifetime_tx INTEGER NOT NULL DEFAULT 0,
+                last_rx     INTEGER NOT NULL DEFAULT 0,
+                last_tx     INTEGER NOT NULL DEFAULT 0,
+                updated_at  TEXT,
+                PRIMARY KEY (server_id, inbound_tag)
+            )
+            """
+        )
 
 
 def _migrate_add_vless_column() -> None:
@@ -855,6 +886,82 @@ def db_accumulate_traffic(samples: List[Dict]) -> None:
                 """,
                 (d_rx, d_tx, rx, tx, tid, pk),
             )
+
+
+def db_accumulate_vless_server_traffic(server_id: str, samples: List[Dict]) -> None:
+    """
+    Накопительный учёт per-inbound VLESS-трафика на сервере (reset-aware).
+
+    samples: [{"inbound_tag": "vless-reality", "rx": int, "tx": int}, ...]
+    rx/tx — текущие значения из `xray api statsquery`. Обнуляются при рестарте
+    Xray. Логика та же что в db_accumulate_traffic: current < last → reset,
+    приращение = current; current ≥ last → приращение = current - last.
+    """
+    _ensure_init()
+    if not samples or not server_id:
+        return
+    with _conn() as con:
+        for s in samples:
+            tag = (s.get("inbound_tag") or "").strip()
+            if not tag:
+                continue
+            rx = int(s.get("rx") or 0)
+            tx = int(s.get("tx") or 0)
+            row = con.execute(
+                "SELECT lifetime_rx, lifetime_tx, last_rx, last_tx "
+                "FROM vless_server_traffic WHERE server_id = ? AND inbound_tag = ?",
+                (server_id, tag),
+            ).fetchone()
+            if row is None:
+                con.execute(
+                    """
+                    INSERT INTO vless_server_traffic
+                        (server_id, inbound_tag, lifetime_rx, lifetime_tx,
+                         last_rx, last_tx, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                    """,
+                    (server_id, tag, rx, tx, rx, tx),
+                )
+                continue
+            d_rx = rx - row["last_rx"] if rx >= row["last_rx"] else rx
+            d_tx = tx - row["last_tx"] if tx >= row["last_tx"] else tx
+            con.execute(
+                """
+                UPDATE vless_server_traffic
+                SET lifetime_rx = lifetime_rx + ?,
+                    lifetime_tx = lifetime_tx + ?,
+                    last_rx     = ?,
+                    last_tx     = ?,
+                    updated_at  = datetime('now')
+                WHERE server_id = ? AND inbound_tag = ?
+                """,
+                (d_rx, d_tx, rx, tx, server_id, tag),
+            )
+
+
+def db_get_vless_server_lifetime() -> Dict[str, Dict]:
+    """
+    Возвращает накопительный VLESS-трафик по серверам:
+    {server_id: {"rx": int, "tx": int, "total": int}}.
+    Суммирует по всем inbound'ам сервера (vless-ws + vless-xhttp + vless-reality).
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT server_id,
+                   SUM(lifetime_rx) AS rx,
+                   SUM(lifetime_tx) AS tx
+            FROM vless_server_traffic
+            GROUP BY server_id
+            """
+        ).fetchall()
+        out: Dict[str, Dict] = {}
+        for r in rows:
+            rx = r["rx"] or 0
+            tx = r["tx"] or 0
+            out[r["server_id"]] = {"rx": rx, "tx": tx, "total": rx + tx}
+        return out
 
 
 def db_get_lifetime_by_user() -> Dict[int, Dict]:

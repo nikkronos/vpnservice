@@ -68,7 +68,11 @@
                 </div>
                 <div class="activity-card activity-card-traffic">
                     <span class="activity-num" id="act-traffic">—</span>
-                    <span class="activity-label">общий трафик</span>
+                    <span class="activity-label" title="AmneziaWG lifetime: рассчитывается из total_bytes пользователей (накопительно, переживает перезапуски)">общий трафик AWG</span>
+                </div>
+                <div class="activity-card activity-card-traffic">
+                    <span class="activity-num" id="act-vless-traffic">—</span>
+                    <span class="activity-label" id="act-vless-label" title="VLESS lifetime: per-inbound через Xray stats API (eu1 + main + yc). Per-user разбивки нет — на серверах общие UUIDs.">VLESS трафик</span>
                 </div>
             </div>
         </section>

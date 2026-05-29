@@ -68,6 +68,7 @@ from bot.database import (
     db_get_claim_by_id,
     db_set_claim_notify_msg,
     db_update_vless_requested_at,
+    db_get_vless_server_lifetime,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -808,6 +809,21 @@ def api_stats():
             except (ValueError, TypeError):
                 continue
 
+        # Per-server VLESS lifetime (пишется scripts/vless_summary_accounting.py
+        # каждые 5 мин через Xray stats API). Сюда попадают inbound-агрегаты
+        # vless-ws + vless-xhttp + vless-tcp по каждому серверу. Per-user
+        # разбивки тут нет (общие UUIDs — см. ROADMAP P2).
+        vless_by_server: Dict[str, int] = {}
+        vless_total_bytes = 0
+        try:
+            vless_lifetime = db_get_vless_server_lifetime()
+            for srv_id, data in vless_lifetime.items():
+                total = int(data.get("total") or 0)
+                vless_by_server[srv_id] = total
+                vless_total_bytes += total
+        except Exception as e:
+            logger.warning("vless_summary read failed: %s", e)
+
         return jsonify({
             "total_users": len(users),
             "active_users": len(active_users),
@@ -820,6 +836,8 @@ def api_stats():
             "proxy_requests_30d": proxy_requests_30d,
             "total_rx_bytes": total_rx,
             "total_tx_bytes": total_tx,
+            "vless_by_server": vless_by_server,
+            "vless_total_bytes": vless_total_bytes,
             "by_server": by_server,
             "last_update": datetime.now().isoformat(),
         })

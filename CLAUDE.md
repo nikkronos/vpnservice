@@ -115,6 +115,8 @@ scripts/
   expiry_reminder.py    — напоминания T-7/3/0 (cron 0 9 * * *, 12:00 МСК)
   sheets_sync_cron.py   — auto-sync БД → Google Sheets (cron 0 */6 * * *)
   health_check.py       — 22 проверки инфры (Fornex local + main/yc через SSH) → TG-алерты владельцу (cron */15)
+  vless_summary_accounting.py — per-server VLESS lifetime через Xray stats API (cron */5)
+  patch_xray_stats.py   — идемпотентный патч Xray config: добавляет stats/api блоки + теги inbound'ов
   peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
 ```
 
@@ -239,7 +241,8 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 9.2. **Flask :5001 биндится на 127.0.0.1** — снаружи закрыт. Доступ только через nginx :8443 с TLS. Для отладки локально можно переопределить `FLASK_HOST=0.0.0.0`.
 10. **Cron на Fornex (root):**
     - `*/5 * * * *` `/opt/amnezia-save-conf.sh` — persist AWG peers (safety net).
-    - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime-трафик.
+    - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime AmneziaWG-трафика per peer/user.
+    - `*/5 * * * *` `scripts/vless_summary_accounting.py` — lifetime VLESS-трафика per-server (eu1 локально + main/yc через SSH к Xray stats API на 127.0.0.1:10085). Пишет в таблицу `vless_server_traffic`, reset-aware.
     - `0 9 * * *` `scripts/expiry_reminder.py` — напоминания T-7/3/0 (12:00 МСК).
     - `0 */6 * * *` `scripts/sheets_sync_cron.py` — auto-sync Google Sheets (каждые 6 ч). Ручной триггер в боте «📊 Sync Google Sheets» остаётся как fallback.
     - `*/15 * * * *` `scripts/health_check.py` — 22 проверки инфры. **Fornex (12, локально):** systemd сервисы (vpn-bot/vpn-web/nginx/xray), docker (amnezia-awg2/mtproxy-faketls), AWG peer-count, peers.json/awg consistency, диск, swap, LE-cert, HTTPS endpoint. **main (6, через SSH):** reachable + xray + wg-quick@wg0 + :443/tcp + :51820/udp + диск. **yc (4, через SSH):** reachable + xray + :443/tcp + диск. При смене статуса OK↔FAIL шлёт TG-алерт владельцу (прямой HTTP API, не через инстанс бота). State: `/var/lib/vpn-health/state.json`. Remote-ключи префиксованы `<host>:` (`yc:xray.service`). FAIL `<host>:reachable` — gate: остальные проверки этого хоста скипаются, чтобы один сетевой провал не давал каскад.
