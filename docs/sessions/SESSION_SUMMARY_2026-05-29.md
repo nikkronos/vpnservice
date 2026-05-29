@@ -277,3 +277,76 @@ Sh4gHaXonhu4N11D…  allowed_ips=10.8.1.1/32  endpoint=94.19.223.132:60636
 
 ### Извлечённое правило для будущих сессий
 **Один человек = два подтверждения для delete-операций.** Read-only диагностика и destructive cleanup не должны идти «одной серией» — между ними обязан быть явный stop-light. Когда показал что собираюсь удалить — ждать пока пользователь не скажет «да», даже если он уже сказал «да делай» на более раннюю задачу.
+
+---
+
+## Дополнение (поздний день 2026-05-29) — Health-check / Alerting
+
+По запросу владельца «не переживать что где-то что-то сломается» — после видимости в админке нужны push-уведомления о поломках. Закрывает задачу «Мониторинг и алерты» из P3 в ROADMAP.
+
+### Что сделано
+
+**`scripts/health_check.py`** — cron-скрипт каждые 15 мин с 12 проверками:
+
+| # | Проверка | Порог FAIL |
+|---|---|---|
+| 1-4 | `vpn-bot/vpn-web/nginx/xray.service` | not active |
+| 5-6 | Docker `amnezia-awg2/mtproxy-faketls` | not running |
+| 7 | AWG peer-count | падение > 50% от прошлой проверки |
+| 8 | `peers.json ⊆ awg show` (lost-after-reboot) | расхождение |
+| 9 | Диск `/` | usage > 85% |
+| 10 | Swap (на eu1 2 ГБ RAM, близко к OOM) | usage > 80% |
+| 11 | LE-cert | < 7 дней до истечения |
+| 12 | HTTPS endpoint `https://supportkronos.online:8443/` | не HTTP 200/301/302/401/403 |
+
+### Архитектура алертов
+
+- **State** в `/var/lib/vpn-health/state.json` — на каждом запуске сравниваем с предыдущим.
+- **OK → FAIL** → `🔴 ALERT` в TG (через прямой `https://api.telegram.org/bot<TOKEN>/sendMessage`, без инстанса бота — алерт уйдёт даже если упал сам `vpn-bot.service`).
+- **FAIL → OK** → `🟢 RESOLVED` с указанием downtime в минутах.
+- **FAIL → FAIL** → молчание (защита от спама).
+- **OK → OK** → молчание.
+
+Алерты содержат: имя проверки, время UTC, статус-сообщение, и для FAIL — детали (для systemd: last 5 journal lines).
+
+### Тестирование
+
+Прогнал FAIL-симуляцию через остановку `mtproxy-faketls` (Telegram-прокси, отдельный от VPN — юзеры WG/VLESS не затронуты):
+
+| Сценарий | Ожидание | Факт |
+|---|---|---|
+| OK → FAIL | 🔴 ALERT в TG | ✅ `Alert FAIL sent=True` |
+| FAIL → FAIL | молчание | ✅ `0 alerts sent` |
+| FAIL → OK | 🟢 RESOLVED + downtime | ✅ `Alert OK sent=True` |
+
+Два сообщения дошли владельцу в `@vpnkronos_bot`.
+
+### Baseline (первый запуск 2026-05-29 13:23 UTC)
+
+Все 12 OK:
+- Диск 73.9% (5.1 GB free) — близко к порогу 85%, в горизонте 1-2 мес нужно будет почистить.
+- RAM 55%, swap 23%.
+- LE cert истекает через 86 дней.
+- AWG peers: 19 / `peers.json`: 16 (json subset of awg — корректно).
+
+### Cron
+
+```
+*/15 * * * * cd /opt/vpnservice && /opt/vpnservice/venv/bin/python scripts/health_check.py 2>&1 | logger -t health-check
+```
+
+Логи: `journalctl -t health-check`.
+
+### Что НЕ делаю в этой версии (сознательно)
+
+- CPU load / детальные метрики памяти → это observability, не alerting.
+- Connectivity к remote (main/yc) → нужна инфра для cross-server check.
+- Auto-recovery (например, auto-restart упавшего сервиса) → высокий риск, обсуждать отдельно.
+- Алерты при WARN-состоянии → пока только FAIL.
+
+### Файлы
+- `scripts/health_check.py` (новый, ~280 строк)
+- `/var/lib/vpn-health/state.json` (создаётся скриптом, не в git)
+- `CLAUDE.md` — 5-й cron + 5-й скрипт в списке
+- `ROADMAP_VPN.md` — «Мониторинг и алерты» в P3 переведено в DONE
+- `docs/sessions/SESSION_SUMMARY_2026-05-29.md` — это дополнение

@@ -84,6 +84,7 @@ scripts/
   traffic_accounting.py — cron-сэмплер lifetime-трафика (*/5)
   expiry_reminder.py    — напоминания T-7/3/0 (cron 0 9 * * *, 12:00 МСК)
   sheets_sync_cron.py   — auto-sync БД → Google Sheets (cron 0 */6 * * *)
+  health_check.py       — 12 проверок инфры → TG-алерты владельцу (cron */15)
   peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
 ```
 
@@ -211,7 +212,8 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
     - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime-трафик.
     - `0 9 * * *` `scripts/expiry_reminder.py` — напоминания T-7/3/0 (12:00 МСК).
     - `0 */6 * * *` `scripts/sheets_sync_cron.py` — auto-sync Google Sheets (каждые 6 ч). Ручной триггер в боте «📊 Sync Google Sheets» остаётся как fallback.
-    После reboot проверять `crontab -l` — все четыре на месте.
+    - `*/15 * * * *` `scripts/health_check.py` — 12 проверок инфры (services, containers, AWG peer-count, peers.json/awg consistency, диск, swap, LE-cert, HTTPS). При смене статуса OK↔FAIL шлёт TG-алерт владельцу. State: `/var/lib/vpn-health/state.json`.
+    После reboot проверять `crontab -l` — все пять на месте.
 11. **Swap на eu1:** `/swapfile` 2 ГБ, `swappiness=10` (RAM всего 2 ГБ) — не удалять, страховка от OOM.
 
 ---
