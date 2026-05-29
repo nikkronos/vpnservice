@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """
-Health-check / alerting для eu1.
+Health-check / alerting для VPN-инфраструктуры (Fornex + main + yc).
 
-Каждые 15 минут проходит 12 проверок (systemd сервисы, docker контейнеры,
-AWG peer-count, peers.json/awg consistency, диск, swap, LE сертификат,
-HTTPS endpoint). При **смене статуса** (OK→FAIL или FAIL→OK) шлёт алерт
-владельцу в Telegram через прямой HTTP API (urllib, без инстанса бота).
+Каждые 15 минут проходит ~22 проверки:
+  * Fornex (12, локально): systemd сервисы, docker контейнеры, AWG peer-count,
+    peers.json/awg consistency, диск, swap, LE сертификат, HTTPS endpoint.
+  * main (Timeweb, 6, через SSH): reachable, xray, wg-quick@wg0, :443/tcp,
+    :51820/udp, диск.
+  * yc (Yandex Cloud, 4, через SSH): reachable, xray, :443/tcp, диск.
+
+При **смене статуса** (OK→FAIL или FAIL→OK) шлёт алерт владельцу в Telegram
+через прямой HTTP API (urllib, без инстанса бота — алерт уйдёт даже если упал
+сам vpn-bot.service).
 
 State хранится в /var/lib/vpn-health/state.json — нужен чтобы не спамить
-повторными алертами при той же ошибке.
+повторными алертами при той же ошибке. Ключи remote-проверок имеют префикс
+`<host>:` (например `yc:xray.service`); локальные имена не меняются (backward
+compat с baseline 2026-05-29).
+
+При FAIL `<host>:reachable` остальные проверки этого хоста **скипаются**
+(не запускаются и в state не пишутся) — чтобы один сетевой провал не
+давал каскад из 5+ алертов.
 
 Запуск:
     # Production (cron)
@@ -29,11 +41,12 @@ import pathlib
 import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Project root для импортов bot.* (нужен только в production-режиме)
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -59,6 +72,41 @@ STATE_PATH = pathlib.Path("/var/lib/vpn-health/state.json")
 SYSTEMCTL = "/bin/systemctl"
 DOCKER = "/usr/bin/docker"
 
+# === Remote: SSH-команды и план проверок ===
+# BatchMode=yes блокирует любые prompt'ы (passphrase/yes-no);
+# ConnectTimeout=5 — быстрый fail при сетевой проблеме;
+# StrictHostKeyChecking=accept-new — авто-добавление новых host keys (для
+# первого запуска после смены IP/перенастройки), но запрет на silent-обновление
+# при подмене ключа (защита от MITM).
+SSH_OPTS = [
+    "-o", "ConnectTimeout=5",
+    "-o", "BatchMode=yes",
+    "-o", "StrictHostKeyChecking=accept-new",
+    "-o", "ServerAliveInterval=3",
+    "-o", "ServerAliveCountMax=1",
+]
+REMOTE_HOSTS: Dict[str, List[str]] = {
+    "main": ["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"],
+    "yc":   ["ssh"] + SSH_OPTS + ["yc"],
+}
+
+# План проверок на каждом удалённом хосте.
+# Tuple-форма: ("systemd", "<unit>") | ("port", <int>, "tcp"|"udp") | ("disk", "<path>")
+REMOTE_CHECK_PLAN: Dict[str, List[Tuple]] = {
+    "main": [
+        ("systemd", "xray.service"),
+        ("systemd", "wg-quick@wg0.service"),
+        ("port",    443,   "tcp"),
+        ("port",    51820, "udp"),
+        ("disk",    "/"),
+    ],
+    "yc": [
+        ("systemd", "xray.service"),
+        ("port",    443,   "tcp"),
+        ("disk",    "/"),
+    ],
+}
+
 
 @dataclass
 class CheckResult:
@@ -74,24 +122,50 @@ def _run(cmd: List[str], timeout: int = 10) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
-# === Проверки ===
+def _run_remote(host: str, remote_cmd: str, timeout: int = 15) -> subprocess.CompletedProcess:
+    """
+    Выполнить shell-команду на удалённом хосте через SSH.
 
-def check_systemd_service(service: str) -> CheckResult:
+    `remote_cmd` передаётся как ОДИН аргумент в ssh — клиент сам пробрасывает
+    его в shell на удалённой стороне, экранирование сохраняется.
+    """
+    ssh_cmd = REMOTE_HOSTS[host] + [remote_cmd]
+    return subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout)
+
+
+# === Проверки (local + remote, параметризованные по host) ===
+
+def _qualify(name: str, host: Optional[str]) -> str:
+    """Имя проверки для state-key. Локально — как есть, для backward compat
+    с baseline; remote — с префиксом `<host>:`."""
+    return f"{host}:{name}" if host else name
+
+
+def check_systemd_service(service: str, host: Optional[str] = None) -> CheckResult:
+    qname = _qualify(service, host)
     try:
-        r = _run([SYSTEMCTL, "is-active", service])
+        if host is None:
+            r = _run([SYSTEMCTL, "is-active", service])
+        else:
+            r = _run_remote(host, f"systemctl is-active {service}")
         active = r.stdout.strip() == "active"
         if active:
-            return CheckResult(service, "OK", "active")
+            return CheckResult(qname, "OK", "active")
         # Захватим последние строки лога для контекста алерта
-        log = _run(["journalctl", "-u", service, "-n", "5", "--no-pager"])
+        if host is None:
+            log = _run(["journalctl", "-u", service, "-n", "5", "--no-pager"])
+            detail = log.stdout.strip()[-500:]
+        else:
+            log = _run_remote(host, f"journalctl -u {service} -n 5 --no-pager")
+            detail = log.stdout.strip()[-500:]
         return CheckResult(
-            service,
+            qname,
             "FAIL",
             f"systemctl is-active вернул: {r.stdout.strip() or 'unknown'}",
-            log.stdout.strip()[-500:],
+            detail,
         )
     except Exception as e:  # noqa: BLE001
-        return CheckResult(service, "FAIL", f"check error: {e}")
+        return CheckResult(qname, "FAIL", f"check error: {e}")
 
 
 def check_docker_container(name: str) -> CheckResult:
@@ -166,18 +240,58 @@ def check_peers_consistency() -> CheckResult:
         return CheckResult(name, "FAIL", f"check error: {e}")
 
 
-def check_disk(path: str = "/") -> CheckResult:
-    name = f"disk_{path}"
+def check_disk(path: str = "/", host: Optional[str] = None) -> CheckResult:
+    qname = _qualify(f"disk_{path}", host)
     try:
-        s = os.statvfs(path)
-        used_pct = (1 - s.f_bavail / s.f_blocks) * 100
-        free_gb = s.f_bavail * s.f_frsize / 1024**3
+        if host is None:
+            s = os.statvfs(path)
+            used_pct = (1 - s.f_bavail / s.f_blocks) * 100
+            free_gb = s.f_bavail * s.f_frsize / 1024**3
+        else:
+            # Парсим `df -P <path>` (вторая строка, 5-я колонка = "NN%",
+            # 4-я колонка = available в 1024-блоках).
+            r = _run_remote(host, f"df -P {path}")
+            if r.returncode != 0:
+                return CheckResult(qname, "FAIL", f"df failed: {r.stderr.strip()[:200]}")
+            lines = [ln for ln in r.stdout.strip().split("\n") if ln.strip()]
+            if len(lines) < 2:
+                return CheckResult(qname, "FAIL", f"df output unexpected: {r.stdout.strip()[:200]}")
+            parts = lines[1].split()
+            if len(parts) < 5:
+                return CheckResult(qname, "FAIL", f"df row unparseable: {lines[1][:200]}")
+            used_pct = float(parts[4].rstrip("%"))
+            free_gb = int(parts[3]) / 1024 / 1024  # 1K-blocks → GB
         msg = f"used={used_pct:.1f}% free={free_gb:.1f}GB"
         if used_pct > DISK_THRESHOLD_PCT:
-            return CheckResult(name, "FAIL", f"диск > {DISK_THRESHOLD_PCT}% ({msg})", msg)
-        return CheckResult(name, "OK", msg)
+            return CheckResult(qname, "FAIL", f"диск > {DISK_THRESHOLD_PCT}% ({msg})", msg)
+        return CheckResult(qname, "OK", msg)
     except Exception as e:  # noqa: BLE001
-        return CheckResult(name, "FAIL", f"check error: {e}")
+        return CheckResult(qname, "FAIL", f"check error: {e}")
+
+
+def check_port_listening(port: int, proto: str, host: Optional[str] = None) -> CheckResult:
+    """
+    Проверка LISTEN (TCP) / UNCONN (UDP) на нужном порту.
+    Локально — `ss` без SSH; удалённо — `ss` через SSH-обёртку.
+    Считаем OK, если вывод `ss -H{tu}nl 'sport = :PORT'` непустой.
+    """
+    qname = _qualify(f"port_{port}_{proto}", host)
+    flag = "tnl" if proto == "tcp" else "unl"
+    cmd_str = f"ss -H{flag} 'sport = :{port}'"
+    try:
+        if host is None:
+            r = _run(["sh", "-c", cmd_str])
+        else:
+            r = _run_remote(host, cmd_str)
+        if r.returncode != 0:
+            return CheckResult(qname, "FAIL", f"ss failed: {r.stderr.strip()[:200]}")
+        output = r.stdout.strip()
+        if not output:
+            return CheckResult(qname, "FAIL", f"no listener on :{port}/{proto}")
+        first_line = output.split("\n", 1)[0][:120]
+        return CheckResult(qname, "OK", f":{port}/{proto} listening", first_line)
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(qname, "FAIL", f"check error: {e}")
 
 
 def check_memory_swap() -> CheckResult:
@@ -242,6 +356,43 @@ def check_https_endpoint() -> CheckResult:
         return CheckResult(name, "FAIL", f"connection error: {e}")
 
 
+# === Remote: reachable-gate ===
+
+def check_remote_reachable(host: str) -> CheckResult:
+    """
+    SSH echo с одним retry. Если оба попытки fail — gate отключает остальные
+    проверки этого хоста (см. run_all_checks). Это критично: один сетевой
+    провал не должен генерить каскад из 5+ алертов.
+    """
+    qname = f"{host}:reachable"
+    last_err = ""
+    for attempt in (1, 2):
+        try:
+            r = _run_remote(host, "echo ok", timeout=10)
+            if r.returncode == 0 and r.stdout.strip() == "ok":
+                return CheckResult(qname, "OK", "ssh reachable")
+            last_err = (r.stderr.strip() or r.stdout.strip())[:200]
+        except subprocess.TimeoutExpired:
+            last_err = "timeout"
+        except Exception as e:  # noqa: BLE001
+            last_err = str(e)[:200]
+        if attempt == 1:
+            time.sleep(2)
+    return CheckResult(qname, "FAIL", f"ssh unreachable: {last_err}")
+
+
+def execute_remote_check(host: str, spec: Tuple) -> CheckResult:
+    """Диспетчер remote-проверок по короткой tuple-спецификации."""
+    kind = spec[0]
+    if kind == "systemd":
+        return check_systemd_service(spec[1], host=host)
+    if kind == "port":
+        return check_port_listening(spec[1], spec[2], host=host)
+    if kind == "disk":
+        return check_disk(spec[1], host=host)
+    return CheckResult(f"{host}:unknown", "FAIL", f"unknown check kind: {kind}")
+
+
 # === Запуск всех проверок ===
 
 SYSTEMD_SERVICES = ["vpn-bot.service", "vpn-web.service", "nginx.service", "xray.service"]
@@ -255,6 +406,7 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results: List[CheckResult] = []
     state_extras: Dict = {}
 
+    # --- Локальные (Fornex) ---
     for svc in SYSTEMD_SERVICES:
         results.append(check_systemd_service(svc))
     for ctn in DOCKER_CONTAINERS:
@@ -270,6 +422,20 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results.append(check_memory_swap())
     results.append(check_le_cert())
     results.append(check_https_endpoint())
+
+    # --- Remote (main, yc) с gate ---
+    for host in REMOTE_HOSTS:
+        reach = check_remote_reachable(host)
+        results.append(reach)
+        if reach.status != "OK":
+            # Gate: остальные проверки этого хоста не запускаем.
+            # State их прошлый статус сохранится без изменений — на
+            # следующем cron, когда SSH восстановится, проверки пойдут
+            # обычным путём и пришлют RESOLVE если что-то было FAIL.
+            logger.warning("Skipping %s remote checks: %s", host, reach.message)
+            continue
+        for spec in REMOTE_CHECK_PLAN[host]:
+            results.append(execute_remote_check(host, spec))
 
     return results, state_extras
 
@@ -336,7 +502,7 @@ def format_resolve_alert(r: CheckResult, prev_changed_at: Optional[str]) -> str:
 # === Main ===
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Health-check для eu1")
+    parser = argparse.ArgumentParser(description="Health-check для VPN-инфраструктуры (Fornex + main + yc)")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -353,7 +519,7 @@ def main() -> int:
     print("=" * 70)
     for r in results:
         icon = "🟢" if r.status == "OK" else "🔴"
-        print(f"{icon} {r.name:<28} {r.status:<6} {r.message}")
+        print(f"{icon} {r.name:<32} {r.status:<6} {r.message}")
         if r.status == "FAIL" and r.detail:
             for line in r.detail.split("\n"):
                 print(f"     {line}")
@@ -371,7 +537,9 @@ def main() -> int:
         return 1
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    new_state: Dict = {}
+    # Стартуем с прежнего state — для skipped-проверок (gate-FAIL) их
+    # прошлый статус сохранится без изменений.
+    new_state: Dict = {k: v for k, v in state.items() if isinstance(v, dict)}
     alerts: List[tuple[str, CheckResult, Optional[str]]] = []
 
     for r in results:

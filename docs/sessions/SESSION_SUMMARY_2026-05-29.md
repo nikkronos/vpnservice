@@ -454,3 +454,51 @@ Sh4gHaXonhu4N11D…  allowed_ips=10.8.1.1/32  endpoint=94.19.223.132:60636
 ### Восстановление окружения у владельца
 
 Параллельно владелец установил Git for Windows (был удалён). После установки `git`/`bash` снова доступны в моём окружении, коммиты пошли.
+
+---
+
+## Дополнение (поздний вечер 2026-05-29) — Cross-server health-check
+
+Закрывает пункт «Расширить health-check на main + yc» (Приоритет 2). Подтверждённый план — `scripts/health_check.py` теперь делает 22 проверки вместо 12.
+
+### Покрытие
+
+| Хост | Кол-во | Что проверяется |
+|---|---|---|
+| **Fornex** (локально) | 12 | как было: services, containers, AWG peer-count, peers consistency, диск, swap, LE-cert, HTTPS |
+| **main** (Timeweb, через `ssh -i id_ed25519_main root@…`) | 6 | reachable, `xray.service`, `wg-quick@wg0.service`, `:443/tcp`, `:51820/udp`, диск `/` |
+| **yc** (Yandex Cloud, через `ssh yc` jump-alias на Fornex) | 4 | reachable, `xray.service`, `:443/tcp`, диск `/` |
+
+### Дизайн
+
+- Один скрипт, один cron — `*/15 * * * *` на Fornex, как и раньше. Никаких дублирующих cron'ов на main/yc, никаких `BOT_TOKEN` на удалённых хостах.
+- **Reachable-gate**: каждый удалённый хост сначала пингуется через `ssh "echo ok"` (timeout 5s + один retry с паузой 2s). Если gate FAIL — остальные проверки этого хоста **не запускаются и в state не пишутся**. Это значит, что один сетевой провал генерит ровно 1 алерт (`<host>:reachable`), а не каскад из 5+ алертов, и не вызывает ложных RESOLVE-сообщений когда SSH восстановится.
+- **State-namespace**: remote-ключи префиксованы `<host>:` (`yc:xray.service`, `main:port_443_tcp`). Локальные имена не меняются — backward compat, baseline state.json не нужно мигрировать.
+- **Парсинг без awk**: `df -P /` и `ss -H{tu}nl 'sport = :PORT'` отдаются сыро, парсятся в Python — три уровня escaping (SSH→shell→awk) надёжно не сделать.
+- **SSH-опции**: `ConnectTimeout=5`, `BatchMode=yes` (никаких prompt'ов на пароль/yes-no), `StrictHostKeyChecking=accept-new` (защита от silent-обновления при подмене ключа), `ServerAliveInterval=3 / ServerAliveCountMax=1` (быстрый детект мёртвого соединения).
+- **Что НЕ делаю сознательно** (вынесено в коде как явный выбор):
+  - HTTPS endpoint test для main/yc — это REALITY-camouflage (SNI=cloud.mail.ru/www.microsoft.com), HEAD-запросом не пробьётся. Listening port + `is-active` = достаточный сигнал.
+  - CPU/RAM/swap/LE-cert на remote — observability, не alerting.
+  - Клиентский тест WG/REALITY — overengineering.
+  - Auto-recovery — высокий риск, отдельный разговор.
+
+### Тестирование (на yc, T2/МТС/Билайн)
+
+| Шаг | Команда | Результат |
+|---|---|---|
+| Baseline (production-прогон с новыми ключами) | `python scripts/health_check.py` | 22 OK, 0 alerts (новые ключи default OK) |
+| FAIL-симуляция | `ssh yc 'sudo systemctl stop xray'` + forced run | 2 алерта в TG: `🔴 yc:xray.service`, `🔴 yc:port_443_tcp` (xray слушал 443) |
+| RESOLVE | `ssh yc 'sudo systemctl start xray'` + forced run | 2 алерта: `🟢 yc:xray.service`, `🟢 yc:port_443_tcp` с downtime |
+| Простой xray на yc | ~22 секунды | REALITY-сессии переустановились без жалоб |
+
+### Известное ограничение
+
+Если падает **сам Fornex** (хост целиком) — алерт уйти не сможет, потому что некому. Это та же дыра, которая была до этой задачи; лечится только внешним uptime-монитором (UptimeRobot, Healthchecks.io). Отдельная задача, вне scope.
+
+### Файлы
+
+- `scripts/health_check.py` — переписан (~430 строк, +~150 vs предыдущей версии)
+- `CLAUDE.md` — в правиле №10 описание 22 проверок с разбивкой по хостам
+- `ROADMAP_VPN.md` — «Расширить health-check на main + yc» → DONE
+- State `/var/lib/vpn-health/state.json` — расширился ключами `main:*` и `yc:*` (не в git)
+

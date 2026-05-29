@@ -1,6 +1,6 @@
 # ROADMAP_VPN
 
-> Последнее обновление: 2026-05-29 (ночь)
+> Последнее обновление: 2026-05-29 (поздний вечер)
 > Текущее состояние: рабочий MVP, бот переехал на `@vpnkronos_bot`, **`ONBOARDING_ENABLED=1` и `ENFORCEMENT_ENABLED=1` активны** (флаги выставлены 2026-05-28). Все каналы покрыты (Yota/Мегафон/Т2/МТС/Билайн). Donation-flow + Stars (oneshot + Subscription) работают параллельно. Support Variant B (двусторонний) активен. Скорость: AWG ~84 Мбит/с, упор в путь RU→DE. Свежая сессия: `docs/sessions/SESSION_SUMMARY_2026-05-29.md`.
 
 ---
@@ -337,12 +337,7 @@
 - [x] ~~**Бот: Error-103 fallback**~~ — **СДЕЛАНО 2026-05-21**
   - Добавлен блок в `docs/bot-instruction-texts/instruction_windows_short.txt`: задиспетчерь Amnezia*, запуск от админа, переустановка либо Hiddify.
 
-- [ ] **Расширить health-check на main + yc** (заметили 2026-05-29 при апгрейде всех 3 серверов):
-  - Сейчас `scripts/health_check.py` бежит только на Fornex. Если main (Timeweb, Xray для Мегафон/Yota) или yc (Yandex Cloud, Xray для T2/МТС/Билайн) упадут — узнаем только по жалобам юзеров.
-  - **Варианты:**
-    1. **Cross-server from Fornex** — `health_check.py` через SSH ходит на main/yc (у нас есть `ssh fornex` → `ssh -i ... main` и `ssh yc` jump), запускает там минимальную проверку (`systemctl is-active xray`, `ss -tlnp :443`, диск, ядро). Плюс: одна точка алертов, не дублируем cron. Минус: если упадёт Fornex, мы не узнаем что main/yc упал тоже.
-    2. **Self-hosted на каждом сервере** — копия `health_check.py` на main и yc, свой cron, свой state-файл. Шлёт TG-алерт напрямую через `BOT_TOKEN` (его придётся раздать на все 3 сервера). Плюс: независимые алерты, выживут падение Fornex. Минус: дублирование, нужны env_vars на каждом сервере.
-  - Рекомендую **вариант 1** (cross-server). Объём: ~30 мин.
+- [x] ~~**Расширить health-check на main + yc**~~ — **DONE 2026-05-29** (вечер). Выбран вариант 1 (cross-server из Fornex через SSH jump). `scripts/health_check.py` теперь делает 22 проверки: 12 локальных (как было) + 6 на main + 4 на yc. Покрытие: на main — xray, wg-quick@wg0, :443/tcp, :51820/udp, диск; на yc — xray, :443/tcp, диск. Reachable-gate: при FAIL `<host>:reachable` остальные проверки этого хоста скипаются, их state не трогается — один сетевой провал не даёт каскад из 5+ алертов. Remote state-ключи префиксованы `<host>:` (например `yc:xray.service`). Тест FAIL→RESOLVE прошёл на yc (xray stop/start, 2 алерта + 2 resolve, downtime ~30 сек, T2/МТС/Билайн REALITY-сессии переустановились без жалоб). Ограничение: если падает сам Fornex — алерт уйти не сможет (та же дыра что и до этого, лечится только external uptime monitor).
 
 - [ ] **Персональные UUIDs для main REALITY (Мегафон/Yota)** (предложено 2026-05-21):
   - Сейчас на main REALITY один универсальный UUID для всех Мегафон/Yota юзеров. Для биллинга/трекинга — нужно перейти на per-user UUID (как сейчас на eu1 REALITY).
