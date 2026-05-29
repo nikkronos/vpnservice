@@ -20,6 +20,33 @@ git log --oneline -3
 
 ---
 
+## Обслуживание серверов / диск (важно для агента)
+
+**Что НЕ трогать на серверах** (личные проекты владельца, не имеют отношения к VPN-сервису):
+
+| Сервер | Путь | Что это |
+|--------|------|---------|
+| **main** (Timeweb) | `/root/transcribator/` (с `.venv`) | Личный проект владельца — транскрибация |
+| **main** | `/root/.cache/huggingface/` | HuggingFace модели для transcribator |
+| **Fornex** | `/home/hamster26/` | Личные проекты владельца (`bot/`, `userbot/`) |
+
+**Что можно чистить безопасно** (если диск > 80%):
+- `journalctl --vacuum-size=300M` — лимит уже стоит 500M (`/etc/systemd/journald.conf` `SystemMaxUse=500M`), но vacuum можно делать вручную.
+- `apt clean` — кеш .deb пакетов.
+- `docker system prune -af --volumes` — **ТОЛЬКО** после `docker ps` для проверки, что активные контейнеры (`amnezia-awg2`, `mtproxy-faketls`) не попадут под удаление.
+- `/opt/vpnservice/web/{templates,static}/*.bak.*` — мои deploy-бэкапы (есть в git).
+- `/root/awg-orphans-*.log` — бэкапы перед удалением peers (мелкие, обычно оставляю).
+
+**Что ВСЕГДА НЕ трогать** на любом сервере:
+- `/opt/amnezia/` — конфиги AWG, **PSK в `/opt/amnezia/awg/wireguard_psk.key`** (один общий для всех peers интерфейса; терять = терять все клиентские конфиги).
+- `/opt/vpnservice/data/` — SQLite БД, peers.json.
+- `/opt/vpnservice/env_vars.txt`, `/root/.secrets/` — секреты.
+- AWG peer-ы в runtime — см. memory `feedback_no_delete_runtime_blind`. Признаки жизни (endpoint/traffic/handshake) важнее консистентности с БД.
+
+**Health-check (cron `*/15`)** алертит при `диск > 85%`. Когда придёт алерт — действовать по плану выше.
+
+---
+
 ## Инфраструктура (май 2026)
 
 | Сервер | IP | Что на нём |

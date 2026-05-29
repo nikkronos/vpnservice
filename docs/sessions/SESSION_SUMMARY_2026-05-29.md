@@ -350,3 +350,60 @@ Sh4gHaXonhu4N11D…  allowed_ips=10.8.1.1/32  endpoint=94.19.223.132:60636
 - `CLAUDE.md` — 5-й cron + 5-й скрипт в списке
 - `ROADMAP_VPN.md` — «Мониторинг и алерты» в P3 переведено в DONE
 - `docs/sessions/SESSION_SUMMARY_2026-05-29.md` — это дополнение
+
+---
+
+## Дополнение (вечер 2026-05-29) — Чистка дисков на обоих серверах
+
+После запуска health-check выяснилось, что **Fornex 73%** и **main 71%** — близко к порогу алерта 85%. Сделали разовую чистку + поставили постоянный лимит journal.
+
+### Fornex (eu1)
+
+| Источник | Освобождено |
+|---|---|
+| Docker prune (Remnawave-наследие: backend/node/subscription-page + postgres/nginx/valkey + старый telegrammessenger/proxy) | **~2.8 GB** (по `df`; docker сам отрапортовал 745 MB — разница из-за overlay shared blobs) |
+| `journalctl --vacuum-size=300M` (было 1.9 GB) | **1.6 GB** |
+| `apt clean` (309 MB → 20 KB) | 300 MB |
+| Мои deploy `*.bak.*` (11 файлов, 312 KB) | 300 KB |
+| **Итого** | **~5.3 GB** |
+
+**Результат:** 14 GB used (73%) → **8.7 GB used (47%)**.
+
+### Main (Timeweb)
+
+| Источник | Освобождено |
+|---|---|
+| `journalctl --vacuum-size=300M` (было 1.4 GB) | **1.2 GB** |
+| `apt clean` (161 MB → 28 KB) | 161 MB |
+| `docker rmi nineseconds/mtg:2` (остаток от тестовой попытки MTProxy на main, реально MTProxy на Fornex) | 13 MB |
+| `rm -rf /root/.vscode-server` (владелец подтвердил что не использует) | **937 MB** |
+| **Итого** | **~2.4 GB** |
+
+**Результат:** 11 GB used (71%) → **8.1 GB used (55%)**.
+
+### Превентивная мера — journald лимит на обоих
+
+В `/etc/systemd/journald.conf` поставлено `SystemMaxUse=500M` + `systemctl restart systemd-journald`. Теперь journal не разрастётся снова, будет сам себя обрезать.
+
+### Что НЕ трогалось (личные проекты владельца)
+
+| Сервер | Путь |
+|---|---|
+| main | `/root/transcribator/` (с `.venv`) + `/root/.cache/huggingface/` (модели) |
+| Fornex | `/home/hamster26/` (`bot/`, `userbot/`) |
+
+Эти пути теперь зафиксированы в `CLAUDE.md` в новом разделе **«Обслуживание серверов / диск»** — будущий агент не должен их трогать.
+
+### Изменения в CLAUDE.md
+
+Добавлен новый раздел **в видном месте** (сразу после `## Старт сессии`, перед `## Инфраструктура`) — «Обслуживание серверов / диск»:
+- Что НЕ трогать (личные проекты + критичные конфиги/PSK).
+- Что можно чистить безопасно (с условиями).
+- Health-check предупреждает при `disk > 85%`.
+
+### Финальная картина после всех правок
+
+| Сервер | Disk used | Free | Health check |
+|---|---|---|---|
+| Fornex (20 GB) | 8.7 GB (47%) | 10 GB | 🟢 12/12 OK |
+| Main (15 GB) | 8.1 GB (55%) | 6.7 GB | health-check только на Fornex; на main отдельно не делали |
