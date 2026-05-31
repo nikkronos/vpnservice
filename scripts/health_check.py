@@ -358,41 +358,155 @@ def check_https_endpoint() -> CheckResult:
         return CheckResult(name, "FAIL", f"connection error: {e}")
 
 
-# === Remote: reachable-gate ===
+# === Remote: batch-выполнение всех проверок одним SSH-вызовом ===
+#
+# Раньше каждая remote-проверка делала отдельный ssh-коннект. На main это
+# давало ложные FAIL'ы (Connection closed by ... port 22) — провайдер
+# rate-limit'ит входящие SSH-соединения. Один batch-вызов = один коннект =
+# нет rate-limit.
 
-def check_remote_reachable(host: str) -> CheckResult:
+def _spec_to_shell_cmd(spec: Tuple) -> str:
+    """Преобразует tuple-спецификацию проверки в shell-команду для batch."""
+    kind = spec[0]
+    if kind == "systemd":
+        return f"systemctl is-active {spec[1]}"
+    if kind == "port":
+        flag = "tnl" if spec[2] == "tcp" else "unl"
+        return f"ss -H{flag} 'sport = :{spec[1]}'"
+    if kind == "disk":
+        return f"df -P {spec[1]}"
+    return "true"
+
+
+def _build_batch_script(plan: List[Tuple]) -> str:
     """
-    SSH echo с одним retry. Если оба попытки fail — gate отключает остальные
-    проверки этого хоста (см. run_all_checks). Это критично: один сетевой
-    провал не должен генерить каскад из 5+ алертов.
+    Формирует один shell-скрипт со всеми проверками + маркерами для парсинга.
+    Первая команда — reachable (`echo ok`), служит и gate'ом и timing'ом.
     """
-    qname = f"{host}:reachable"
+    parts = [
+        # Reachable — индекс 0; echo всегда успешный, факт что мы получили
+        # его вывод подтверждает что весь batch выполнился.
+        "echo '<<<BEGIN:0>>>'; echo ok; echo \"<<<END:0:$?>>>\""
+    ]
+    for i, spec in enumerate(plan, start=1):
+        cmd = _spec_to_shell_cmd(spec)
+        parts.append(f"echo '<<<BEGIN:{i}>>>'; {cmd}; echo \"<<<END:{i}:$?>>>\"")
+    return "; ".join(parts)
+
+
+def _parse_batch_output(output: str, count: int) -> List[Tuple[int, str]]:
+    """Возвращает [(rc, output), ...] для каждой команды (count = len(plan) + 1)."""
+    results: List[Tuple[int, str]] = []
+    for i in range(count):
+        begin_marker = f"<<<BEGIN:{i}>>>\n"
+        end_prefix = f"<<<END:{i}:"
+        try:
+            start_pos = output.index(begin_marker) + len(begin_marker)
+            end_pos = output.index(end_prefix, start_pos)
+            content = output[start_pos:end_pos].rstrip("\n")
+            rc_start = end_pos + len(end_prefix)
+            rc_end = output.index(">>>", rc_start)
+            rc = int(output[rc_start:rc_end])
+            results.append((rc, content))
+        except (ValueError, IndexError):
+            results.append((-1, "(batch marker missing — partial ssh output)"))
+    return results
+
+
+def _spec_to_check_result(host: str, spec: Tuple, rc: int, output: str) -> CheckResult:
+    """
+    Конвертирует output batch-команды в CheckResult с применением той же логики
+    что в одиночных check_systemd_service / check_port_listening / check_disk.
+    """
+    kind = spec[0]
+    output = output.strip()
+
+    if kind == "systemd":
+        qname = _qualify(spec[1], host)
+        if rc == -1:
+            return CheckResult(qname, "FAIL", "batch missing")
+        active = output == "active"
+        if active:
+            return CheckResult(qname, "OK", "active")
+        return CheckResult(
+            qname, "FAIL",
+            f"systemctl is-active вернул: {output or 'unknown'}",
+        )
+
+    if kind == "port":
+        port, proto = spec[1], spec[2]
+        qname = _qualify(f"port_{port}_{proto}", host)
+        if rc == -1:
+            return CheckResult(qname, "FAIL", "batch missing")
+        if rc != 0 and not output:
+            return CheckResult(qname, "FAIL", f"ss failed (rc={rc})")
+        if not output:
+            return CheckResult(qname, "FAIL", f"no listener on :{port}/{proto}")
+        first_line = output.split("\n", 1)[0][:120]
+        return CheckResult(qname, "OK", f":{port}/{proto} listening", first_line)
+
+    if kind == "disk":
+        path = spec[1]
+        qname = _qualify(f"disk_{path}", host)
+        if rc == -1:
+            return CheckResult(qname, "FAIL", "batch missing")
+        if rc != 0:
+            return CheckResult(qname, "FAIL", f"df failed (rc={rc}): {output[:200]}")
+        lines = [ln for ln in output.split("\n") if ln.strip()]
+        if len(lines) < 2:
+            return CheckResult(qname, "FAIL", f"df output unexpected: {output[:200]}")
+        parts = lines[1].split()
+        if len(parts) < 5:
+            return CheckResult(qname, "FAIL", f"df row unparseable: {lines[1][:200]}")
+        try:
+            used_pct = float(parts[4].rstrip("%"))
+            free_gb = int(parts[3]) / 1024 / 1024
+        except (ValueError, IndexError):
+            return CheckResult(qname, "FAIL", f"df parse error: {lines[1][:200]}")
+        msg = f"used={used_pct:.1f}% free={free_gb:.1f}GB"
+        if used_pct > DISK_THRESHOLD_PCT:
+            return CheckResult(qname, "FAIL", f"диск > {DISK_THRESHOLD_PCT}% ({msg})", msg)
+        return CheckResult(qname, "OK", msg)
+
+    return CheckResult(f"{host}:unknown", "FAIL", f"unknown check kind: {kind}")
+
+
+def collect_remote_results(host: str, plan: List[Tuple]) -> List[CheckResult]:
+    """
+    Выполняет все проверки хоста ОДНИМ SSH-вызовом (batch), возвращает
+    [CheckResult(<host>:reachable), ...checks].
+
+    Если batch упал целиком (timeout / connection refused / любой ssh-уровень
+    failure) — возвращает только <host>:reachable FAIL, остальные проверки
+    НЕ возвращаются (gate-логика: их state не трогается, на следующем cron
+    когда SSH восстановится — пройдут как обычно).
+    """
+    reach_qname = f"{host}:reachable"
+    script = _build_batch_script(plan)
     last_err = ""
+    output = ""
     for attempt in (1, 2):
         try:
-            r = _run_remote(host, "echo ok", timeout=10)
-            if r.returncode == 0 and r.stdout.strip() == "ok":
-                return CheckResult(qname, "OK", "ssh reachable")
-            last_err = (r.stderr.strip() or r.stdout.strip())[:200]
+            r = _run_remote(host, script, timeout=30)
+            output = r.stdout
+            # Считаем batch успешным если на выходе есть хотя бы reachable-маркер.
+            # rc от ssh при этом может быть != 0 (если одна из проверок упала),
+            # это нормально — главное что мы получили output.
+            if "<<<BEGIN:0>>>" in output and "<<<END:0:" in output:
+                results: List[CheckResult] = [CheckResult(reach_qname, "OK", "ssh reachable")]
+                parsed = _parse_batch_output(output, count=len(plan) + 1)
+                for spec, (rc, out) in zip(plan, parsed[1:]):
+                    results.append(_spec_to_check_result(host, spec, rc, out))
+                return results
+            # Output есть, но нет наших маркеров — частичный/обрезанный.
+            last_err = (r.stderr.strip() or output.strip() or "no markers in output")[:200]
         except subprocess.TimeoutExpired:
-            last_err = "timeout"
+            last_err = f"timeout after {30}s"
         except Exception as e:  # noqa: BLE001
             last_err = str(e)[:200]
         if attempt == 1:
             time.sleep(2)
-    return CheckResult(qname, "FAIL", f"ssh unreachable: {last_err}")
-
-
-def execute_remote_check(host: str, spec: Tuple) -> CheckResult:
-    """Диспетчер remote-проверок по короткой tuple-спецификации."""
-    kind = spec[0]
-    if kind == "systemd":
-        return check_systemd_service(spec[1], host=host)
-    if kind == "port":
-        return check_port_listening(spec[1], spec[2], host=host)
-    if kind == "disk":
-        return check_disk(spec[1], host=host)
-    return CheckResult(f"{host}:unknown", "FAIL", f"unknown check kind: {kind}")
+    return [CheckResult(reach_qname, "FAIL", f"ssh unreachable: {last_err}")]
 
 
 # === Запуск всех проверок ===
@@ -425,19 +539,18 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results.append(check_le_cert())
     results.append(check_https_endpoint())
 
-    # --- Remote (main, yc) с gate ---
+    # --- Remote (main, yc): batch-вызов на хост, gate по reachable ---
+    # Все проверки одного хоста выполняются ОДНИМ SSH-вызовом через
+    # collect_remote_results. Это решает проблему «Connection closed by ...
+    # port 22» которая давала ложные FAIL'ы на 5-6-м SSH-коннекте подряд
+    # (вероятно rate-limit на стороне провайдера main).
     for host in REMOTE_HOSTS:
-        reach = check_remote_reachable(host)
-        results.append(reach)
-        if reach.status != "OK":
-            # Gate: остальные проверки этого хоста не запускаем.
-            # State их прошлый статус сохранится без изменений — на
-            # следующем cron, когда SSH восстановится, проверки пойдут
-            # обычным путём и пришлют RESOLVE если что-то было FAIL.
-            logger.warning("Skipping %s remote checks: %s", host, reach.message)
-            continue
-        for spec in REMOTE_CHECK_PLAN[host]:
-            results.append(execute_remote_check(host, spec))
+        host_results = collect_remote_results(host, REMOTE_CHECK_PLAN[host])
+        results.extend(host_results)
+        # Если reachable FAIL — collect_remote_results вернул только один
+        # элемент (gate), остальные проверки скипнуты автоматически.
+        if len(host_results) == 1 and host_results[0].status == "FAIL":
+            logger.warning("Skipping %s remote checks: %s", host, host_results[0].message)
 
     return results, state_extras
 
