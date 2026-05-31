@@ -166,6 +166,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_proxy_column()
     _migrate_add_vless_column()
     _migrate_add_vless_server_traffic_table()
+    _migrate_add_traffic_snapshots_table()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
@@ -205,6 +206,43 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_traffic_snapshots_table() -> None:
+    """
+    Создаёт таблицу traffic_snapshots для исторических снимков AmneziaWG-трафика
+    (`scripts/traffic_accounting.py` пишет каждые 5 мин). Нужна для расследований
+    типа «в N мск был лаг — кто качал».
+
+    `traffic_accounting` хранит только cumulative-snapshot (последнее значение
+    per pubkey), без истории — реконструировать пики по нему нельзя. Эта таблица
+    хранит timeseries: для каждого пика можно посчитать delta (rx_t1 - rx_t0)
+    per юзер и найти top-нагружающих.
+
+    Только AWG (per-user pinpoint возможен через telegram_id привязку pubkey).
+    VLESS использует общие UUIDs — per-user всё равно невозможно;
+    per-server VLESS-history можно достать из journalctl `vless-summary`.
+
+    Rolling-delete: >14 дней удаляется автоматически при каждой записи
+    (см. db_record_traffic_snapshot). Объём: ~16 peers × 12 snapshots/час
+    × 24 ч × 14 дней ≈ 65k строк (мизер для SQLite).
+    """
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS traffic_snapshots (
+                ts          TEXT NOT NULL,
+                public_key  TEXT NOT NULL,
+                telegram_id INTEGER,
+                rx          INTEGER NOT NULL,
+                tx          INTEGER NOT NULL,
+                PRIMARY KEY (ts, public_key)
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_traffic_snapshots_ts ON traffic_snapshots(ts)"
+        )
 
 
 def _migrate_add_vless_server_traffic_table() -> None:
@@ -962,6 +1000,100 @@ def db_get_vless_server_lifetime() -> Dict[str, Dict]:
             tx = r["tx"] or 0
             out[r["server_id"]] = {"rx": rx, "tx": tx, "total": rx + tx}
         return out
+
+
+def db_record_traffic_snapshot(samples: List[Dict]) -> None:
+    """
+    Сохраняет snapshot текущих rx/tx значений AmneziaWG-peer'ов.
+    Вызывается каждые 5 мин из traffic_accounting.py после db_accumulate_traffic.
+
+    samples — тот же формат что и в db_accumulate_traffic:
+    [{"public_key": str, "telegram_id": int|None, "rx": int, "tx": int}, ...].
+
+    Auto-cleanup: удаляет записи старше 14 дней при каждом вызове (cheap WHERE
+    по индексу idx_traffic_snapshots_ts). 65k строк за 14 дней — SQLite это
+    не нагружает.
+    """
+    _ensure_init()
+    if not samples:
+        return
+    # timezone-aware UTC (Python 3.12+ deprecates utcnow); храним как
+    # naive string в SQLite-формате, как и весь остальной datetime в БД.
+    from datetime import timezone as _tz
+    ts = datetime.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with _conn() as con:
+        for s in samples:
+            pk = (s.get("public_key") or "").strip()
+            if not pk:
+                continue
+            con.execute(
+                """
+                INSERT OR REPLACE INTO traffic_snapshots
+                    (ts, public_key, telegram_id, rx, tx)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (ts, pk, s.get("telegram_id"), int(s.get("rx") or 0), int(s.get("tx") or 0)),
+            )
+        con.execute(
+            "DELETE FROM traffic_snapshots WHERE ts < datetime('now', '-14 days')"
+        )
+
+
+def db_query_traffic_delta(start_ts: str, end_ts: str) -> List[Dict]:
+    """
+    Возвращает delta-трафик per public_key за окно [start_ts, end_ts].
+    delta = rx/tx в последней записи окна минус первая запись окна, per pubkey.
+
+    Отрицательные значения = был reset (рестарт контейнера/перегенерация peer'а)
+    — в этом случае возвращаем последнюю запись как нижнюю оценку прироста.
+
+    Возвращает list of dict, отсортированный по убыванию (delta_rx + delta_tx).
+    Полезно для «кто качал в окне X-Y».
+    """
+    _ensure_init()
+    with _conn() as con:
+        # Получаем для каждого peer'а первое и последнее значения в окне.
+        rows = con.execute(
+            """
+            SELECT public_key, telegram_id,
+                   MIN(ts) AS first_ts, MAX(ts) AS last_ts,
+                   COUNT(*) AS samples
+            FROM traffic_snapshots
+            WHERE ts >= ? AND ts <= ?
+            GROUP BY public_key
+            """,
+            (start_ts, end_ts),
+        ).fetchall()
+
+        results = []
+        for r in rows:
+            first = con.execute(
+                "SELECT rx, tx FROM traffic_snapshots WHERE ts = ? AND public_key = ?",
+                (r["first_ts"], r["public_key"]),
+            ).fetchone()
+            last = con.execute(
+                "SELECT rx, tx FROM traffic_snapshots WHERE ts = ? AND public_key = ?",
+                (r["last_ts"], r["public_key"]),
+            ).fetchone()
+            if not first or not last:
+                continue
+            # reset-aware: если last < first, считаем что был reset и
+            # delta = last (что прокачано после reset'а).
+            delta_rx = last["rx"] - first["rx"] if last["rx"] >= first["rx"] else last["rx"]
+            delta_tx = last["tx"] - first["tx"] if last["tx"] >= first["tx"] else last["tx"]
+            results.append({
+                "public_key": r["public_key"],
+                "telegram_id": r["telegram_id"],
+                "samples": r["samples"],
+                "first_ts": r["first_ts"],
+                "last_ts": r["last_ts"],
+                "delta_rx": delta_rx,
+                "delta_tx": delta_tx,
+                "delta_total": delta_rx + delta_tx,
+            })
+
+        results.sort(key=lambda x: x["delta_total"], reverse=True)
+        return results
 
 
 def db_get_lifetime_by_user() -> Dict[int, Dict]:

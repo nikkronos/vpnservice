@@ -117,6 +117,7 @@ scripts/
   health_check.py       — 22 проверки инфры (Fornex local + main/yc через SSH) → TG-алерты владельцу (cron */15)
   vless_summary_accounting.py — per-server VLESS lifetime через Xray stats API (cron */5)
   patch_xray_stats.py   — идемпотентный патч Xray config: добавляет stats/api блоки + теги inbound'ов
+  traffic_diagnosis.py  — кто качал в окне (read-only диагностика по traffic_snapshots): `python scripts/traffic_diagnosis.py --last 1h` или `python scripts/traffic_diagnosis.py 2026-05-30 17:00 2026-05-30 18:00` (UTC)
   peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
 ```
 
@@ -241,7 +242,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 9.2. **Flask :5001 биндится на 127.0.0.1** — снаружи закрыт. Доступ только через nginx :8443 с TLS. Для отладки локально можно переопределить `FLASK_HOST=0.0.0.0`.
 10. **Cron на Fornex (root):**
     - `*/5 * * * *` `/opt/amnezia-save-conf.sh` — persist AWG peers (safety net).
-    - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime AmneziaWG-трафика per peer/user.
+    - `*/5 * * * *` `scripts/traffic_accounting.py` — lifetime AmneziaWG-трафика per peer/user. **Также пишет snapshots в `traffic_snapshots`** (timestamp + pubkey + rx/tx) — 14-дневная история для `scripts/traffic_diagnosis.py`.
     - `*/5 * * * *` `scripts/vless_summary_accounting.py` — lifetime VLESS-трафика per-server (eu1 локально + main/yc через SSH к Xray stats API на 127.0.0.1:10085). Пишет в таблицу `vless_server_traffic`, reset-aware.
     - `0 9 * * *` `scripts/expiry_reminder.py` — напоминания T-7/3/0 (12:00 МСК).
     - `0 */6 * * *` `scripts/sheets_sync_cron.py` — auto-sync Google Sheets (каждые 6 ч). Ручной триггер в боте «📊 Sync Google Sheets» остаётся как fallback.

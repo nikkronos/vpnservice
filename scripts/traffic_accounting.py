@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from bot.storage import get_all_peers
-from bot.database import db_accumulate_traffic, init_db
+from bot.database import db_accumulate_traffic, db_record_traffic_snapshot, init_db
 
 
 def _awg_dump() -> str:
@@ -72,6 +72,9 @@ def main() -> int:
             total_bytes_this_run += rx + tx
 
     db_accumulate_traffic(samples)
+    # Snapshot history для диагностики «кто качал в N мск» (14 дней rolling).
+    # См. db_record_traffic_snapshot + scripts/traffic_diagnosis.py.
+    db_record_traffic_snapshot(samples)
     # Видимая лог-строка — чтобы `journalctl -t traffic-accounting` не молчал
     # и было легко увидеть что cron жив и какое-то значение отщёлкивает.
     print(
