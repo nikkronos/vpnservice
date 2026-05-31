@@ -137,7 +137,7 @@ def _require_admin_auth(f):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if session.get("logged_in"):
-        return redirect(url_for("index"))
+        return redirect(url_for("admin_panel"))
     error = None
     if request.method == "POST":
         admin_secret = getattr(config, "admin_secret", None) if config else None
@@ -145,7 +145,7 @@ def login():
         password = request.form.get("password", "")
         if username == "admin" and admin_secret and password == admin_secret:
             session["logged_in"] = True
-            return redirect(url_for("index"))
+            return redirect(url_for("admin_panel"))
         error = "Неверный логин или пароль"
     return render_template("login.html", error=error)
 
@@ -384,9 +384,33 @@ def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 @app.route("/")
+def landing():
+    """
+    Публичный лендинг (Phase 3i — prerequisite для ЮKassa-модерации).
+    Залогиненный admin автоматически редиректится в /admin (удобство — букмарк).
+    Все остальные видят landing-страницу с описанием сервиса, ценой и контактами.
+    """
+    if session.get("logged_in"):
+        return redirect(url_for("admin_panel"))
+    return render_template("landing.html")
+
+
+@app.route("/oferta")
+def oferta():
+    """Публичный договор-оферта (для ЮKassa-модерации и юр. чистоты)."""
+    return render_template("oferta.html")
+
+
+@app.route("/contacts")
+def contacts():
+    """Публичная страница с реквизитами исполнителя."""
+    return render_template("contacts.html")
+
+
+@app.route("/admin")
 @_require_admin_auth
-def index():
-    """Главная страница с общей статистикой."""
+def admin_panel():
+    """Админ-панель с общей статистикой (раньше была на /)."""
     try:
         peers = get_all_peers()
         users = get_all_users()

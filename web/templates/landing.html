@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kronos — доступ к интернет-сервисам по подписке</title>
+    <meta name="description" content="Стабильный канал доступа к интернет-сервисам по подписке. Работает при любом операторе связи. 200 ₽ в месяц.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="/" class="nav-brand">
+            Kronos<span class="nav-brand-sub">подписка</span>
+        </a>
+        <div class="nav-links">
+            <a href="#pricing" class="nav-link">Тариф</a>
+            <a href="#how" class="nav-link">Как подключиться</a>
+            <a href="/oferta" class="nav-link">Оферта</a>
+            <a href="/contacts" class="nav-link">Контакты</a>
+            <a href="/recovery" class="nav-cta">Личный кабинет</a>
+        </div>
+    </div>
+</nav>
+
+<!-- ── Hero ── -->
+<div class="container">
+    <section class="hero" id="hero">
+        <h1>Доступ к интернет-сервисам по подписке — стабильный канал при любом операторе</h1>
+        <p class="hero-sub">
+            Подключение к интернет-ресурсам через защищённый канал.
+            Сервис работает при ограничениях операторов связи, на стационарном и мобильном интернете.
+            Подходит для повседневной работы, общения и развлечений.
+        </p>
+        <a href="/recovery" class="hero-cta">Войти в личный кабинет</a>
+        <a href="#how" class="hero-cta-secondary">Как это работает →</a>
+    </section>
+
+    <!-- ── Pricing ── -->
+    <section class="section" id="pricing">
+        <h2>Тариф</h2>
+        <div class="pricing-card">
+            <div class="pricing-amount">200&nbsp;₽</div>
+            <div class="pricing-period">в месяц · оплата вперёд</div>
+            <ul class="pricing-features">
+                <li>Безлимитный объём трафика</li>
+                <li>Несколько резервных каналов на случай блокировок</li>
+                <li>Подключение на ПК, iOS и Android</li>
+                <li>Один канал поддержки в Telegram</li>
+                <li>Возврат за неиспользованный период в любой момент</li>
+            </ul>
+            <a href="/recovery" class="hero-cta">Подключиться</a>
+        </div>
+    </section>
+
+    <!-- ── How it works ── -->
+    <section class="section" id="how">
+        <h2>Как подключиться</h2>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <h3>Регистрация по email</h3>
+                <p>Войдите в личный кабинет — на email придёт одноразовый код. Без сложных форм и обязательной привязки телефона.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <h3>Оплата подписки</h3>
+                <p>200 ₽ переводом через СБП или картой. После зачисления доступ открывается на месяц.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <h3>Подключение устройства</h3>
+                <p>В личном кабинете — конфигурации для всех ваших устройств. Подробные инструкции для каждой платформы.</p>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- ── Footer ── -->
+<footer class="footer">
+    <div class="footer-inner">
+        <div class="footer-legal">
+            <strong>Титов Никита Олегович</strong><br>
+            ИНН 470420524404 · самозанятый (НПД)<br>
+            Санкт-Петербург, Россия
+        </div>
+        <div class="footer-links">
+            <a href="/oferta">Оферта</a>
+            <a href="/contacts">Контакты</a>
+            <a href="mailto:kronos-lolly@yandex.ru">kronos-lolly@yandex.ru</a>
+            <a href="/recovery">Личный кабинет</a>
+        </div>
+    </div>
+</footer>
+
+</body>
+</html>

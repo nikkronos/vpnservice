@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Контакты — Kronos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='landing.css') }}">
+</head>
+<body>
+
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="/" class="nav-brand">Kronos<span class="nav-brand-sub">подписка</span></a>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Главная</a>
+            <a href="/oferta" class="nav-link">Оферта</a>
+            <a href="/recovery" class="nav-cta">Личный кабинет</a>
+        </div>
+    </div>
+</nav>
+
+<div class="container container-narrow">
+    <div class="doc">
+        <h1 style="color:#fff; font-size:1.6em; margin-bottom:8px;">Контакты</h1>
+        <p style="color:var(--text-dim); margin-bottom:28px;">
+            Реквизиты исполнителя и способы связи.
+        </p>
+
+        <div class="contact-block">
+            <h3 style="color:#fff; font-size:1.05em; margin-bottom:14px;">Исполнитель</h3>
+            <div class="contact-row">
+                <span class="contact-label">ФИО</span>
+                <span class="contact-value"><strong>Титов Никита Олегович</strong></span>
+            </div>
+            <div class="contact-row">
+                <span class="contact-label">Статус</span>
+                <span class="contact-value">Плательщик налога на профессиональный доход (самозанятый)</span>
+            </div>
+            <div class="contact-row">
+                <span class="contact-label">ИНН</span>
+                <span class="contact-value">470420524404</span>
+            </div>
+            <div class="contact-row">
+                <span class="contact-label">Город</span>
+                <span class="contact-value">Санкт-Петербург, Россия</span>
+            </div>
+        </div>
+
+        <div class="contact-block">
+            <h3 style="color:#fff; font-size:1.05em; margin-bottom:14px;">Связь</h3>
+            <div class="contact-row">
+                <span class="contact-label">Email</span>
+                <span class="contact-value"><a href="mailto:kronos-lolly@yandex.ru">kronos-lolly@yandex.ru</a></span>
+            </div>
+            <div class="contact-row">
+                <span class="contact-label">Telegram (поддержка)</span>
+                <span class="contact-value"><a href="https://t.me/vpnkronos_bot" target="_blank" rel="noopener">@vpnkronos_bot</a></span>
+            </div>
+            <div class="contact-row">
+                <span class="contact-label">Telegram (личные вопросы)</span>
+                <span class="contact-value"><a href="https://t.me/nikkronos" target="_blank" rel="noopener">@nikkronos</a></span>
+            </div>
+        </div>
+
+        <p style="color:var(--text-dim); font-size:0.88em; margin-top:24px;">
+            Ответ на обращения по email — в течение 1–3 рабочих дней.
+            Срочные вопросы по работе сервиса — через Telegram-бота, обычно отвечаем в течение дня.
+        </p>
+
+        <p style="color:var(--text-dim); font-size:0.88em; margin-top:14px;">
+            Полные условия предоставления услуг см. в <a href="/oferta" style="color:var(--accent);">публичной оферте</a>.
+        </p>
+    </div>
+</div>
+
+<footer class="footer">
+    <div class="footer-inner">
+        <div class="footer-legal">
+            <strong>Титов Никита Олегович</strong><br>
+            ИНН 470420524404 · самозанятый (НПД)
+        </div>
+        <div class="footer-links">
+            <a href="/">Главная</a>
+            <a href="/oferta">Оферта</a>
+            <a href="/recovery">Личный кабинет</a>
+        </div>
+    </div>
+</footer>
+
+</body>
+</html>

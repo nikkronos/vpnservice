@@ -1,0 +1,332 @@
+/* Public pages styling: landing, oferta, contacts.
+   Тёмная тема, согласованная с admin/recovery (login.html, style.css). */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg:        #0d0f14;
+    --surface:   #131720;
+    --surface2:  #1a1f2e;
+    --border:    #1e2535;
+    --border2:   #252d42;
+    --text:      #c8d0e0;
+    --text-dim:  #5a6580;
+    --text-muted:#3a4260;
+    --accent:    #7c83fd;
+    --accent2:   #00e5ff;
+    --green:     #00e676;
+    --yellow:    #ffd740;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── Navbar ── */
+.nav {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.nav-inner {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.nav-brand {
+    font-weight: 700;
+    color: #fff;
+    font-size: 1.05em;
+    text-decoration: none;
+    letter-spacing: 0.01em;
+}
+.nav-brand-sub {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-size: 0.85em;
+    margin-left: 8px;
+}
+.nav-links {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+}
+.nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.9em;
+    transition: color 0.15s;
+}
+.nav-link:hover { color: var(--text); }
+.nav-cta {
+    color: #fff;
+    background: var(--accent);
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 0.88em;
+    transition: filter 0.15s;
+}
+.nav-cta:hover { filter: brightness(1.1); }
+
+/* ── Container ── */
+.container {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 24px 64px;
+}
+.container-narrow {
+    max-width: 720px;
+}
+
+/* ── Hero ── */
+.hero {
+    padding: 32px 0 56px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+}
+.hero h1 {
+    font-size: 2.0em;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.25;
+    margin-bottom: 18px;
+    letter-spacing: -0.01em;
+}
+.hero-sub {
+    color: var(--text);
+    font-size: 1.05em;
+    margin-bottom: 28px;
+    max-width: 620px;
+}
+.hero-cta {
+    display: inline-block;
+    padding: 13px 26px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1.0em;
+    transition: filter 0.15s, transform 0.05s;
+}
+.hero-cta:hover { filter: brightness(1.1); }
+.hero-cta:active { transform: translateY(1px); }
+.hero-cta-secondary {
+    display: inline-block;
+    padding: 13px 22px;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.95em;
+    margin-left: 10px;
+}
+.hero-cta-secondary:hover { color: var(--text); }
+
+/* ── Sections ── */
+.section {
+    margin-bottom: 56px;
+}
+.section h2 {
+    font-size: 1.3em;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 20px;
+    letter-spacing: -0.005em;
+}
+
+/* ── Pricing card ── */
+.pricing-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    padding: 28px;
+    max-width: 440px;
+}
+.pricing-amount {
+    font-size: 2.2em;
+    font-weight: 700;
+    color: var(--accent2);
+    margin-bottom: 4px;
+}
+.pricing-period {
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    font-size: 0.92em;
+}
+.pricing-features {
+    list-style: none;
+    margin: 0 0 24px;
+}
+.pricing-features li {
+    padding: 7px 0;
+    color: var(--text);
+    font-size: 0.95em;
+}
+.pricing-features li::before {
+    content: '✓';
+    color: var(--green);
+    font-weight: 700;
+    margin-right: 10px;
+}
+
+/* ── How-it-works (3 шага) ── */
+.steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+}
+.step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px;
+}
+.step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.9em;
+    margin-bottom: 14px;
+}
+.step h3 {
+    color: var(--text);
+    font-size: 1.0em;
+    margin-bottom: 8px;
+}
+.step p {
+    color: var(--text-dim);
+    font-size: 0.92em;
+}
+
+/* ── Document (oferta, contacts) ── */
+.doc h2 {
+    font-size: 1.15em;
+    color: var(--text);
+    margin: 32px 0 12px;
+    letter-spacing: 0;
+}
+.doc h3 {
+    font-size: 1.0em;
+    color: var(--text);
+    margin: 18px 0 8px;
+    font-weight: 600;
+}
+.doc p, .doc li {
+    color: var(--text);
+    font-size: 0.95em;
+    margin-bottom: 10px;
+    line-height: 1.65;
+}
+.doc ul, .doc ol {
+    padding-left: 24px;
+    margin-bottom: 14px;
+}
+.doc li { margin-bottom: 6px; }
+.doc strong { color: #fff; }
+.doc .doc-meta {
+    color: var(--text-dim);
+    font-size: 0.88em;
+    border-left: 3px solid var(--accent);
+    padding-left: 14px;
+    margin: 20px 0 28px;
+}
+.doc-section {
+    border-top: 1px solid var(--border);
+    padding-top: 24px;
+    margin-top: 24px;
+}
+.doc-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+
+/* ── Contacts cards ── */
+.contact-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px 24px;
+    margin-bottom: 14px;
+}
+.contact-block strong { color: #fff; }
+.contact-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 6px 0;
+    flex-wrap: wrap;
+}
+.contact-label {
+    color: var(--text-dim);
+    font-size: 0.92em;
+}
+.contact-value {
+    color: var(--text);
+    font-size: 0.95em;
+}
+.contact-value a {
+    color: var(--accent);
+    text-decoration: none;
+}
+.contact-value a:hover { text-decoration: underline; }
+
+/* ── Footer ── */
+.footer {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 28px 0 32px;
+    margin-top: 56px;
+}
+.footer-inner {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 24px;
+    color: var(--text-dim);
+    font-size: 0.84em;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: center;
+    justify-content: space-between;
+}
+.footer-legal {
+    line-height: 1.7;
+}
+.footer-legal strong { color: var(--text); font-weight: 600; }
+.footer-links {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.footer-links a {
+    color: var(--text-dim);
+    text-decoration: none;
+}
+.footer-links a:hover { color: var(--accent); }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+    .nav-inner { padding: 12px 16px; }
+    .nav-links { gap: 12px; }
+    .container { padding: 28px 16px 40px; }
+    .hero { padding: 16px 0 36px; margin-bottom: 32px; }
+    .hero h1 { font-size: 1.55em; }
+    .hero-sub { font-size: 0.98em; }
+    .hero-cta-secondary { display: block; margin: 12px 0 0; padding: 8px 0; }
+    .section { margin-bottom: 36px; }
+    .pricing-card { padding: 22px; }
+    .pricing-amount { font-size: 1.8em; }
+    .footer-inner { flex-direction: column; align-items: flex-start; gap: 14px; }
+}
