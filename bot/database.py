@@ -167,6 +167,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_vless_column()
     _migrate_add_vless_server_traffic_table()
     _migrate_add_traffic_snapshots_table()
+    _migrate_add_per_user_vless_uuids()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
@@ -206,6 +207,32 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_per_user_vless_uuids() -> None:
+    """
+    Per-user VLESS UUIDs на каждом сервере (для замены общих share-UUIDs).
+
+    Колонки:
+      - users.vless_uuid_eu1  — для vless-ws на eu1 (CDN канал)
+      - users.vless_uuid_main — для vless-tcp REALITY на main (Мегафон/Yota)
+      - users.vless_uuid_yc   — для vless-xhttp REALITY на yc (T2/МТС/Билайн)
+
+    Legacy `users.vless_uuid` (+ `vless_short_id`) — НЕ трогаются, остаются
+    для совместимости с db_get_vless_creds. Новые поля используются в
+    _build_subscription_links и в bot/main.py callback_mobile_operator
+    после полной миграции.
+
+    Email-маркер в Xray для per-user телеметрии: `tid_<telegram_id>@kronos`
+    (синтетический, без утечки ПД в логи Xray — мы декларируем в Политике
+    что трафик не логируем).
+    """
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+        for col in ("vless_uuid_eu1", "vless_uuid_main", "vless_uuid_yc"):
+            if col not in existing:
+                con.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+                logger.info("Migration: added %s column to users", col)
 
 
 def _migrate_add_traffic_snapshots_table() -> None:
@@ -770,6 +797,108 @@ def db_clear_vless_creds(telegram_id: int) -> None:
     with _conn() as con:
         con.execute(
             "UPDATE users SET vless_uuid = NULL, vless_short_id = NULL WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+
+
+# ─── Per-user VLESS UUIDs (новая схема, миграция 2026-06-01) ──────────────────
+
+_VLESS_UUID_COLUMNS = {
+    "eu1":  "vless_uuid_eu1",
+    "main": "vless_uuid_main",
+    "yc":   "vless_uuid_yc",
+}
+
+
+def db_get_or_create_vless_uuid(telegram_id: int, server_id: str) -> Optional[str]:
+    """
+    Возвращает per-user VLESS UUID для указанного сервера. Если ещё не создан —
+    генерирует новый (uuid4), сохраняет в БД и возвращает.
+
+    Idempotent: повторный вызов вернёт ТОТ ЖЕ UUID. Никогда не перегенерирует,
+    чтобы старый .conf на устройстве юзера продолжал работать.
+
+    Серверы: 'eu1' / 'main' / 'yc'. Возвращает None для неизвестного server_id.
+
+    Sync с Xray runtime НЕ делает (это отдельный шаг: xray api inbounduser add).
+    Эта функция — только БД-уровень.
+    """
+    import uuid as _uuid
+    _ensure_init()
+    col = _VLESS_UUID_COLUMNS.get(server_id)
+    if not col:
+        logger.warning("db_get_or_create_vless_uuid: unknown server_id %s", server_id)
+        return None
+    with _conn() as con:
+        row = con.execute(
+            f"SELECT {col} FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if row and row[col]:
+            return row[col]
+        # Генерируем новый UUID и сохраняем
+        new_uuid = str(_uuid.uuid4())
+        con.execute(
+            f"UPDATE users SET {col} = ? WHERE telegram_id = ?",
+            (new_uuid, telegram_id),
+        )
+        # Проверяем что UPDATE задел строку (юзер существует)
+        check = con.execute(
+            f"SELECT {col} FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not check:
+            logger.warning("db_get_or_create_vless_uuid: user tid=%s не существует", telegram_id)
+            return None
+        logger.info("Сгенерирован per-user VLESS UUID для tid=%s server=%s", telegram_id, server_id)
+        return new_uuid
+
+
+def db_get_per_user_vless_uuid(telegram_id: int, server_id: str) -> Optional[str]:
+    """Возвращает UUID если он уже создан, иначе None (не создаёт)."""
+    _ensure_init()
+    col = _VLESS_UUID_COLUMNS.get(server_id)
+    if not col:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            f"SELECT {col} FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return row[col]
+
+
+def db_get_all_per_user_vless_uuids() -> List[Dict]:
+    """
+    Возвращает все per-user VLESS UUIDs для restore-скрипта.
+    [{"telegram_id": int, "eu1": uuid|None, "main": uuid|None, "yc": uuid|None}, ...]
+    Только active юзеры (т.к. неактивные не подключаются).
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT telegram_id, vless_uuid_eu1, vless_uuid_main, vless_uuid_yc "
+            "FROM users WHERE telegram_id IS NOT NULL AND active = 1"
+        ).fetchall()
+        return [
+            {
+                "telegram_id": r["telegram_id"],
+                "eu1":  r["vless_uuid_eu1"],
+                "main": r["vless_uuid_main"],
+                "yc":   r["vless_uuid_yc"],
+            }
+            for r in rows
+        ]
+
+
+def db_clear_per_user_vless_uuid(telegram_id: int, server_id: str) -> None:
+    """Очищает per-user UUID для конкретного сервера (для enforce_expired hard-revoke)."""
+    _ensure_init()
+    col = _VLESS_UUID_COLUMNS.get(server_id)
+    if not col:
+        return
+    with _conn() as con:
+        con.execute(
+            f"UPDATE users SET {col} = NULL WHERE telegram_id = ?",
             (telegram_id,),
         )
 
