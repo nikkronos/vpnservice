@@ -119,6 +119,8 @@ scripts/
   patch_xray_stats.py   — идемпотентный патч Xray config: добавляет stats/api блоки + теги inbound'ов
   traffic_diagnosis.py  — кто качал в окне (read-only диагностика по traffic_snapshots): `python scripts/traffic_diagnosis.py --last 1h` или `python scripts/traffic_diagnosis.py 2026-05-30 17:00 2026-05-30 18:00` (UTC)
   enforce_expired.py    — soft-revoke AWG peers у юзеров с истёкшей подпиской (> 12 ч grace). Default dry-run, `--apply` для реального отзыва. Auto-restore при оплате через `restore_user_revoked_peers` (peer возвращается с теми же pubkey/ip — старый .conf работает).
+  sync_xray_users.py    — синхронизация per-user VLESS UUIDs из БД в Xray config.json на main/yc через SSH + restart. `--server main|yc | --all`, `--dry-run`, `--no-shared` (удалить legacy shared UUID).
+  vless_uuid_backfill.py — one-shot скрипт генерации per-user UUIDs всем active юзерам в БД (идемпотентен).
   peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
 ```
 

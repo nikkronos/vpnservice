@@ -419,7 +419,26 @@
   - Рекомендация: UptimeRobot — простейший. Делает владелец сам (нужен его email + привязка TG-бота).
   - Время: 2-5 мин setup, ноль кода.
 
-- [ ] **🔥 САМОЕ ВАЖНОЕ: Per-user VLESS UUIDs на всех 3 серверах** (приоритет повышен 2026-06-01):
+- [~] **🔥 САМОЕ ВАЖНОЕ: Per-user VLESS UUIDs на всех 3 серверах** (приоритет повышен 2026-06-01, **Сессия 1 DONE 2026-06-01 ночь, пауза 24ч до 02.06 ~22:20**):
+
+  **Прогресс по этапам:**
+  - [x] Этап 1: БД миграция + хелперы — colonki `vless_uuid_{eu1,main,yc}`, `db_get_or_create_vless_uuid`, `db_get_per_user_vless_uuid`, `db_get_all_per_user_vless_uuids`, `db_clear_per_user_vless_uuid` (commit `4c5caa3`)
+  - [~] Этап 2: Sync механизм — **архитектурное изменение**: вместо runtime API (`xray api adu` молча fail'ится) используется прямая правка config.json + restart. `scripts/sync_xray_users.py` (commit `2648538`). **Etап 3 (Restore-скрипт) стал не нужен** — UUIDs живут в config.json, переживают рестарт Xray. `sync_xray_users.py` сам играет роль restore (БД=source of truth → регенерирует config.json).
+  - [x] Этап 4: Переписать выдачу VLESS-ссылок — `_personalize_vless_url` в web/app.py + `_personalize_vless_for_bot` в bot/main.py. Покрыты `/sub/<token>`, `/api/recovery/mobile-link-by-email`, bot `callback_mobile_operator`. Async sync Xray при создании нового UUID (commit `ea479d7`).
+  - [x] Этап 5: Backfill — 42 новых per-user UUIDs созданы для main + 42 для yc (commit `da996b4`). sync_xray_users.py --all: 44 clients (43 per-user + 1 shared) на каждом сервере.
+  - [x] Этап 5.5: Broadcast — отправлен владельцем 2026-06-01 23:20 МСК. Текст про обновление инфры + переподключение для тех у кого ссылка отвалится. **Пауза 24ч до 02.06 ~23:20**.
+  - [ ] Этап 7: Удаление shared-UUIDs — `sync_xray_users.py --all --no-shared`. Делать после паузы 24ч (т.е. 02.06 ~23:20).
+  - [ ] Этап 8: Расширение enforce_expired для отзыва per-user UUID на main/yc через clear UUID в БД + sync. + Cron safety net (`sync_xray_users.py --all` раз в 6ч) — аналог Etапа 3 safety-механизма. + Health-check на consistency БД vs config.json.
+  - [ ] Этап 9: Per-user телеметрия — расширить `vless_summary_accounting.py` парсингом `user>>>` pattern, новая таблица `vless_user_traffic`. В админ-панели VLESS-юзеры перестанут быть «тихими».
+  - [ ] eu1 (vless-ws на CDN-канале) — отдельная задача. На eu1 пул 9 share-UUIDs + 1 общий WS. Кто реально использует — не выяснено. Сначала разведка (`xray api statsquery` теперь работает после backfill), потом миграция.
+
+  **Архитектурные решения (durable):**
+  - Email-маркер в Xray: `tid_<telegram_id>@kronos` — синтетический, без ПД в логах
+  - iplimit: пока не используется (Xray не принимал в JSON), вернёмся к этому в Этапе 9
+  - Sync через config.json + restart, не runtime API — config.json как persistent state, sync_xray_users.py как идемпотентный инструмент
+  - eu1 пока не трогаем
+
+  **Прошлый план (для исторической ссылки):**
   - **Контекст:** сейчас на main/yc по одному общему UUID, на eu1 — пул 9 share-UUIDs. Все юзеры пользуются одним и тем же UUID per inbound.
   - **Почему критично:**
     1. **Невозможно отозвать VLESS-доступ конкретному юзеру** при истечении подписки (enforcement gap для VLESS share-link)

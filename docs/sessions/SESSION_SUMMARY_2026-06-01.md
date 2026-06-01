@@ -175,3 +175,67 @@ Swap на yc — 1 GB swapfile, swappiness=10 (RAM 960 MB, критически 
 **Что я считаю главным достижением:** не количество, а **что мы вышли на состояние готовности к ЮKassa подаче**. Это разблокирует автоматизацию платежей, что снимает с владельца ручную обработку каждого payment claim.
 
 Следующий шаг — Уведомление РКН + регистрация ЮKassa (это на тебе).
+
+---
+
+## Дополнение (поздний вечер 2026-06-01) — Per-user VLESS UUIDs Сессия 1
+
+Решили закрыть **Per-user VLESS UUIDs** (🔥 САМОЕ ВАЖНОЕ в ROADMAP). 5 коммитов, ~3 часа работы. Архитектурное изменение по ходу — отказались от runtime API (`xray api adu` не работал), перешли на прямую правку config.json.
+
+### Что сделано (Этапы 1, 2, 4, 5, 5.5 — все DONE)
+
+| Commit | Этап | Что |
+|---|---|---|
+| `4c5caa3` | 1 | БД миграция: `users.vless_uuid_{eu1,main,yc}` + хелперы `db_get_or_create_vless_uuid`, `db_get_per_user_vless_uuid`, `db_get_all_per_user_vless_uuids`, `db_clear_per_user_vless_uuid` |
+| `2648538` | 2 | `scripts/sync_xray_users.py` — синхронизация config.json на main/yc с БД через SSH + `xray run -test` validate + atomic mv + restart. Архитектурный pivot: НЕ runtime API. |
+| `ea479d7` | 4 | Переписана выдача VLESS-ссылок (web `/sub`, `/api/recovery/mobile-link-by-email`, bot `callback_mobile_operator`). Подстановка per-user UUID + async sync Xray при создании нового UUID |
+| `da996b4` | 5 | Backfill 42 юзеров (main + yc UUIDs созданы). sync_xray_users.py --all — 44 clients (43+1 shared) на каждом сервере |
+| — | 5.5 | Broadcast отправлен владельцем 2026-06-01 23:20 МСК. Пауза 24ч до 02.06 ~23:20. |
+
+### Архитектурный pivot: Этап 3 (Restore-скрипт) стал не нужен
+
+**Изначальный план** предполагал runtime API (`xray api adu/rmu`) — UUIDs в памяти Xray, теряются при рестарте → нужен Restore-скрипт через systemd ExecStartPost.
+
+**В процессе обнаружено:** `xray api adu` молча fail'ится на наших inbound'ах (даже после добавления `HandlerService` в `api.services`). Не разбирались глубже — выбрали более простой и надёжный путь.
+
+**Принятая архитектура:** прямая правка config.json + restart. При этом UUIDs **живут в config.json**, переживают рестарт Xray по определению. **Restore-скрипт не нужен.**
+
+`sync_xray_users.py` сам играет роль restore — БД = source of truth, скрипт регенерирует config.json из БД одной командой. Это **архитектурно лучше** runtime+restore: меньше движущихся частей, БД явный source-of-truth, sync_xray_users = инструмент общего назначения (backfill + regular sync + recovery).
+
+В Этапе 8 добавлю cron `sync_xray_users.py --all` раз в 6 часов как safety net (аналог Etапа 3 safety-механизма в новом контексте).
+
+### Другое архитектурное решение
+
+**Email-маркер: `tid_<telegram_id>@kronos`** — синтетический, не утекают ПД в логи Xray.
+
+**`iplimit` не используется** — Xray не принимал в JSON (нужен другой формат?). Отложено, вернёмся в Этапе 9.
+
+**eu1 НЕ трогаем** — vless-ws на CDN-канале использует пул 9 share-UUIDs + 1 общий WS. Кто реально пользуется неясно. Сначала разведка, потом миграция. Отдельная подзадача внутри Per-user UUIDs.
+
+### Что ждёт (после паузы 24ч)
+
+- **Этап 7** (02.06 ~23:20): `sync_xray_users.py --all --no-shared` — удалить shared-UUIDs (старые ссылки legacy юзеров перестанут работать → broadcast предупредил)
+- **Этап 8**: enforce_expired для per-user UUID, cron safety net sync, health-check consistency
+- **Этап 9**: per-user телеметрия через `xray api statsquery user>>>` (теперь работает — email-маркеры есть)
+
+### E2E подтверждено
+
+```
+GET /sub/<owner_token>:
+  vless://2a748133-...@158.160.236.147:443?... (per-user yc)
+  vless://5c444a98-...@81.200.146.32:443?...   (per-user main)
+```
+Раньше там были общие `11dd653c-...` и `359e23cc-...`.
+
+### Что зафиксировано в правилах
+
+CLAUDE.md: упоминание `sync_xray_users.py` в списке скриптов (добавлю в следующем коммите).
+
+### Метрики Сессии 1
+
+- 5 коммитов (`4c5caa3` → `da996b4`)
+- 42 новых UUIDs созданы (для 42 юзеров, owner был у них из Этапа 1)
+- 86 UUIDs в config.json (43 main + 43 yc — включая owner)
+- 2 рестарта Xray (~5 сек downtime VLESS на каждом)
+- 1 архитектурный pivot
+- 0 нежданных багов (Pre-deploy checklist в действии)
