@@ -2687,13 +2687,26 @@ def main() -> None:
             # Реферал-бонус (если есть и ещё не выплачен)
             inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
 
-            # Уведомление пользователю
-            exp_str = (new_exp or "")[:10]
-            safe_reply(
-                message,
-                f"✅ Оплата получена: {total_amount} ⭐\n"
-                f"Подписка продлена на {days} дней (активна до {exp_str}).",
-            )
+            # Уведомление пользователю — после ВСЕХ начислений, итоговая дата.
+            # Если реф-бонус сработал — берём свежий expires_at из БД (он
+            # включает +14 после db_apply_referral_bonus).
+            if inviter_tid:
+                final_sub = db_get_subscription(tid) or {}
+                final_exp = final_sub.get("expires_at") or new_exp
+                exp_str = (final_exp or "")[:10]
+                safe_reply(
+                    message,
+                    f"✅ Оплата получена: {total_amount} ⭐\n"
+                    f"Подписка продлена на {days} дней (оплата) + {REFERRAL_REWARD_DAYS} дней (реф-бонус).\n"
+                    f"Активна до {exp_str}.",
+                )
+            else:
+                exp_str = (new_exp or "")[:10]
+                safe_reply(
+                    message,
+                    f"✅ Оплата получена: {total_amount} ⭐\n"
+                    f"Подписка продлена на {days} дней (активна до {exp_str}).",
+                )
             if inviter_tid:
                 # Юзеру отдельно про реферал-бонус
                 safe_reply(
@@ -2780,14 +2793,30 @@ def main() -> None:
             except Exception as e:
                 logger.warning("referral bonus failed for claim %s: %s", claim_id, e)
 
-            # Уведомляем юзера
-            exp_str = (new_exp or "")[:10]
+            # Итоговая дата — после ВСЕХ начислений (включая реф-бонус если был).
+            # Без этого юзер видел дату от db_extend_subscription, до +14 бонуса.
+            if inviter_tid:
+                final_sub = db_get_subscription(tid) or {}
+                final_exp = final_sub.get("expires_at") or new_exp
+            else:
+                final_exp = new_exp
+            exp_str = (final_exp or "")[:10]
+
+            # Уведомляем юзера — одним сообщением с правильной итоговой датой.
             try:
-                bot.send_message(
-                    tid,
-                    f"✅ Оплата подтверждена. Подписка продлена на {days} дней "
-                    f"(активна до {exp_str}).",
-                )
+                if inviter_tid:
+                    bot.send_message(
+                        tid,
+                        f"✅ Оплата подтверждена.\n"
+                        f"Подписка продлена на {days} дней (оплата) + {REFERRAL_REWARD_DAYS} дней (реф-бонус).\n"
+                        f"Активна до {exp_str}.",
+                    )
+                else:
+                    bot.send_message(
+                        tid,
+                        f"✅ Оплата подтверждена. Подписка продлена на {days} дней "
+                        f"(активна до {exp_str}).",
+                    )
             except Exception as e:
                 logger.warning("notify user (approved claim) failed: %s", e)
             if inviter_tid:
@@ -2803,12 +2832,16 @@ def main() -> None:
                 except Exception as e:
                     logger.warning("notify inviter failed: %s", e)
 
-            # Обновляем сообщение владельца — убираем кнопки + ставим статус
+            # Обновляем сообщение владельца — убираем кнопки + ставим статус.
+            # Дата с учётом реф-бонуса, чтобы admin видел корректную итоговую.
+            admin_extra = (
+                f" + {REFERRAL_REWARD_DAYS} реф-бонус" if inviter_tid else ""
+            )
             try:
                 bot.edit_message_text(
                     f"✅ <b>ОДОБРЕНО</b> — @{uname} (id: <code>{tid}</code>)\n"
                     f"📧 {email}\n"
-                    f"+{days} дн, активна до {exp_str}",
+                    f"+{days} дн{admin_extra}, активна до {exp_str}",
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
                     parse_mode="HTML",
