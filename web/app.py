@@ -70,6 +70,8 @@ from bot.database import (
     db_set_claim_notify_msg,
     db_update_vless_requested_at,
     db_get_vless_server_lifetime,
+    db_get_or_create_vless_uuid,
+    db_get_per_user_vless_uuid,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -1137,26 +1139,33 @@ def api_recovery_mobile_link_by_email():
             return jsonify({"error": "operator must be one of: megafon, yota, beeline, mts, tele2, tmobile, other"}), 400
 
         fresh_cfg = load_config()
+        # server_id для per-user UUID: megafon/yota → main (REALITY cloud.mail.ru),
+        # остальные операторы → yc (REALITY www.microsoft.com).
         if operator in ("megafon", "yota"):
-            vless_url = (
+            template_url = (
                 getattr(fresh_cfg, "vless_cdn_tls_share_url", None)
                 or getattr(fresh_cfg, "vless_cdn_share_url", None)
                 or getattr(fresh_cfg, "vless_reality_share_url", None)
             )
+            target_server = "main"
             hint = (
                 "Резервная ссылка для Мегафон/Yota — работает при активных белых списках РКН. "
                 "Скопируй vless://... целиком и импортируй в приложение."
             )
         else:
-            vless_url = getattr(fresh_cfg, "vless_reality_share_url", None)
+            template_url = getattr(fresh_cfg, "vless_reality_share_url", None)
+            target_server = "yc"
             hint = (
                 "Резервный мобильный VPN. Скопируй vless://... целиком. "
                 "Android: v2rayNG или Hiddify → «+» → «Импорт из буфера». "
                 "iOS: Streisand, FoXray, V2Box или Hiddify → импорт ссылки."
             )
 
-        if not vless_url:
+        if not template_url:
             return jsonify({"error": "VLESS link is not configured on server"}), 503
+
+        # Подстановка per-user UUID (с автосинхронизацией Xray-config через async sync).
+        vless_url = _personalize_vless_url(template_url, target_server, telegram_id)
 
         # Proof-of-life для VLESS — компенсирует отсутствие AWG-handshake.
         # Ставим после успешной выдачи; если что-то упадёт в обновлении —
@@ -1684,24 +1693,95 @@ _SUB_LABEL_MAP = {
 }
 
 
-def _build_subscription_links() -> List[str]:
+def _replace_uuid_in_vless_url(url: str, new_uuid: str) -> str:
     """
-    Список vless:// для subscription. Берём готовые рабочие REALITY-ссылки из
-    конфига (eu/yc + main cloud.mail.ru для БС) и переписываем #fragment на
-    user-friendly метки (URL-encoded UTF-8). Исходные env-ссылки не трогаем.
-    TODO (продакшен): подставлять per-user UUID вместо общих share-ссылок.
+    Заменяет UUID в vless://<UUID>@host:port?...#fragment на new_uuid.
+    Если URL некорректный — возвращает исходный (graceful).
+    """
+    if not url or not url.startswith("vless://") or "@" not in url or not new_uuid:
+        return url
+    head, rest = url.split("@", 1)
+    return f"vless://{new_uuid}@{rest}"
+
+
+def _sync_xray_after_new_uuid(server_id: str) -> None:
+    """
+    Фоновая синхронизация Xray config после создания нового per-user UUID.
+    Запускается в отдельном subprocess чтобы не блокировать HTTP-ответ.
+    Юзер сразу получает ссылку; Xray-config обновится за ~5-10 сек.
+
+    Если sync упадёт — юзер сможет подключиться только после следующего
+    sync (cron / повторный sync_xray_users.py вручную).
+    """
+    try:
+        import subprocess as _sp
+        script_path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+        # Используем Popen — non-blocking, родительский процесс не ждёт
+        _sp.Popen(
+            [sys.executable, str(script_path), "--server", server_id],
+            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            start_new_session=True,
+        )
+        logger.info("Spawned async sync_xray_users for server %s", server_id)
+    except Exception as e:
+        logger.warning("Failed to spawn sync_xray_users for %s: %s", server_id, e)
+
+
+# Маппинг VLESS-сервера → ENV-атрибут (для генерации ссылок)
+_VLESS_SERVER_TO_ATTR = {
+    "yc":   "vless_reality_share_url",       # YC REALITY xHTTP (T2/МТС/Билайн)
+    "main": "vless_cdn_tls_share_url",       # Main REALITY (Мегафон/Yota)
+}
+
+
+def _personalize_vless_url(template_url: str, server_id: str, telegram_id: int) -> str:
+    """
+    Берёт env-template (общий vless://OLD_UUID@...) и подставляет per-user UUID
+    для конкретного юзера. Если UUID ещё не создан в БД — создаёт + триггерит
+    async sync Xray (≈10 сек до готовности на сервере).
+
+    Если что-то пошло не так — возвращает оригинальный template (graceful
+    degradation: юзер получит общую ссылку, продолжит работать как раньше).
+    """
+    if not template_url or not telegram_id:
+        return template_url
+    try:
+        existing = db_get_per_user_vless_uuid(telegram_id, server_id)
+        per_user_uuid = db_get_or_create_vless_uuid(telegram_id, server_id)
+        if not per_user_uuid:
+            return template_url
+        if not existing:
+            # Только что создан → нужна синхронизация Xray
+            _sync_xray_after_new_uuid(server_id)
+        return _replace_uuid_in_vless_url(template_url, per_user_uuid)
+    except Exception as e:
+        logger.warning("personalize_vless_url failed for tid=%s server=%s: %s",
+                       telegram_id, server_id, e)
+        return template_url
+
+
+def _build_subscription_links(telegram_id: Optional[int] = None) -> List[str]:
+    """
+    Список vless:// для subscription. Если telegram_id передан — подставляем
+    per-user UUID для каждого сервера (миграция 2026-06-01). Если None
+    (legacy путь) — возвращаем общие share-ссылки из env.
     """
     cfg = load_config()
     out: List[str] = []
     seen = set()
-    for attr, default_label in (
-        ("vless_reality_share_url", "🇪🇺 Европа"),
-        ("vless_cdn_tls_share_url", "🇷🇺 Россия"),
-    ):
+    # (env_attr, default_label, server_id для per-user UUID)
+    config_list = (
+        ("vless_reality_share_url", "🇪🇺 Европа", "yc"),
+        ("vless_cdn_tls_share_url", "🇷🇺 Россия", "main"),
+    )
+    for attr, default_label, server_id in config_list:
         u = (getattr(cfg, attr, None) or "").strip()
         if not u.startswith("vless://") or u in seen:
             continue
         seen.add(u)
+        # Подстановка per-user UUID
+        if telegram_id:
+            u = _personalize_vless_url(u, server_id, telegram_id)
         if "#" in u:
             base, frag = u.rsplit("#", 1)
             current = urllib.parse.unquote(frag)
@@ -1742,7 +1822,7 @@ def api_subscription(token):
             except Exception:
                 logger.warning("vless_requested_at update failed for sub tid=%s", tid)
 
-        links = _build_subscription_links()
+        links = _build_subscription_links(telegram_id=int(tid) if tid else None)
         body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
         resp = Response(body, mimetype="text/plain; charset=utf-8")
         resp.headers["Profile-Update-Interval"] = "12"

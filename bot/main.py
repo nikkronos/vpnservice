@@ -24,6 +24,8 @@ from .database import (
     db_get_vless_creds,
     db_update_proxy_requested_at,
     db_update_vless_requested_at,
+    db_get_or_create_vless_uuid,
+    db_get_per_user_vless_uuid,
     db_record_payment,
     db_extend_subscription,
     db_find_payment_by_external_id,
@@ -2222,6 +2224,39 @@ def main() -> None:
             logger.exception("Не удалось отправить VLESS ссылку: %s", e)
             bot.send_message(chat_id, "Не удалось отправить ссылку. Напиши владельцу.")
 
+    def _personalize_vless_for_bot(template_url: str, target_server: str, telegram_id: int) -> str:
+        """
+        Подставляет per-user UUID в vless://-template для бота.
+        Mirror функции _personalize_vless_url в web/app.py. Если UUID только что
+        создан — асинхронно триггерит sync_xray_users (~10 сек до готовности).
+        """
+        if not template_url or "@" not in template_url or not template_url.startswith("vless://"):
+            return template_url
+        try:
+            existing = db_get_per_user_vless_uuid(telegram_id, target_server)
+            per_user_uuid = db_get_or_create_vless_uuid(telegram_id, target_server)
+            if not per_user_uuid:
+                return template_url
+            if not existing:
+                # Только что создан → async sync Xray в фоне
+                import subprocess as _sp
+                import pathlib as _pl
+                script_path = _pl.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+                try:
+                    _sp.Popen(
+                        [sys.executable, str(script_path), "--server", target_server],
+                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                        start_new_session=True,
+                    )
+                    logger.info("Spawned async sync_xray_users for tid=%s server=%s", telegram_id, target_server)
+                except Exception as e:
+                    logger.warning("Failed to spawn sync: %s", e)
+            head, rest = template_url.split("@", 1)
+            return f"vless://{per_user_uuid}@{rest}"
+        except Exception as e:
+            logger.warning("personalize_vless_for_bot failed for tid=%s: %s", telegram_id, e)
+            return template_url
+
     @bot.callback_query_handler(func=lambda call: call.data.startswith("mobile_op_"))
     def callback_mobile_operator(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
@@ -2233,47 +2268,59 @@ def main() -> None:
 
         op = call.data  # mobile_op_beeline / mobile_op_megafon / etc.
 
+        # target_server — для подстановки per-user UUID:
+        #   main — REALITY cloud.mail.ru (Мегафон/Yota)
+        #   yc   — REALITY www.microsoft.com (остальные операторы)
         if op == "mobile_op_yota":
             # Yota подтверждённо работает через main REALITY (SNI=cloud.mail.ru) при БС.
             # См. SESSION_SUMMARY_2026-05-21.
             if config.vless_cdn_tls_share_url:
-                url = config.vless_cdn_tls_share_url
+                template_url = config.vless_cdn_tls_share_url
                 instruction_key = "vless_cdn"
+                target_server = "main"
             elif config.vless_cdn_share_url:
-                url = config.vless_cdn_share_url
+                template_url = config.vless_cdn_share_url
                 instruction_key = "vless_cdn"
+                target_server = "main"
             else:
-                url = config.vless_reality_share_url
+                template_url = config.vless_reality_share_url
                 instruction_key = "vless_reality"
+                target_server = "yc"
         elif op == "mobile_op_megafon":
             # Мегафон: 2026-05-22 выявлено что у Мегафон IP Timeweb (наш main) НЕ в whitelist
-            # (TCP-таймаут). Пока выдаём то же что Yota, как best-effort; при следующей разведке
-            # whitelist Мегафон планируется отдельный канал. См. ROADMAP_VPN.md.
+            # (TCP-таймаут). Пока выдаём то же что Yota, как best-effort.
             if config.vless_cdn_tls_share_url:
-                url = config.vless_cdn_tls_share_url
+                template_url = config.vless_cdn_tls_share_url
                 instruction_key = "vless_cdn"
+                target_server = "main"
             elif config.vless_cdn_share_url:
-                url = config.vless_cdn_share_url
+                template_url = config.vless_cdn_share_url
                 instruction_key = "vless_cdn"
+                target_server = "main"
             else:
-                url = config.vless_reality_share_url
+                template_url = config.vless_reality_share_url
                 instruction_key = "vless_reality"
+                target_server = "yc"
         elif op == "mobile_op_other":
-            url = config.vless_reality_share_url
+            template_url = config.vless_reality_share_url
             instruction_key = "vless_reality_other"
+            target_server = "yc"
         else:
-            url = config.vless_reality_share_url
+            template_url = config.vless_reality_share_url
             instruction_key = "vless_reality"
+            target_server = "yc"
 
-        if not url:
+        if not template_url:
             bot.send_message(
                 call.message.chat.id,
                 "Мобильный профиль пока не настроен. Напиши владельцу.",
             )
             return
 
-        # Proof-of-life для VLESS — компенсирует отсутствие AWG-handshake в
-        # админ-панели (см. SESSION_SUMMARY_2026-05-29 «vless-телеметрия Вариант C»).
+        # Подстановка per-user UUID (с автосинхронизацией Xray в фоне)
+        url = _personalize_vless_for_bot(template_url, target_server, call.from_user.id)
+
+        # Proof-of-life для VLESS
         try:
             db_update_vless_requested_at(call.from_user.id)
         except Exception:
