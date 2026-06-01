@@ -28,6 +28,8 @@ from .database import (
     db_extend_subscription,
     db_find_payment_by_external_id,
     db_apply_referral_bonus,
+    db_set_referred_by,
+    db_get_user_by_referral_code,
     db_get_claim_by_id,
     db_decide_claim,
     db_get_pending_claim,
@@ -381,8 +383,8 @@ def main() -> None:
         "1. Данный сервис позволяет быстро получать доступ к любым сайтам и программам.\n"
         "2. В сервисе безлимитный трафик, однако, будьте учтивы и не используйте торренты.\n"
         "3. Обратная связь приветствуется. По всем вопросам @nikkronos.\n"
-        "4. Сервис будет дорабатываться и улучшаться по мере прихода новых пользователей, "
-        "реферальная система в разработке.\n"
+        "4. Приглашай друзей: при первой оплате друга — +14 дней тебе и ему. "
+        "Ссылка для приглашений в личном кабинете.\n"
         "5. Вся важная информация будет публиковаться в тг канале: https://t.me/vpnkronos."
     )
 
@@ -477,6 +479,18 @@ def main() -> None:
         db_mark_migrated идёт ИМЕННО ЗДЕСЬ (а не в /start) — у новых юзеров запись в users
         появляется только после db_upsert_user в OTP-шаге, до этого UPDATE затрагивает 0 строк.
         """
+        # Pending ref-код от /start ref_<code> deeplink — применяем сейчас,
+        # когда юзер реально создан в БД и прошёл OTP. db_set_referred_by
+        # idempotent (вернёт False если уже привязан) — повторного уведомления не будет.
+        state = _onboarding_state.get(telegram_id) or {}
+        pending_ref_code = state.get("pending_ref_code")
+        if pending_ref_code:
+            try:
+                if db_set_referred_by(telegram_id, pending_ref_code):
+                    _notify_inviter_about_signup_from_bot(pending_ref_code)
+            except Exception as e:
+                logger.warning("pending_ref attribution failed for %s: %s", telegram_id, e)
+
         _onboarding_state.pop(telegram_id, None)
         try:
             db_mark_migrated(telegram_id)
@@ -677,6 +691,34 @@ def main() -> None:
         _onboarding_state.pop(tid, None)
 
     @bot.message_handler(commands=["start"])
+    def _notify_inviter_about_signup_from_bot(ref_code: str) -> None:
+        """
+        Уведомляет пригласителя в TG, что по его реф-ссылке зарегистрировался
+        новый пользователь (через bot deeplink /start ref_X, либо после
+        завершения онбординга с pending_ref_code).
+        Не падает при ошибках — это вспомогательное уведомление, не критичный
+        функционал. db_set_referred_by уже привязал к этому моменту.
+        """
+        try:
+            if not ref_code:
+                return
+            inviter = db_get_user_by_referral_code(ref_code)
+            if not inviter:
+                return
+            inviter_tid = inviter.get("telegram_id")
+            if not inviter_tid:
+                return
+            bot.send_message(
+                int(inviter_tid),
+                "👋 <b>По твоей реф-ссылке зарегистрировался новый пользователь.</b>\n\n"
+                "Бонус +14 дней начислится тебе и ему, когда он впервые "
+                "оплатит подписку.",
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            logger.warning("notify inviter (bot) failed: %s", e)
+
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
@@ -684,10 +726,22 @@ def main() -> None:
         tid = message.from_user.id
 
         # Deeplink: /start support → сразу в Support-флоу (минуя меню), если онбординг пройден.
-        # Юзер из ЛК (Mini App) тыкает «🆘 Поддержка» → tg.openTelegramLink(t.me/bot?start=support).
+        # /start ref_<code> → сохраняем реф-код для привязки в конце онбординга
+        # (основной flow рефералов идёт через Mini App startapp=ref_X, см. /api/auth/tg-webapp;
+        # этот /start fallback нужен для тех, кто открыл ссылку без Mini App).
         start_arg = ""
         if message.text and " " in message.text:
-            start_arg = message.text.split(maxsplit=1)[1].strip().lower()
+            start_arg = message.text.split(maxsplit=1)[1].strip()
+
+        # Сохраняем ref-код для привязки после успешного OTP-verify в FSM.
+        # state доступен через _onboarding_state[tid] — set'аем заранее, чтобы
+        # на этапе finalize-onboarding можно было применить db_set_referred_by.
+        if start_arg.lower().startswith("ref_"):
+            ref_code = start_arg[4:]  # сохраняем исходный регистр кода
+            if ref_code:
+                _onboarding_state.setdefault(tid, {})["pending_ref_code"] = ref_code
+
+        start_arg_lower = start_arg.lower()
 
         # Если онбординг включён и юзер ещё не «прошёл» — запускаем FSM, не показывая обычное меню.
         # Support deeplink имеет приоритет ТОЛЬКО для уже-онбордившихся юзеров.
@@ -701,9 +755,20 @@ def main() -> None:
             _start_onboarding(message.chat.id, tid)
             return
 
-        if start_arg == "support":
+        if start_arg_lower == "support":
             _open_support_flow(message.chat.id, tid)
             return
+
+        # Если юзер уже-онбордившийся и пришёл по реф-ссылке — применяем сразу
+        # (привязки можно делать idempotent: db_set_referred_by вернёт False
+        # если уже привязан, и тогда уведомление не уйдёт).
+        if start_arg_lower.startswith("ref_"):
+            try:
+                ref_code = start_arg[4:]
+                if ref_code and db_set_referred_by(tid, ref_code):
+                    _notify_inviter_about_signup_from_bot(ref_code)
+            except Exception as e:
+                logger.warning("/start ref attribution failed: %s", e)
 
         _send_main_menu(message.chat.id, message.from_user)
 

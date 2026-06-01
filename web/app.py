@@ -52,6 +52,7 @@ from bot.database import (
     db_ensure_referral_code,
     db_count_referrals,
     db_set_referred_by,
+    db_get_user_by_referral_code,
     db_set_password,
     db_has_password,
     db_ensure_sub_token,
@@ -123,6 +124,47 @@ MANUAL_PAY = {
     "owner_tg": "nikkronos",
     "rub": SUBSCRIPTION_RUB_PRICE,
 }
+
+
+def _notify_inviter_about_signup(referral_code: str) -> None:
+    """
+    Уведомляет пригласителя в TG что по его реф-ссылке зарегистрировался
+    новый пользователь. Вызывается только при УСПЕШНОЙ привязке (когда
+    db_set_referred_by вернул True).
+
+    Не падает при ошибках — это psychological-уведомление, не критичный
+    функционал. Если не дойдёт — реф-бонус всё равно начислится при оплате.
+    """
+    try:
+        bot_token = getattr(config, "bot_token", None) if config else None
+        if not bot_token or not referral_code:
+            return
+        inviter = db_get_user_by_referral_code(referral_code)
+        if not inviter:
+            return
+        inviter_tid = inviter.get("telegram_id")
+        if not inviter_tid:
+            return
+        text = (
+            "👋 <b>По твоей реф-ссылке зарегистрировался новый пользователь.</b>\n\n"
+            f"Бонус +{REFERRAL_REWARD_DAYS} дней начислится тебе и ему, "
+            "когда он впервые оплатит подписку."
+        )
+        api_body = json.dumps({
+            "chat_id": int(inviter_tid),
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            data=api_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception as e:
+        logger.warning("notify inviter about signup failed: %s", e)
 
 
 def _require_admin_auth(f):
@@ -1752,7 +1794,10 @@ def api_auth_verify_otp():
             if tid:
                 ref = (body.get("ref") or "").strip()
                 if ref:
-                    db_set_referred_by(int(tid), ref)
+                    # db_set_referred_by возвращает True только при УСПЕШНОЙ
+                    # первой привязке (не при повторном переходе по ссылке).
+                    if db_set_referred_by(int(tid), ref):
+                        _notify_inviter_about_signup(ref)
                 # idempotent — для grandfather/уже-платящих ничего не делает
                 db_ensure_signup_trial(int(tid), days=TRIAL_DAYS)
         except Exception as e:
@@ -1836,7 +1881,10 @@ def api_auth_tg_webapp():
         # Реферал-атрибуция: ?startapp=ref_<CODE>
         if start_param.startswith("ref_"):
             try:
-                db_set_referred_by(tid, start_param[4:])
+                ref_code = start_param[4:]
+                # True только при первой успешной привязке.
+                if db_set_referred_by(tid, ref_code):
+                    _notify_inviter_about_signup(ref_code)
             except Exception as e:
                 logger.warning("referral attribution failed: %s", e)
 

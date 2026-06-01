@@ -402,18 +402,68 @@ document.addEventListener('DOMContentLoaded', () => {
     // Управление паролем
     renderPasswordBlock(!!d.has_password);
 
-    // Реферальный блок (заглушка «в разработке» — рефералка отложена)
+    // Реферальный блок: ссылка-приглашение + TG share + счётчик
     if (referralBlock) {
-      referralBlock.hidden = false;
-      referralBlock.innerHTML = '';
-      const t = document.createElement('div');
-      t.className = 'acc-subtitle';
-      t.textContent = '👥 Приглашай друзей';
-      const note = document.createElement('p');
-      note.className = 'section-hint';
-      note.innerHTML = '<b>В разработке.</b> Скоро добавим: при оплате друга — бонусные дни обоим.';
-      referralBlock.appendChild(t);
-      referralBlock.appendChild(note);
+      if (d.referral_code) {
+        referralBlock.hidden = false;
+        referralBlock.innerHTML = '';
+        const t = document.createElement('div');
+        t.className = 'acc-subtitle';
+        t.textContent = '👥 Приглашай друзей';
+        referralBlock.appendChild(t);
+
+        const note = document.createElement('p');
+        note.className = 'section-hint';
+        note.innerHTML = (
+          `+${d.referral_reward_days} дней тебе, +${d.referral_reward_days} другу — `
+          + 'когда он <b>впервые оплатит</b> подписку. '
+          + 'Бонус один раз за каждого приглашённого.'
+        );
+        referralBlock.appendChild(note);
+
+        if (typeof d.invited_count === 'number') {
+          const counter = document.createElement('p');
+          counter.className = 'section-hint';
+          counter.style.marginTop = '6px';
+          counter.innerHTML = `Приглашено: <b>${d.invited_count}</b>`;
+          referralBlock.appendChild(counter);
+        }
+
+        // Реф-ссылка: используем Mini App deeplink (`startapp=ref_X`).
+        // Он открывает Mini App с start_param, который ловится в
+        // /api/auth/tg-webapp → db_set_referred_by + уведомление пригласителю.
+        // Если юзер вместо клика на Mini App нажмёт обычный «Start» в боте —
+        // bot/main.py cmd_start тоже обработает start=ref_X (fallback).
+        const refLink = `https://t.me/vpnkronos_bot?startapp=ref_${d.referral_code}`;
+
+        renderLinkBlock(referralBlock, refLink, '', '📋 Скопировать ссылку');
+
+        // TG-share — открывает нативный share-dialog Telegram.
+        const shareBtn = document.createElement('button');
+        shareBtn.type = 'button';
+        shareBtn.className = 'btn-recovery btn-recovery-secondary';
+        shareBtn.style.marginTop = '8px';
+        shareBtn.style.width = '100%';
+        shareBtn.textContent = '💬 Поделиться через Telegram';
+        shareBtn.addEventListener('click', () => {
+          haptic('light');
+          // Нейтральный текст — без УТП (УТП отложен, см. ROADMAP).
+          // Когда УТП будет утверждено, поменяем здесь.
+          const shareText = (
+            `Реферальная ссылка на VPN-сервис. `
+            + `При твоей первой оплате — бонус +${d.referral_reward_days} дней нам обоим.`
+          );
+          const httpsShare = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent(shareText)}`;
+          if (window.Telegram?.WebApp?.openTelegramLink) {
+            window.Telegram.WebApp.openTelegramLink(httpsShare);
+          } else {
+            window.location.href = httpsShare;
+          }
+        });
+        referralBlock.appendChild(shareBtn);
+      } else {
+        referralBlock.hidden = true;
+      }
     }
   }
 
