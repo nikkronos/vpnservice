@@ -429,12 +429,13 @@ document.addEventListener('DOMContentLoaded', () => {
           referralBlock.appendChild(counter);
         }
 
-        // Реф-ссылка: используем Mini App deeplink (`startapp=ref_X`).
-        // Он открывает Mini App с start_param, который ловится в
-        // /api/auth/tg-webapp → db_set_referred_by + уведомление пригласителю.
-        // Если юзер вместо клика на Mini App нажмёт обычный «Start» в боте —
-        // bot/main.py cmd_start тоже обработает start=ref_X (fallback).
-        const refLink = `https://t.me/vpnkronos_bot?startapp=ref_${d.referral_code}`;
+        // Реф-ссылка: обычный bot deeplink (`?start=ref_X`).
+        // Через `?startapp=` было бы более бесшовно (сразу Mini App), но TG
+        // требует настройки Direct Link Mini App URL в BotFather, без которой
+        // выдаёт BOT_INVALID. С `?start=` работает out-of-the-box: юзер видит
+        // приветствие бота → жмёт «Start» → cmd_start обрабатывает ref_<code>
+        // через fallback в bot/main.py (db_set_referred_by + notify).
+        const refLink = `https://t.me/vpnkronos_bot?start=ref_${d.referral_code}`;
 
         renderLinkBlock(referralBlock, refLink, '', '📋 Скопировать ссылку');
 
