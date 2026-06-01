@@ -822,6 +822,115 @@ def _remove_amneziawg_peer(public_key: str) -> None:
     else:
         remote_cmd = f"awg set {shlex.quote(interface)} peer {shlex.quote(public_key)} remove 2>/dev/null || true"
     execute_server_command("eu1", remote_cmd, timeout=15)
+
+
+def revoke_amneziawg_peer_soft(public_key: str) -> None:
+    """
+    Soft-revoke: удаляет AmneziaWG peer только из runtime (`awg set peer remove`).
+    Peer-credentials (pubkey, privkey, ip) НЕ затрагиваются в peers.json — для
+    последующего auto-restore при возобновлении подписки (см. restore_amneziawg_peer_runtime).
+
+    Вызывает существующий AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT, который делает
+    `awg set ... remove` + `/opt/amnezia-save-conf.sh` (persist).
+
+    Используется в `scripts/enforce_expired.py --apply`.
+    """
+    _remove_amneziawg_peer(public_key)
+
+
+def restore_amneziawg_peer_runtime(public_key: str, wg_ip: str) -> None:
+    """
+    Возвращает AmneziaWG peer в runtime с теми же pubkey/ip (после soft-revoke).
+    Команда: `awg set awg0 peer <pk> preshared-key /opt/amnezia/awg/wireguard_psk.key allowed-ips <ip>/32`
+    PSK у AmneziaWG общий для всех peers интерфейса (хранится в контейнере).
+    После — `/opt/amnezia-save-conf.sh` для persist (иначе при рестарте контейнера peer пропадёт).
+
+    Используется в `extend_subscription_and_restore` (hook после оплаты).
+
+    Raises WireGuardError при сбое.
+    """
+    if not public_key or not wg_ip:
+        raise WireGuardError(f"restore_amneziawg_peer_runtime: пустой pubkey или ip ({public_key!r}, {wg_ip!r})")
+    env = _load_env()
+    interface = env.get("AMNEZIAWG_EU1_INTERFACE", "").strip() or "awg0"
+    container = env.get("AMNEZIAWG_EU1_CONTAINER", "").strip() or "amnezia-awg2"
+    psk_path = "/opt/amnezia/awg/wireguard_psk.key"
+    # IP может прийти как "10.8.1.5/24" или "10.8.1.5" — нормализуем в /32
+    ip_clean = wg_ip.split("/")[0].strip()
+    allowed_ips = f"{ip_clean}/32"
+
+    # 1. Вернуть peer в runtime (awg внутри контейнера).
+    awg_cmd = (
+        f"docker exec {shlex.quote(container)} awg set {shlex.quote(interface)} "
+        f"peer {shlex.quote(public_key)} "
+        f"preshared-key {shlex.quote(psk_path)} "
+        f"allowed-ips {shlex.quote(allowed_ips)}"
+    )
+    # 2. Persist через хостовый скрипт (вне контейнера).
+    save_cmd = "/opt/amnezia-save-conf.sh"
+    combined = f"{awg_cmd} && {save_cmd}"
+
+    stdout, stderr = execute_server_command("eu1", combined, timeout=20)
+    if stderr and "error" in stderr.lower():
+        # save-script может писать info в stderr, поэтому проверяем явно на "error"
+        logger.warning(
+            "restore_amneziawg_peer_runtime: возможна ошибка. pubkey=%s ip=%s stderr=%s",
+            public_key[:20], wg_ip, stderr[:300],
+        )
+    logger.info(
+        "Восстановлен AmneziaWG peer в runtime: pubkey=%s..., ip=%s",
+        public_key[:20], wg_ip,
+    )
+
+
+def restore_user_revoked_peers(telegram_id: int) -> list:
+    """
+    Возвращает в runtime все revoked AWG peer'ы юзера (active=False в peers.json),
+    идентифицированные при soft-revoke в `enforce_expired.py`.
+
+    Idempotent: если у юзера нет revoked peer'ов, ничего не делает.
+    Безопасно вызывать после любого db_extend_subscription — даже когда юзер
+    никогда не был отозван.
+
+    Возвращает список Peer'ов которые были успешно восстановлены.
+    Используется как hook после оплаты — старый .conf на устройстве юзера
+    снова работает без необходимости заново импортировать.
+    """
+    from .storage import get_all_peers, upsert_peer
+
+    restored = []
+    for peer in get_all_peers():
+        if peer.telegram_id != telegram_id:
+            continue
+        if peer.server_id != "eu1":
+            continue
+        if peer.active:
+            continue  # уже активен — нечего восстанавливать
+        # Этот peer был soft-revoked — возвращаем в runtime
+        try:
+            restore_amneziawg_peer_runtime(peer.public_key, peer.wg_ip)
+            new_peer = Peer(
+                telegram_id=peer.telegram_id,
+                wg_ip=peer.wg_ip,
+                public_key=peer.public_key,
+                server_id=peer.server_id,
+                active=True,
+                profile_type=peer.profile_type,
+                platform=peer.platform,
+            )
+            upsert_peer(new_peer)
+            restored.append(new_peer)
+        except Exception as e:
+            logger.exception(
+                "restore_user_revoked_peers: failed for tid=%s pk=%s: %s",
+                telegram_id, peer.public_key[:20], e,
+            )
+    if restored:
+        logger.info(
+            "Восстановлено %d AWG peer(ов) для tid=%s после оплаты",
+            len(restored), telegram_id,
+        )
+    return restored
     logger.info("Удалён AmneziaWG peer с eu1 (public_key: %s...)", public_key[:20] if len(public_key) > 20 else public_key)
 
 

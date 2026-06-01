@@ -80,6 +80,7 @@ from .wireguard_peers import (
     regenerate_amneziawg_peer_and_config_for_user,
     regenerate_peer_and_config_for_user,
     replace_peer_with_profile_type,
+    restore_user_revoked_peers,
 )
 
 
@@ -689,6 +690,33 @@ def main() -> None:
 
         # Неизвестный шаг — чистим состояние
         _onboarding_state.pop(tid, None)
+
+    def _restore_and_notify(telegram_id: int) -> None:
+        """
+        Hook после успешного db_extend_subscription: возвращает revoked AWG peer'ы
+        в runtime + уведомляет юзера. Idempotent — если у юзера нет revoked
+        peer'ов (никогда не отзывался), ничего не делает.
+
+        Используется во всех payment-handlers (Stars, donation, admin_credit).
+        Без этого юзер после оплаты должен был бы сам нажать «Получить VPN»
+        для нового конфига — теперь старый .conf просто снова заработает.
+        """
+        try:
+            restored = restore_user_revoked_peers(telegram_id)
+        except Exception as e:
+            logger.exception("restore_user_revoked_peers failed for tid=%s: %s", telegram_id, e)
+            return
+        if not restored:
+            return
+        try:
+            bot.send_message(
+                telegram_id,
+                "✅ <b>Доступ восстановлен.</b>\n\n"
+                "Твой существующий конфиг снова работает — переподключаться не нужно.",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning("notify restored user failed for tid=%s: %s", telegram_id, e)
 
     def _notify_inviter_about_signup_from_bot(ref_code: str) -> None:
         """
@@ -1904,6 +1932,10 @@ def main() -> None:
                     status="succeeded",
                 )
             new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            # Auto-restore revoked peers (enforcement gap hook).
+            # Только при зачислении — при списании наоборот ничего не возвращаем.
+            if not is_debit:
+                _restore_and_notify(tid)
             # Реферал-бонус — только при зачислении. При списании не начисляем.
             inviter = None
             if not is_debit:
@@ -2697,6 +2729,8 @@ def main() -> None:
             )
             new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
             logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
+            # Auto-restore revoked peers (enforcement gap hook).
+            _restore_and_notify(tid)
 
             # Реферал-бонус (если есть и ещё не выплачен)
             inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
@@ -2801,6 +2835,8 @@ def main() -> None:
             except Exception as e:
                 logger.warning("db_record_payment failed for claim %s: %s", claim_id, e)
             new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            # Auto-restore revoked peers (enforcement gap hook).
+            _restore_and_notify(tid)
             inviter_tid = None
             try:
                 inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)

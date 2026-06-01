@@ -369,19 +369,15 @@
   - **Бонус:** в шапке можно вместо двух точек (AWG / VLESS) показывать иконку каждого канала отдельно (Быстрый / Резервный / Мобильный / Telegram-прокси) — точная карта инфраструктуры с одного взгляда.
   - **Объём:** ~1 час.
 
-- [ ] **Enforcement gap: AWG peer не удаляется при истечении подписки** (выявлено 2026-05-31 во время реферал-сессии):
-  - **Симптом:** при истечении подписки гейтится только **выдача нового** конфига (бот → 402, ЛК → блокировка). Но уже выданные конфиги продолжают работать:
-    - AmneziaWG .conf на устройстве → ❌ юзер подключается напрямую, peer на сервере не удаляется
-    - VLESS subscription URL → ✅ отвалится через ~12 ч (клиент авто-refresh получит пустую подписку)
-    - VLESS прямой share-link → ❌ продолжает работать (UUID общий)
-    - MTProxy → ✅ открыт для всех сознательно
-  - **Сейчас не критично:** платных юзеров мало, никто не злоупотребляет.
-  - **Станет проблемой при росте:** юзер может оплатить 1 раз, потом бесконечно пользоваться AWG без новых платежей.
-  - **Правильный фикс:** cron `scripts/enforce_expired.py` каждые 1-6 ч:
-    - Для всех `expires_at < now AND has_awg_peer`: удалить peer из AmneziaWG (`awg set awg0 peer <pk> remove` + `amnezia-save-conf.sh`)
-    - При возобновлении подписки (`db_extend_subscription` при оплате) → пересоздать peer
-    - VLESS прямой share-link: per-user UUIDs (отдельная задача в ROADMAP), тогда можно удалять через `xray api rmu`
-  - **Объём:** ~2-3 ч (миграция, скрипт, тест на одном peer'е перед раскаткой).
+- [x] ~~**Enforcement gap (для AWG): отзыв доступа при истечении подписки**~~ — **DONE 2026-06-01**. Soft-revoke реализация (Variant A):
+  - `scripts/enforce_expired.py` (cron `0 * * * *`) — отзывает AWG peer у юзеров с `expires_at < now - 12h`. Soft-revoke: `awg set peer remove` + persist, peer-credentials в peers.json остаются (`active=False`).
+  - `bot/wireguard_peers.py`: `revoke_amneziawg_peer_soft`, `restore_amneziawg_peer_runtime`, `restore_user_revoked_peers` — функции для отзыва/восстановления.
+  - **Auto-restore при оплате** через hook `_restore_and_notify(tid)` в 4 местах: `bot/main.py` (Stars `successful_payment_handler`, claim_approve, admin_credit) + `web/app.py` (`/admin/credit`). После `db_extend_subscription` → если у юзера есть revoked peers → возвращаются в runtime с теми же pubkey/ip → старый .conf на устройстве снова работает без переимпорта.
+  - **Уведомление юзеру при отзыве:** «⚠ Срок подписки истёк более 12 ч назад. Доступ временно отозван. Продли подписку — доступ восстановится автоматически.»
+  - **Уведомление юзеру при восстановлении:** «✅ Доступ восстановлен. Твой существующий конфиг снова работает — переподключаться не нужно.»
+  - **Уведомление владельцу:** при каждом cron-прогоне с revoked > 0 — TG-сводка какие юзеры отозваны.
+  - **E2E тест прошёл** на синтетическом юзере (tid=999999999): create peer → enforce --apply → peer revoked, credentials сохранены → restore_user_revoked_peers → peer вернулся с теми же pubkey/ip. Cleanup автоматический.
+  - **Что НЕ закрывает (gap остаётся):** VLESS прямой share-link (общий UUID — не отозвать конкретного юзера) и subscription URL (через `db_clear_sub_token` → клиент отвалится через ~12 ч). Полное решение — задача «Per-user VLESS UUIDs» (🔥 САМОЕ ВАЖНОЕ в P1).
 
 - [ ] **External uptime monitor для Fornex** (отложено 2026-05-29 по решению владельца):
   - Дыра: если падает сам Fornex (хост целиком) — `scripts/health_check.py` cron не запустится, TG-алерта не будет. Узнаёшь только по жалобам юзеров (от 30 мин до нескольких часов, ночью — до утра).
@@ -392,10 +388,25 @@
   - Рекомендация: UptimeRobot — простейший. Делает владелец сам (нужен его email + привязка TG-бота).
   - Время: 2-5 мин setup, ноль кода.
 
-- [ ] **Персональные UUIDs для main REALITY (Мегафон/Yota)** (предложено 2026-05-21):
-  - Сейчас на main REALITY один универсальный UUID для всех Мегафон/Yota юзеров. Для биллинга/трекинга — нужно перейти на per-user UUID (как сейчас на eu1 REALITY).
-  - Нужно: при выдаче ссылки через `/api/recovery/mobile-link-by-email` для оператора megafon/yota — генерировать персональный UUID, добавлять в Xray на main через `xray api inbounduser` (или через config reload), хранить в `users.vless_uuid_main` (новая колонка).
-  - Объём: ~1–1.5 часа.
+- [ ] **🔥 САМОЕ ВАЖНОЕ: Per-user VLESS UUIDs на всех 3 серверах** (приоритет повышен 2026-06-01):
+  - **Контекст:** сейчас на main/yc по одному общему UUID, на eu1 — пул 9 share-UUIDs. Все юзеры пользуются одним и тем же UUID per inbound.
+  - **Почему критично:**
+    1. **Невозможно отозвать VLESS-доступ конкретному юзеру** при истечении подписки (enforcement gap для VLESS share-link)
+    2. Нет per-user телеметрии (видим только общую через `xray api statsquery -pattern=inbound`)
+    3. Нет защиты от расшаривания (один UUID = неограниченное число устройств без идентификации)
+    4. Невозможен биллинг per-юзер по трафику
+  - **План реализации (4-6 ч, поэтапно):**
+    1. **БД migration:** колонки `users.vless_uuid_eu1`, `users.vless_uuid_main`, `users.vless_uuid_yc` (~10 мин)
+    2. **Хелперы:** `db_get_or_create_vless_uuid(tid, server_id)` — генерит UUID при первом запросе, хранит навсегда. Через `xray api inbounduser add` на нужном сервере (~30 мин)
+    3. **Изменить выдачу:** `/api/recovery/mobile-link-by-email`, `/sub/<token>`, bot `callback_mobile_operator`, `callback_vpn_quick` — используют per-user UUID (~1 ч)
+    4. **Backfill для 40+ существующих:** скрипт one-shot, создаёт per-user UUIDs всем активным юзерам, обновляет sub_token (~30 мин)
+    5. **Подождать 12-24 ч** — клиенты HAPP обновят subscription с новыми UUID
+    6. **Удалить общие share-UUIDs** из Xray-конфигов (eu1 пул 9 UUIDs, main 1 UUID, yc 1 UUID). После шага 5 — старые ссылки никем не используются (~5 мин)
+    7. **Расширить `vless_summary_accounting.py`** парсингом `user>>>` pattern, per-user lifetime в новую таблицу `vless_user_traffic` (~1 ч)
+    8. **Расширить enforce_expired.py**: при отзыве доступа также удалять per-user UUID через `xray api rmu` на всех 3 серверах (~30 мин)
+    9. **В админ-панели** статусы юзеров перестанут быть «тихими» когда они реально пользуются VLESS (закрывает gap который вылез на скриншоте `@n_alitair_b` 2026-06-01)
+  - **Зависимости/риски:** в шаге 6 удаление общих UUIDs ломает старые ссылки. Поэтому шаги 4→5→6 строго в этом порядке с паузой в сутки.
+  - **Без внешних блокеров.** Xray API всё поддерживает.
 
 ### 🟢 Приоритет 3 — Масштабирование (после ~100 платных пользователей)
 

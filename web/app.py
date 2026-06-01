@@ -1601,6 +1601,30 @@ def admin_credit():
             )
             # 2) Продление подписки
             new_exp = db_extend_subscription(telegram_id, days=days, plan="paid", status="active")
+            # 2a) Auto-restore revoked peers + уведомление (enforcement gap hook).
+            # Через прямой TG API + reusable helper из bot.wireguard_peers.
+            try:
+                from bot.wireguard_peers import restore_user_revoked_peers
+                restored = restore_user_revoked_peers(int(telegram_id))
+                if restored and config and getattr(config, "bot_token", None):
+                    notify_body = json.dumps({
+                        "chat_id": int(telegram_id),
+                        "text": "✅ <b>Доступ восстановлен.</b>\n\n"
+                                "Твой существующий конфиг снова работает — переподключаться не нужно.",
+                        "parse_mode": "HTML",
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+                        data=notify_body,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    try:
+                        urllib.request.urlopen(req, timeout=10).read()
+                    except Exception as e:
+                        logger.warning("/admin/credit notify-restore failed: %s", e)
+            except Exception as e:
+                logger.exception("/admin/credit auto-restore failed: %s", e)
             # 3) Реферальный бонус (idempotent)
             inviter_tid = db_apply_referral_bonus(telegram_id, REFERRAL_REWARD_DAYS)
 
