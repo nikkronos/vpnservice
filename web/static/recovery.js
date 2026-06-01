@@ -902,18 +902,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ── Кнопка «🆘 Поддержка» в главном меню → открывает бот с deeplink ?start=support
+  // ── Кнопка «🆘 Поддержка» — теперь <a target=_blank>, не <button>.
+  // В браузере: нативный клик по ссылке (popup-blocker не работает на user-initiated links).
+  // В TG WebApp: перехватываем JS-ом и зовём tg.openTelegramLink — без выхода из TG.
   const btnSupportLink = document.getElementById('btnSupportLink');
   if (btnSupportLink) {
-    btnSupportLink.addEventListener('click', () => {
+    btnSupportLink.addEventListener('click', (e) => {
       haptic('light');
-      const supportLink = 'https://t.me/vpnkronos_bot?start=support';
-      // В TG WebApp используем openTelegramLink — переход внутри Telegram, без выхода.
       if (inTelegram && tg.openTelegramLink) {
-        try { tg.openTelegramLink(supportLink); return; } catch (e) {}
+        e.preventDefault();
+        const supportLink = 'https://t.me/vpnkronos_bot?start=support';
+        try { tg.openTelegramLink(supportLink); } catch (_) {}
       }
-      // В браузере — обычный переход.
-      window.open(supportLink, '_blank');
+      // В браузере — preventDefault НЕ вызывается, href сработает естественно.
     });
   }
 
