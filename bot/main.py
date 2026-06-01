@@ -1831,7 +1831,7 @@ def main() -> None:
         message.text = f"/add_user {message.text}"
         cmd_add_user(message)
 
-    # ── Зачислить дней юзеру: кнопка из админ-панели ──────────────────────────
+    # ── Зачислить/списать дней юзеру: кнопки из админ-панели ──────────────────
 
     @bot.callback_query_handler(func=lambda call: call.data == "admin_credit_user")
     def callback_admin_credit_user(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -1841,10 +1841,13 @@ def main() -> None:
         _pending_credit_user.add(call.from_user.id)
         bot.send_message(
             call.message.chat.id,
-            "💳 Зачисление дней.\n\n"
+            "💳 <b>Зачислить / списать дней</b>\n\n"
             "Введи одним сообщением: <code>telegram_id дней [метка]</code>\n\n"
+            "<b>Положительное число</b> — добавить дни (зачисление).\n"
+            "<b>Отрицательное число</b> — списать дни (коррекция, например при возврате).\n\n"
             "Примеры:\n"
             "<code>151990415 30</code> — добавить 30 дней\n"
+            "<code>151990415 -10 ошибочное зачисление</code> — списать 10 дней\n"
             "<code>151990415 30 СБП Иван 27.05</code> — с меткой\n\n"
             "Отправь «отмена» чтобы выйти.",
             parse_mode="HTML",
@@ -1872,10 +1875,11 @@ def main() -> None:
         except ValueError:
             safe_reply(message, "tid и дней должны быть числами. Попробуй ещё раз через кнопку.")
             return
-        if days < 1 or days > 365:
-            safe_reply(message, "Дней должно быть в диапазоне 1–365.")
+        if days == 0 or abs(days) > 365:
+            safe_reply(message, "Дней должно быть в диапазоне ±1…365 (0 не имеет смысла).")
             return
         note = parts[2] if len(parts) > 2 else ""
+        is_debit = days < 0  # списание (отрицательное)
 
         user_row = db_find_user_by_telegram_id(tid)
         if not user_row:
@@ -1885,18 +1889,25 @@ def main() -> None:
         import time as _time
         ext_id = f"manual-bot-{tid}-{int(_time.time())}"
         try:
-            db_record_payment(
-                provider="manual",
-                amount=200.0 * (days / 30.0),
-                currency="RUB",
-                telegram_id=tid,
-                external_id=ext_id,
-                plan="monthly",
-                days=days,
-                status="succeeded",
-            )
+            # Запись в payments — ТОЛЬКО для зачислений (положительные дни).
+            # Списание = коррекция баланса, не платёж — payments-таблица
+            # для бухгалтерии, дебеты туда не пишем.
+            if not is_debit:
+                db_record_payment(
+                    provider="manual",
+                    amount=200.0 * (days / 30.0),
+                    currency="RUB",
+                    telegram_id=tid,
+                    external_id=ext_id,
+                    plan="monthly",
+                    days=days,
+                    status="succeeded",
+                )
             new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
-            inviter = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
+            # Реферал-бонус — только при зачислении. При списании не начисляем.
+            inviter = None
+            if not is_debit:
+                inviter = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
         except Exception as e:
             logger.exception("admin credit failed: %s", e)
             safe_reply(message, f"❌ Ошибка: {e}")
@@ -1905,8 +1916,9 @@ def main() -> None:
         exp_str = (new_exp or "")[:10]
         uname = user_row.get("username") or "—"
         email = user_row.get("email") or "—"
+        op_label = f"Списано: {days} дней" if is_debit else f"Зачислено: +{days} дней"
         summary = (
-            f"✅ Зачислено: +{days} дней.\n\n"
+            f"✅ {op_label}.\n\n"
             f"👤 @{uname} (id <code>{tid}</code>)\n"
             f"📧 {email}\n"
             f"📅 Активна до <b>{exp_str}</b>"
@@ -1917,15 +1929,17 @@ def main() -> None:
             summary += f"\n🎁 Реферал-бонус: +{REFERRAL_REWARD_DAYS} дн пригласителю (tid {inviter})"
         safe_reply(message, summary)
 
-        # Уведомление юзеру
-        try:
-            bot.send_message(
-                tid,
-                f"✅ Подписка продлена на {days} дней — активна до <b>{exp_str}</b>.",
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.warning("notify credited user failed: %s", e)
+        # Уведомление юзеру (только при зачислении — при списании юзеру не
+        # сообщаем автоматически, это административная коррекция).
+        if not is_debit:
+            try:
+                bot.send_message(
+                    tid,
+                    f"✅ Подписка продлена на {days} дней — активна до <b>{exp_str}</b>.",
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.warning("notify credited user failed: %s", e)
 
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
