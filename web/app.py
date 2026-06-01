@@ -449,6 +449,12 @@ def contacts():
     return render_template("contacts.html")
 
 
+@app.route("/privacy")
+def privacy():
+    """Политика обработки персональных данных (152-ФЗ)."""
+    return render_template("privacy.html")
+
+
 @app.route("/admin")
 @_require_admin_auth
 def admin_panel():
