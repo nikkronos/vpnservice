@@ -690,7 +690,6 @@ def main() -> None:
         # Неизвестный шаг — чистим состояние
         _onboarding_state.pop(tid, None)
 
-    @bot.message_handler(commands=["start"])
     def _notify_inviter_about_signup_from_bot(ref_code: str) -> None:
         """
         Уведомляет пригласителя в TG, что по его реф-ссылке зарегистрировался
@@ -717,8 +716,9 @@ def main() -> None:
                 disable_web_page_preview=True,
             )
         except Exception as e:
-            logger.warning("notify inviter (bot) failed: %s", e)
+            logger.exception("notify inviter (bot) failed: %s", e)
 
+    @bot.message_handler(commands=["start"])
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
             return
