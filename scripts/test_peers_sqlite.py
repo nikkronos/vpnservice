@@ -23,6 +23,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+try:  # Windows-консоль (cp1251) не должна ронять вывод на emoji/стрелках
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 _FAILED = 0
 
 
