@@ -124,6 +124,7 @@ scripts/
   peers_sync_check.py   — диагностика рассинхрона таблицы peers ↔ awg show ↔ БД (read-only, on-demand)
   migrate_peers_check.py — бэкап + сверка peers.json ↔ таблица peers (для cutover; read-only кроме --backup)
   test_peers_sqlite.py  — self-contained тест миграции + storage поверх SQLite (на временной БД)
+  eu1_monitor.sh        — лёгкий мониторинг eu1 (cron */5): CSV метрик (load/RAM/swap/conntrack/awg-peers/rx-tx) в /var/log/eu1-monitor.log для расследования жалоб «скорость падает». Без speedtest, self-trim.
 ```
 
 ### Ключевые концепции
@@ -253,7 +254,8 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
     - `0 */6 * * *` `scripts/sheets_sync_cron.py` — auto-sync Google Sheets (каждые 6 ч). Ручной триггер в боте «📊 Sync Google Sheets» остаётся как fallback.
     - `0 * * * *` `scripts/enforce_expired.py --apply` — отзыв AWG peer у юзеров с `expires_at < now - 12h`. Soft-revoke: peer удаляется из runtime, peer-credentials в peers.json сохраняются (`active=False`). При оплате — auto-restore через `restore_user_revoked_peers` hook в payment-handlers (Stars / claim_approve / admin_credit / web/admin/credit). Уведомление юзеру при отзыве, владельцу — сводка с тех революциях когда они есть.
     - `*/15 * * * *` `scripts/health_check.py` — 22 проверки инфры. **Fornex (12, локально):** systemd сервисы (vpn-bot/vpn-web/nginx/xray), docker (amnezia-awg2/mtproxy-faketls), AWG peer-count, peers.json/awg consistency, диск, swap, LE-cert, HTTPS endpoint. **main (6, через SSH):** reachable + xray + wg-quick@wg0 + :443/tcp + :51820/udp + диск. **yc (4, через SSH):** reachable + xray + :443/tcp + диск. **Все remote-проверки одного хоста идут одним SSH-batch'ем** (с маркерами `<<<BEGIN:N>>>`/`<<<END:N:rc>>>`) — раньше отдельные ssh-коннекты иногда отбивались провайдером main с `Connection closed by ... port 22` на 5-6-м соединении (false-FAIL'ы 2026-05-31). При смене статуса OK↔FAIL шлёт TG-алерт владельцу (прямой HTTP API, не через инстанс бота). State: `/var/lib/vpn-health/state.json`. Remote-ключи префиксованы `<host>:` (`yc:xray.service`). FAIL `<host>:reachable` — gate: остальные проверки этого хоста скипаются, чтобы один сетевой провал не давал каскад.
-    После reboot проверять `crontab -l` — все пять на месте.
+    - `*/5 * * * *` `scripts/eu1_monitor.sh` — лёгкий мониторинг eu1 (CSV в `/var/log/eu1-monitor.log`) для расследования жалоб «скорость падает». Без speedtest, self-trim до ~12000 строк.
+    После reboot проверять `crontab -l` — все на месте (8 шт).
 11. **Swap на eu1:** `/swapfile` 2 ГБ, `swappiness=10` (RAM всего 2 ГБ) — не удалять, страховка от OOM.
 12. **Swap на yc:** `/swapfile` 1 ГБ, `swappiness=10` (RAM всего 960 МБ — критически мало) — добавлен 2026-06-01 после серии 14-минутных freeze'ов из-за memory pressure. Xray на yc ел до 619 МБ RAM (64%) из-за накопления stats counters + state от SYN-сканеров. Без swap при OOM-pressure ядро замораживало процессы → SSH timeout → health-check FAIL → юзеры теряли VLESS на ~14 мин. Если повторится при росте нагрузки — рассмотреть upgrade VM (yc free-tier очень тесный) или перезапуск Xray по расписанию.
 
