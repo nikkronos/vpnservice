@@ -17,4 +17,4 @@
 
 ## Обновление
 
-При изменении шагов в `docs/client-instructions-pc.md`, `docs/client-instructions-ios.md` или `docs/client-instructions-android.md` обновить соответствующий `instruction_*_short.txt` и задеплоить бота.
+Актуальный источник инструкций бота — сами `instruction_*_short.txt`. Классические гайды `docs/archive/client-instructions-{pc,ios,android}.md` устарели (WireGuard-эпоха), оставлены как история.

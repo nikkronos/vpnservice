@@ -167,4 +167,4 @@ sudo iptables -t nat -L PREROUTING -n | grep 1081
 
 - `deployment.md` — информация о серверах и сервисах
 - `architecture.md` — архитектура системы
-- `spec-01-architecture-wg-ss.md` — детали архитектуры WireGuard + Shadowsocks
+- `docs/archive/spec-01-architecture-wg-ss.md` — детали архитектуры WireGuard + Shadowsocks (legacy)

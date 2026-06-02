@@ -149,8 +149,8 @@ Telegram пытается использовать MTProto proxy, но он ко
 
 - `specs/spec-04-unified-profile-all-services.md` — единый профиль для всех сервисов
 - `troubleshooting-ios-devices.md` — проблемы с iOS устройствами
-- `spec-02-telegram-mtproto-proxy.md` — настройка MTProto proxy
-- `spec-01-architecture-wg-ss.md` — архитектура системы
+- `docs/archive/spec-02-telegram-mtproto-proxy.md` — настройка MTProto proxy (legacy)
+- `docs/archive/spec-01-architecture-wg-ss.md` — архитектура системы (legacy)
 
 ## Вопросы для диагностики
 

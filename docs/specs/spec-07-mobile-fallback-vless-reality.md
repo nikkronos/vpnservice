@@ -1,5 +1,7 @@
 # Spec 07: резервный доступ с мобильной сети (VLESS + REALITY)
 
+> ⚠️ **РЕАЛИЗОВАНО (2026), спека историческая.** VLESS+REALITY mobile-fallback работает, но серверы сменились: REALITY теперь на **yc** (SNI www.microsoft.com) и **main** (cloud.mail.ru), не на eu1:443. Выдача — через subscription URL и бот. Актуальная картина — корневой `CLAUDE.md`.
+
 ## Проблема
 
 - AmneziaWG / WireGuard по **UDP** и часть прокси на **мобильном интернете** (LTE/5G) не устанавливают соединение, при этом на Wi‑Fi те же конфиги работают.

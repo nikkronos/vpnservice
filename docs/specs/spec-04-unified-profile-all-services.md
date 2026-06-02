@@ -196,7 +196,7 @@ DNS = 10.1.0.1, 8.8.8.8
 
 ## Связанные документы
 
-- `spec-01-architecture-wg-ss.md` — текущая архитектура
+- `docs/archive/spec-01-architecture-wg-ss.md` — текущая архитектура (legacy)
 - `troubleshooting-ios-devices.md` — проблемы с устройствами
 - `eu1-workarounds-fornex.md` — обходные пути
 - `ROADMAP_VPN.md` — планы развития

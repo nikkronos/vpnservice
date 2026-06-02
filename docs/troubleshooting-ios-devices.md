@@ -190,7 +190,7 @@ cloudflared tunnel create vpn-tunnel
 - `eu1-workarounds-fornex.md` — детальные инструкции по обходным путям
 - `eu1-setup-and-troubleshooting.md` — диагностика проблем eu1
 - `deployment.md` — информация о серверах
-- `spec-01-architecture-wg-ss.md` — архитектура системы
+- `docs/archive/spec-01-architecture-wg-ss.md` — архитектура системы (legacy)
 
 ## Вопросы для диагностики
 

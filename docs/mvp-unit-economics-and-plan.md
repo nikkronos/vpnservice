@@ -7,7 +7,7 @@
 - протоколы уровня VPN (WireGuard/AmneziaWG/VLESS+REALITY) могут быть **не первопричиной**;
 - устойчивость достигается не “идеальным протоколом”, а **портфелем независимых точек входа** (разные IP/ASN/провайдеры) и быстрым фолбэком.
 
-См. фиксацию: `docs/blocking-bypass-strategy.md` (дополнение 2026‑03‑26) и `docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md`.
+См. фиксацию: `docs/blocking-bypass-strategy.md` (дополнение 2026‑03‑26) и `docs/archive/mobile-lte-eu1-xray-reality-attempt-2026-03.md`.
 
 ---
 

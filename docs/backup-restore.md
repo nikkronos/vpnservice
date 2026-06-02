@@ -119,5 +119,5 @@ systemctl cat xray > "$BACKUP_DIR/xray.service.txt" 2>/dev/null || true
 
 ## Связанные документы
 
-- `docs/specs/spec-01-architecture-wg-ss.md` — архитектура
-- `docs/checklist-add-client.md` — добавление клиента
+- `CLAUDE.md` (корень) — актуальная архитектура и инфраструктура
+- `docs/archive/checklist-add-client.md` — ручное добавление WG-клиента (legacy; бот делает автоматически)
