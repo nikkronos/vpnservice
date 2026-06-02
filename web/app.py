@@ -1616,30 +1616,47 @@ def admin_credit():
             )
             # 2) Продление подписки
             new_exp = db_extend_subscription(telegram_id, days=days, plan="paid", status="active")
-            # 2a) Auto-restore revoked peers + уведомление (enforcement gap hook).
-            # Через прямой TG API + reusable helper из bot.wireguard_peers.
+            # 2a) Auto-restore (enforcement gap hook): AWG + VLESS soft-restore.
+            restored_awg = []
+            restored_vless = False
             try:
                 from bot.wireguard_peers import restore_user_revoked_peers
-                restored = restore_user_revoked_peers(int(telegram_id))
-                if restored and config and getattr(config, "bot_token", None):
-                    notify_body = json.dumps({
-                        "chat_id": int(telegram_id),
-                        "text": "✅ <b>Доступ восстановлен.</b>\n\n"
-                                "Твой существующий конфиг снова работает — переподключаться не нужно.",
-                        "parse_mode": "HTML",
-                    }).encode("utf-8")
-                    req = urllib.request.Request(
-                        f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
-                        data=notify_body,
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    )
-                    try:
-                        urllib.request.urlopen(req, timeout=10).read()
-                    except Exception as e:
-                        logger.warning("/admin/credit notify-restore failed: %s", e)
+                restored_awg = restore_user_revoked_peers(int(telegram_id))
             except Exception as e:
-                logger.exception("/admin/credit auto-restore failed: %s", e)
+                logger.exception("/admin/credit AWG restore failed: %s", e)
+            # VLESS: async sync_xray_users.py если у юзера есть UUIDs
+            try:
+                if (db_get_per_user_vless_uuid(int(telegram_id), "main")
+                        or db_get_per_user_vless_uuid(int(telegram_id), "yc")):
+                    import subprocess as _sp
+                    script_path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+                    _sp.Popen(
+                        [sys.executable, str(script_path), "--all", "--no-shared"],
+                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                        start_new_session=True,
+                    )
+                    restored_vless = True
+                    logger.info("/admin/credit: spawned VLESS sync for tid=%s", telegram_id)
+            except Exception as e:
+                logger.warning("/admin/credit VLESS sync failed: %s", e)
+            # Уведомление юзеру если хоть что-то восстановлено
+            if (restored_awg or restored_vless) and config and getattr(config, "bot_token", None):
+                notify_body = json.dumps({
+                    "chat_id": int(telegram_id),
+                    "text": "✅ <b>Доступ восстановлен.</b>\n\n"
+                            "Твой существующий конфиг снова работает — переподключаться не нужно.",
+                    "parse_mode": "HTML",
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+                    data=notify_body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                try:
+                    urllib.request.urlopen(req, timeout=10).read()
+                except Exception as e:
+                    logger.warning("/admin/credit notify-restore failed: %s", e)
             # 3) Реферальный бонус (idempotent)
             inviter_tid = db_apply_referral_bonus(telegram_id, REFERRAL_REWARD_DAYS)
 

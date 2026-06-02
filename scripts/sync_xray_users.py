@@ -101,8 +101,22 @@ def _ssh_write_file(ssh_args: List[str], path: str, content: str, sudo: str = ""
 
 def fetch_db_users_for_server(server_id: str) -> List[Dict]:
     """
-    Берёт из БД активных юзеров с per-user UUID для указанного сервера.
-    Возвращает [{"telegram_id": int, "uuid": str}, ...] (только те у кого UUID задан).
+    Берёт из БД юзеров с per-user UUID для указанного сервера, у которых
+    активный доступ (с учётом grace 12h — тем же условием что enforce_expired.py).
+
+    Условие active:
+      - users.active = 1
+      - telegram_id IS NOT NULL
+      - UUID для сервера IS NOT NULL
+      - expires_at IS NULL (grandfather) ИЛИ
+        datetime(expires_at) > datetime('now', '-12 hours') (активный или в grace)
+
+    Юзеры с истёкшей подпиской > 12h автоматически исключаются → при следующем
+    sync их UUID пропадёт из Xray clients[] → старая ссылка перестанет работать.
+    При оплате (db_extend_subscription) → expires_at в будущем → юзер снова
+    попадает в SQL → следующий sync восстановит UUID.
+
+    Это VLESS-аналог soft-revoke для AWG (commit a2d8c88).
     """
     from bot.database import _conn, _ensure_init
     _ensure_init()
@@ -110,7 +124,9 @@ def fetch_db_users_for_server(server_id: str) -> List[Dict]:
     with _conn() as con:
         rows = con.execute(
             f"SELECT telegram_id, {col} AS uuid FROM users "
-            f"WHERE telegram_id IS NOT NULL AND active = 1 AND {col} IS NOT NULL"
+            f"WHERE telegram_id IS NOT NULL AND active = 1 AND {col} IS NOT NULL "
+            f"  AND (expires_at IS NULL "
+            f"       OR datetime(expires_at) > datetime('now', '-12 hours'))"
         ).fetchall()
     return [{"telegram_id": int(r["telegram_id"]), "uuid": r["uuid"]} for r in rows]
 

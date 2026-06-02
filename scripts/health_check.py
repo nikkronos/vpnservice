@@ -341,6 +341,73 @@ def check_le_cert() -> CheckResult:
         return CheckResult(name, "FAIL", f"check error: {e}")
 
 
+def check_vless_config_consistency() -> CheckResult:
+    """
+    Cross-server consistency check: count(per-user UUIDs в БД) vs count(clients[]
+    в Xray config.json на main и yc). Если разошлось > 2 (буфер для гонок sync) —
+    FAIL: значит cron safety net (`sync_xray_users.py --all --no-shared`) не
+    сработал или sync упал.
+
+    Допуск ±2: один юзер может быть в процессе оплаты/revoke между БД и config,
+    плюс возможна гонка между sync_xray_users и health_check.
+    """
+    name = "vless_config_consistency"
+    try:
+        from bot.database import _conn, _ensure_init
+        _ensure_init()
+        with _conn() as con:
+            row = con.execute(
+                "SELECT "
+                "  SUM(CASE WHEN vless_uuid_main IS NOT NULL "
+                "           AND (expires_at IS NULL "
+                "                OR datetime(expires_at) > datetime('now', '-12 hours')) "
+                "      THEN 1 ELSE 0 END) AS db_main, "
+                "  SUM(CASE WHEN vless_uuid_yc IS NOT NULL "
+                "           AND (expires_at IS NULL "
+                "                OR datetime(expires_at) > datetime('now', '-12 hours')) "
+                "      THEN 1 ELSE 0 END) AS db_yc "
+                "FROM users "
+                "WHERE telegram_id IS NOT NULL AND active = 1"
+            ).fetchone()
+        db_main = (row["db_main"] or 0) if row else 0
+        db_yc = (row["db_yc"] or 0) if row else 0
+
+        # SSH к main и yc — забираем count(clients) из config.json
+        ssh_main = REMOTE_HOSTS["main"]
+        ssh_yc = REMOTE_HOSTS["yc"]
+        cmd_main = "jq '[.inbounds[] | select(.tag==\"vless-tcp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
+        cmd_yc = "sudo jq '[.inbounds[] | select(.tag==\"vless-xhttp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
+
+        r_m = subprocess.run(ssh_main + [cmd_main], capture_output=True, text=True, timeout=15)
+        r_y = subprocess.run(ssh_yc + [cmd_yc], capture_output=True, text=True, timeout=15)
+
+        try:
+            cfg_main = int(r_m.stdout.strip()) if r_m.returncode == 0 else -1
+        except ValueError:
+            cfg_main = -1
+        try:
+            cfg_yc = int(r_y.stdout.strip()) if r_y.returncode == 0 else -1
+        except ValueError:
+            cfg_yc = -1
+
+        if cfg_main < 0 or cfg_yc < 0:
+            return CheckResult(
+                name, "FAIL",
+                f"не удалось прочитать count(clients) на main/yc",
+                f"main_rc={r_m.returncode} yc_rc={r_y.returncode}",
+            )
+
+        diff_main = abs(db_main - cfg_main)
+        diff_yc = abs(db_yc - cfg_yc)
+        msg = f"db_main={db_main} cfg_main={cfg_main} (diff {diff_main}), db_yc={db_yc} cfg_yc={cfg_yc} (diff {diff_yc})"
+
+        if diff_main > 2 or diff_yc > 2:
+            return CheckResult(name, "FAIL", f"разошлось > 2 ({msg})", msg)
+        return CheckResult(name, "OK", msg)
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(name, "FAIL", f"check error: {e}")
+
+
 def check_https_endpoint() -> CheckResult:
     name = "https_endpoint"
     try:
@@ -538,6 +605,7 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results.append(check_memory_swap())
     results.append(check_le_cert())
     results.append(check_https_endpoint())
+    results.append(check_vless_config_consistency())
 
     # --- Remote (main, yc): batch-вызов на хост, gate по reachable ---
     # Все проверки одного хоста выполняются ОДНИМ SSH-вызовом через

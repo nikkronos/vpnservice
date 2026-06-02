@@ -698,19 +698,42 @@ def main() -> None:
     def _restore_and_notify(telegram_id: int) -> None:
         """
         Hook после успешного db_extend_subscription: возвращает revoked AWG peer'ы
-        в runtime + уведомляет юзера. Idempotent — если у юзера нет revoked
-        peer'ов (никогда не отзывался), ничего не делает.
+        в runtime + триггерит async sync VLESS UUIDs (если у юзера есть) +
+        уведомляет юзера. Idempotent.
 
         Используется во всех payment-handlers (Stars, donation, admin_credit).
         Без этого юзер после оплаты должен был бы сам нажать «Получить VPN»
-        для нового конфига — теперь старый .conf просто снова заработает.
+        для нового конфига — теперь старый .conf и subscription снова работают.
         """
+        # 1. AWG soft-restore (как было)
+        restored_awg = []
         try:
-            restored = restore_user_revoked_peers(telegram_id)
+            restored_awg = restore_user_revoked_peers(telegram_id)
         except Exception as e:
             logger.exception("restore_user_revoked_peers failed for tid=%s: %s", telegram_id, e)
-            return
-        if not restored:
+
+        # 2. VLESS soft-restore (NEW) — async sync_xray_users.py если у юзера есть UUIDs.
+        # sync_xray_users.py забирает только active юзеров (с учётом grace 12h);
+        # после db_extend_subscription expires_at в будущем → юзер попадает в active
+        # → UUID возвращается в Xray clients[] → старая ссылка снова работает.
+        restored_vless = False
+        try:
+            if db_get_per_user_vless_uuid(telegram_id, "main") or db_get_per_user_vless_uuid(telegram_id, "yc"):
+                import subprocess as _sp
+                import pathlib as _pl
+                script_path = _pl.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+                _sp.Popen(
+                    [sys.executable, str(script_path), "--all", "--no-shared"],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                    start_new_session=True,
+                )
+                restored_vless = True
+                logger.info("Spawned async sync_xray_users for VLESS auto-restore tid=%s", telegram_id)
+        except Exception as e:
+            logger.warning("VLESS auto-restore sync failed for tid=%s: %s", telegram_id, e)
+
+        # 3. Уведомить юзера — только если хоть что-то восстановилось
+        if not (restored_awg or restored_vless):
             return
         try:
             bot.send_message(
