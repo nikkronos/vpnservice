@@ -1,0 +1,7 @@
+# Нормализация концов строк.
+# Скрипты деплоятся на Linux-серверы (Fornex/main/yc) — форсим LF, чтобы при
+# ре-чекауте репозитория на Windows (core.autocrlf) они не получили CRLF и
+# не сломались на shebang/командах (bash) или импортах (python).
+* text=auto
+*.sh  text eol=lf
+*.py  text eol=lf
