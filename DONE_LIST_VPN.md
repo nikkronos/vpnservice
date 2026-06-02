@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-02 — Мониторинг eu1 + чистка доков + .gitattributes
+
+**Лёгкий мониторинг eu1** (`6eb38cc`): `scripts/eu1_monitor.sh` (cron `*/5`, теперь 8 кронов) пишет CSV (load/RAM/swap/conntrack/awg-peers/rx-tx eth0) в `/var/log/eu1-monitor.log`. Без speedtest (не грузим 100-Мбит порт). Под расследование жалоб «скорость иногда падает» — корреляция метрик с временем жалобы. Задеплоен, протестирован.
+
+**Глубокая чистка доков** (`b1c548a`, `4f98e04`): 18 устаревших доков (classic-WG / Shadowsocks / Remnawave / historical эпохи) → `docs/archive/` (git rename, история сохранена). Баннеры «устарело/реализовано» на `spec-05`, `spec-07`, `deployment.md`, `eu1-setup-and-troubleshooting.md`, `backup-restore.md` (последний — добавлен блок «что бэкапить сейчас»: `vpn.db` + AWG PSK). 13 активных доков — фикс inbound-ссылок на `archive/`, битых ссылок в актуальных доках нет. `docs/` root ~40→31, `docs/specs/` ~10→4. DONE_LIST/sessions/archive не трогались (история).
+
+**`.gitattributes`** (`0283986`): LF форсится для `*.sh`/`*.py` — защита от CRLF при ре-чекауте на Windows (скрипты деплоятся на Linux). Renormalize 0 изменений (блобы уже LF).
+
+---
+
 ## 2026-06-02 — Уведомление РКН об обработке ПД подано (вариант B)
 
 Стали оператором ПД (email + telegram_id юзеров) → подали уведомление на pd.rkn.gov.ru. **Номер 100306737, ключ 15161399.** Принято в ИС уполномоченного органа, в реестр ~неделя.
