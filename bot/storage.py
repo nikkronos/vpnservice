@@ -9,6 +9,13 @@ PEERS_FILE = DATA_DIR / "peers.json"
 
 VALID_PLATFORMS = frozenset({"pc", "ios", "android"})
 
+# Переходный период миграции peers.json → SQLite (2026-06).
+# Источник правды — таблица `peers` в SQLite. upsert/delete дублируются в
+# peers.json как зеркало-страховка (мгновенный откат на старый storage.py).
+# Phase 3 (после нескольких дней наблюдения) — выставить False, оставить
+# только периодический export-бэкап.
+DUAL_WRITE_JSON = True
+
 
 def _normalize_platform(platform: Optional[str]) -> str:
     """Нормализует платформу к допустимому значению. По умолчанию 'pc'."""
@@ -136,11 +143,60 @@ def _save_raw(path: pathlib.Path, data: Dict[str, dict]) -> None:
 
 
 def _load_peers_data() -> Dict[str, dict]:
+    """
+    Возвращает {storage_key: payload} как раньше, но источник правды — таблица
+    `peers` в SQLite. storage_key = "{tid}:{server_id}:{platform}".
+
+    Fallback: таблица пуста, а peers.json непустой → читаем JSON. После
+    init_db()._migrate_peers_json_to_sqlite этого не должно случаться, но для
+    критичных данных (клиентские конфиги) оставляем подстраховку на случай
+    если миграция ещё не отработала.
+    """
+    from .database import db_get_all_peers
+
+    rows = db_get_all_peers()
+    if rows:
+        out: Dict[str, dict] = {}
+        for r in rows:
+            sid = normalize_peer_server_id(r.get("server_id"))
+            plat = _normalize_platform(r.get("platform"))
+            key = f'{r["telegram_id"]}:{sid}:{plat}'
+            out[key] = {
+                "telegram_id": int(r["telegram_id"]),
+                "wg_ip": r["wg_ip"],
+                "public_key": r["public_key"],
+                "server_id": sid,
+                "active": bool(r["active"]),
+                "profile_type": r.get("profile_type"),
+                "platform": plat,
+            }
+        return out
+
+    # Fallback на сырой JSON (таблица пуста)
     raw = _load_raw(PEERS_FILE)
     migrated = _migrate_peers_json_on_load(raw)
     if migrated != raw:
         _save_raw(PEERS_FILE, migrated)
     return migrated
+
+
+def _upsert_peer_json(peer_norm: "Peer") -> None:
+    """Зеркалит один слот в peers.json (read-modify-write сырого файла)."""
+    data = _migrate_peers_json_on_load(_load_raw(PEERS_FILE))
+    key = _peer_storage_key(peer_norm.telegram_id, peer_norm.server_id, peer_norm.platform)
+    data[key] = asdict(peer_norm)
+    _save_raw(PEERS_FILE, data)
+
+
+def _delete_peer_json(telegram_id: int, server_id: str, platform: str) -> None:
+    """Удаляет один слот из peers.json-зеркала."""
+    data = _migrate_peers_json_on_load(_load_raw(PEERS_FILE))
+    key = _peer_storage_key(
+        telegram_id, normalize_peer_server_id(server_id), _normalize_platform(platform)
+    )
+    if key in data:
+        del data[key]
+        _save_raw(PEERS_FILE, data)
 
 
 def _user_from_db_row(row: dict) -> User:
@@ -352,7 +408,10 @@ def find_peer_by_telegram_id(
 
 
 def upsert_peer(peer: Peer) -> None:
-    data = _load_peers_data()
+    """
+    Вставляет/обновляет peer-слот. Источник правды — таблица `peers` в SQLite;
+    peers.json зеркалится пока DUAL_WRITE_JSON=True (страховка отката).
+    """
     sid = normalize_peer_server_id(peer.server_id)
     plat = _normalize_platform(getattr(peer, "platform", "pc"))
     peer_norm = Peer(
@@ -364,19 +423,32 @@ def upsert_peer(peer: Peer) -> None:
         profile_type=peer.profile_type,
         platform=plat,
     )
-    key = _peer_storage_key(peer_norm.telegram_id, sid, plat)
-    data[key] = asdict(peer_norm)
-    _save_raw(PEERS_FILE, data)
+    from .database import db_upsert_peer
+
+    db_upsert_peer(
+        {
+            "telegram_id": peer_norm.telegram_id,
+            "server_id": sid,
+            "platform": plat,
+            "wg_ip": peer_norm.wg_ip,
+            "public_key": peer_norm.public_key,
+            "active": peer_norm.active,
+            "profile_type": peer_norm.profile_type,
+        }
+    )
+    if DUAL_WRITE_JSON:
+        _upsert_peer_json(peer_norm)
 
 
 def delete_peer(telegram_id: int, server_id: str, platform: str = "pc") -> None:
-    """Удаляет запись peer из JSON (редко нужно)."""
-    data = _load_peers_data()
-    key = _peer_storage_key(
-        telegram_id,
-        normalize_peer_server_id(server_id),
-        _normalize_platform(platform),
-    )
-    if key in data:
-        del data[key]
-        _save_raw(PEERS_FILE, data)
+    """
+    Удаляет peer-слот (редко нужно). Источник правды — SQLite; peers.json
+    зеркалится пока DUAL_WRITE_JSON=True.
+    """
+    sid = normalize_peer_server_id(server_id)
+    plat = _normalize_platform(platform)
+    from .database import db_delete_peer
+
+    db_delete_peer(telegram_id, sid, plat)
+    if DUAL_WRITE_JSON:
+        _delete_peer_json(telegram_id, sid, plat)

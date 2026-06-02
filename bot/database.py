@@ -20,6 +20,7 @@ _BASE_DIR = pathlib.Path(__file__).resolve().parent
 DATA_DIR = _BASE_DIR / "data"
 DB_PATH = DATA_DIR / "vpn.db"
 USERS_JSON_PATH = DATA_DIR / "users.json"
+PEERS_JSON_PATH = DATA_DIR / "peers.json"
 
 _db_initialized = False
 
@@ -31,6 +32,9 @@ def _conn() -> Generator[sqlite3.Connection, None, None]:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
+    # Несколько писателей одновременно (bot + web + cron-скрипты) — ждём
+    # освобождения блокировки до 5 с вместо мгновенного "database is locked".
+    con.execute("PRAGMA busy_timeout=5000")
     try:
         yield con
         con.commit()
@@ -64,6 +68,25 @@ CREATE TABLE IF NOT EXISTS servers (
     capacity    INTEGER NOT NULL DEFAULT 100,      -- max users on this server
     active      INTEGER NOT NULL DEFAULT 1         -- 0 = offline / maintenance
 );
+
+-- VPN-слоты пользователей (WG/AmneziaWG peers). Раньше жили только в
+-- bot/data/peers.json; консолидированы в SQLite (2026-06). Composite-ключ
+-- (telegram_id, server_id, platform) повторяет ключ peers.json
+-- "{tid}:{server_id}:{platform}". Без FK на users/servers — сохраняем
+-- вольность JSON (legacy/синтетические отрицательные tid, peers вне users).
+CREATE TABLE IF NOT EXISTS peers (
+    telegram_id   INTEGER NOT NULL,
+    server_id     TEXT NOT NULL DEFAULT 'rus1',
+    platform      TEXT NOT NULL DEFAULT 'pc',       -- 'pc' | 'ios' | 'android'
+    wg_ip         TEXT NOT NULL,
+    public_key    TEXT NOT NULL,
+    active        INTEGER NOT NULL DEFAULT 1,
+    profile_type  TEXT,                             -- для eu1: 'vpn'|'vpn_gpt'|'unified'
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT,
+    PRIMARY KEY (telegram_id, server_id, platform)
+);
+CREATE INDEX IF NOT EXISTS idx_peers_public_key ON peers (public_key);
 
 CREATE TABLE IF NOT EXISTS otp_codes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,6 +184,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     with _conn() as con:
         con.executescript(_SCHEMA)
     _migrate_from_json()
+    _migrate_peers_json_to_sqlite()
     _migrate_add_vless_columns()
     _migrate_add_servers_table()
     _migrate_add_proxy_column()
@@ -482,6 +506,80 @@ def _migrate_from_json() -> None:
         logger.info("Мигрировано users.json → SQLite: %d записей", migrated)
 
 
+def _migrate_peers_json_to_sqlite() -> None:
+    """
+    Переносит bot/data/peers.json → таблицу peers (идемпотентно).
+
+    Пропускает уже существующие слоты по composite-ключу
+    (telegram_id, server_id, platform). Нормализация ключей/server_id/platform
+    переиспользуется из storage.py (late-import — чистые функции, без БД,
+    без циклического импорта). Записи без wg_ip/public_key пропускаются.
+
+    Запускается из init_db() на каждом старте — но реально вставляет строки
+    только при первом проходе (или когда в peers.json появился новый слот,
+    которого ещё нет в таблице). peers.json остаётся как dual-write зеркало
+    на время переходного периода (см. storage.DUAL_WRITE_JSON).
+    """
+    if not PEERS_JSON_PATH.exists():
+        return
+    try:
+        raw = json.loads(PEERS_JSON_PATH.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("peers.json миграция: не удалось прочитать (%s)", e)
+        return
+    if not raw:
+        return
+    from .storage import (  # late-import: чистые функции нормализации, без БД
+        _migrate_peers_json_on_load,
+        normalize_peer_server_id,
+        _normalize_platform,
+    )
+    normalized = _migrate_peers_json_on_load(raw)
+    migrated = 0
+    with _conn() as con:
+        for key, payload in normalized.items():
+            parts = str(key).split(":")
+            try:
+                tid = int(payload.get("telegram_id", parts[0]))
+            except (ValueError, TypeError):
+                continue
+            sid = normalize_peer_server_id(
+                payload.get("server_id", parts[1] if len(parts) > 1 else "rus1")
+            )
+            plat = _normalize_platform(
+                payload.get("platform", parts[2] if len(parts) > 2 else "pc")
+            )
+            wg_ip = payload.get("wg_ip")
+            public_key = payload.get("public_key")
+            if not wg_ip or not public_key:
+                continue
+            existing = con.execute(
+                "SELECT 1 FROM peers WHERE telegram_id = ? AND server_id = ? AND platform = ?",
+                (tid, sid, plat),
+            ).fetchone()
+            if existing:
+                continue
+            con.execute(
+                """
+                INSERT OR IGNORE INTO peers
+                    (telegram_id, server_id, platform, wg_ip, public_key, active, profile_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tid,
+                    sid,
+                    plat,
+                    wg_ip,
+                    public_key,
+                    1 if payload.get("active", True) else 0,
+                    payload.get("profile_type"),
+                ),
+            )
+            migrated += 1
+    if migrated:
+        logger.info("Мигрировано peers.json → SQLite: %d слотов", migrated)
+
+
 def _seed_whitelist(ids: List[int]) -> None:
     """Добавляет telegram_id из env в whitelist (пропускает дубли)."""
     with _conn() as con:
@@ -658,6 +756,64 @@ def db_get_effective_telegram_id(user_row: Dict) -> int:
         return int(tid)
     db_id = user_row.get("id", 0)
     return -int(db_id)
+
+
+# ─── Peers (VPN-слоты) ──────────────────────────────────────────────────────────
+# Источник правды для WG/AmneziaWG peers (раньше — bot/data/peers.json).
+# Нормализация server_id/platform делается в storage.py перед вызовом этих
+# хелперов — здесь «глупое» хранилище, значения кладутся как есть.
+
+def db_get_all_peers() -> List[Dict]:
+    """Все peer-слоты. Возвращает list[dict] (как строки таблицы peers)."""
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM peers ORDER BY telegram_id, server_id, platform"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def db_upsert_peer(data: Dict) -> None:
+    """
+    Вставляет/обновляет peer-слот по ключу (telegram_id, server_id, platform).
+    Ожидает уже нормализованные server_id/platform (см. storage.upsert_peer).
+    created_at сохраняется при обновлении (его трогает только INSERT).
+    """
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO peers
+                (telegram_id, server_id, platform, wg_ip, public_key, active, profile_type, updated_at)
+            VALUES
+                (:telegram_id, :server_id, :platform, :wg_ip, :public_key, :active, :profile_type, datetime('now'))
+            ON CONFLICT(telegram_id, server_id, platform) DO UPDATE SET
+                wg_ip        = :wg_ip,
+                public_key   = :public_key,
+                active       = :active,
+                profile_type = :profile_type,
+                updated_at   = datetime('now')
+            """,
+            {
+                "telegram_id": int(data["telegram_id"]),
+                "server_id": data["server_id"],
+                "platform": data["platform"],
+                "wg_ip": data["wg_ip"],
+                "public_key": data["public_key"],
+                "active": 1 if data.get("active", True) else 0,
+                "profile_type": data.get("profile_type"),
+            },
+        )
+
+
+def db_delete_peer(telegram_id: int, server_id: str, platform: str) -> None:
+    """Удаляет peer-слот по composite-ключу (ожидает нормализованные значения)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "DELETE FROM peers WHERE telegram_id = ? AND server_id = ? AND platform = ?",
+            (int(telegram_id), server_id, platform),
+        )
 
 
 # ─── OTP ──────────────────────────────────────────────────────────────────────
