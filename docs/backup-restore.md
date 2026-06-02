@@ -1,5 +1,15 @@
 # Резервное копирование и восстановление конфигов VPN‑сервера
 
+> ⚠️ **Актуально (2026): что бэкапить СЕЙЧАС.** Разделы ниже — классическая эпоха (wg0.conf / ss-wg.json / iptables), частично legacy. Текущая инфра eu1 = AmneziaWG в Docker + Xray + SQLite. **Минимальный критичный бэкап перед любыми изменениями:**
+> - **`/opt/vpnservice/bot/data/vpn.db`** — SQLite (пользователи + peers, источник правды). Главное.
+> - **`/opt/amnezia/awg/wireguard_psk.key`** — общий PSK AmneziaWG. **Потерять = потерять ВСЕ клиентские конфиги.**
+> - **`/opt/amnezia/`** — конфиги AmneziaWG (awg0).
+> - **`/opt/vpnservice/env_vars.txt`** + `/root/.secrets/` — секреты (НЕ в git).
+> - Xray `config.json` на eu1/main/yc — там живут per-user VLESS UUID (см. `scripts/sync_xray_users.py`).
+> - `/opt/vpnservice/bot/data/peers.json` — пока dual-write зеркало (до Phase 3), бэкапить заодно.
+>
+> Полный список «что не трогать / что чистить» — `CLAUDE.md`, раздел «Обслуживание серверов».
+
 ## Цель
 
 Перед любыми изменениями на сервере Fornex создавать резервные копии конфигов WireGuard, Shadowsocks, AmneziaWG и (при необходимости) MTProto. При сбое — восстанавливать из бэкапа.
