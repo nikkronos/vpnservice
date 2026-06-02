@@ -107,8 +107,8 @@ web/
   templates/       — index.html, recovery.html
   static/          — main.js, recovery.js, style.css
 bot/data/
-  vpn.db           — SQLite (основная БД)
-  peers.json       — legacy JSON (ещё используется)
+  vpn.db           — SQLite (основная БД; таблица `peers` — источник правды для WG/AWG слотов с 2026-06-02)
+  peers.json       — dual-write зеркало (НЕ источник правды; флаг storage.DUAL_WRITE_JSON, Phase 3 выключит)
   mtproto_proxy_link.txt — текущая MTProxy ссылка (не в git)
 scripts/
   traffic_accounting.py — cron-сэмплер lifetime-трафика (*/5)
@@ -121,13 +121,15 @@ scripts/
   enforce_expired.py    — soft-revoke AWG peers у юзеров с истёкшей подпиской (> 12 ч grace). Default dry-run, `--apply` для реального отзыва. Auto-restore при оплате через `restore_user_revoked_peers` (peer возвращается с теми же pubkey/ip — старый .conf работает).
   sync_xray_users.py    — синхронизация per-user VLESS UUIDs из БД в Xray config.json на main/yc через SSH + restart. `--server main|yc | --all`, `--dry-run`, `--no-shared` (удалить legacy shared UUID).
   vless_uuid_backfill.py — one-shot скрипт генерации per-user UUIDs всем active юзерам в БД (идемпотентен).
-  peers_sync_check.py   — диагностика рассинхрона peers.json ↔ awg show ↔ БД (read-only, on-demand)
+  peers_sync_check.py   — диагностика рассинхрона таблицы peers ↔ awg show ↔ БД (read-only, on-demand)
+  migrate_peers_check.py — бэкап + сверка peers.json ↔ таблица peers (для cutover; read-only кроме --backup)
+  test_peers_sqlite.py  — self-contained тест миграции + storage поверх SQLite (на временной БД)
 ```
 
 ### Ключевые концепции
 
 - **server_id:** `eu1` (AmneziaWG, Docker), логически был `eu2` — нормализован в `eu1` через `storage.py`
-- **peer key формат:** `{telegram_id}:{server_id}:{platform}` (в peers.json)
+- **peer key формат:** `{telegram_id}:{server_id}:{platform}` (composite-PK таблицы `peers`; раньше — ключ в peers.json)
 - **Платформы:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
 - **Recovery auth:** `RECOVERY_SECRET` — для legacy recovery endpoints
