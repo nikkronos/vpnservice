@@ -72,6 +72,8 @@ from bot.database import (
     db_get_vless_server_lifetime,
     db_get_or_create_vless_uuid,
     db_get_per_user_vless_uuid,
+    db_get_vless_user_last_seen,
+    db_get_vless_user_lifetime,
     init_db,
 )
 from bot.email_otp import generate_otp, send_otp_email
@@ -669,6 +671,17 @@ def api_traffic():
             logger.warning("Traffic accounting failed: %s", e)
             lifetime_map = {}
 
+        # Per-user VLESS telemetry (Этап 9 миграции на per-user UUID).
+        # Заполняется vless_summary_accounting.py каждые 5 мин через
+        # `xray api statsquery -pattern='user>>>tid_X@kronos>>>...'`.
+        try:
+            vless_last_seen_map = db_get_vless_user_last_seen()
+            vless_lifetime_map = db_get_vless_user_lifetime()
+        except Exception as e:
+            logger.warning("VLESS user telemetry read failed: %s", e)
+            vless_last_seen_map = {}
+            vless_lifetime_map = {}
+
         users_list: List[Dict] = []
         for u in db_users:
             uid = u.get("telegram_id")
@@ -718,17 +731,27 @@ def api_traffic():
                         platform = peer.platform or "pc"
 
             # --- vless proof-of-life ---
-            # Сигнал что юзер пользуется VLESS (вместо/в дополнение к AWG).
-            # Пишется в bot/web при выдаче vless:// и при subscription URL hit
-            # (см. db_update_vless_requested_at). Это компенсирует отсутствие
-            # AWG-handshake до тех пор пока не сделаем per-user UUID + Xray stats.
+            # Два сигнала:
+            #  1) vless_requested_at — отметка о запросе ссылки (нечёткий сигнал,
+            #     ставится при /sub/<token> hit или выдаче через бот).
+            #  2) vless_user_traffic.last_seen — РЕАЛЬНОЕ подключение по per-user
+            #     UUID (Этап 9, пишется vless_summary_accounting). Точнее.
             vless_req = u.get("vless_requested_at")
-            vless_ts = 0
+            vless_req_ts = 0
             if vless_req:
                 try:
-                    vless_ts = int(datetime.strptime(vless_req, "%Y-%m-%d %H:%M:%S").timestamp())
+                    vless_req_ts = int(datetime.strptime(vless_req, "%Y-%m-%d %H:%M:%S").timestamp())
                 except (ValueError, TypeError):
                     pass
+            vless_seen = vless_last_seen_map.get(uid)
+            vless_seen_ts = 0
+            if vless_seen:
+                try:
+                    vless_seen_ts = int(datetime.strptime(vless_seen, "%Y-%m-%d %H:%M:%S").timestamp())
+                except (ValueError, TypeError):
+                    pass
+            # Берём свежайший сигнал из двух — более точный (real connect) выигрывает
+            vless_ts = max(vless_req_ts, vless_seen_ts)
             recent_vless = vless_ts and (now_ts - vless_ts) < 7 * 86400
 
             # --- status ---
@@ -750,7 +773,11 @@ def api_traffic():
                 status_key = "idle"
 
             lt = lifetime_map.get(uid)
-            total_bytes = lt["total"] if lt else (rx + tx)
+            awg_total = lt["total"] if lt else (rx + tx)
+            # Per-user VLESS lifetime + объединённый total (AWG + VLESS)
+            vless_lt = vless_lifetime_map.get(uid) or {"total": 0}
+            vless_total_bytes = vless_lt.get("total", 0)
+            total_bytes = awg_total + vless_total_bytes
 
             users_list.append({
                 "telegram_id": uid,
@@ -761,6 +788,8 @@ def api_traffic():
                 "rx_bytes": rx,
                 "tx_bytes": tx,
                 "total_bytes": total_bytes,
+                "vless_total_bytes": vless_total_bytes,
+                "vless_last_seen": vless_seen,  # ISO timestamp (real per-user connect)
                 "last_handshake": last_hs,
                 "proxy_requested_at": u.get("proxy_requested_at"),
                 "vless_requested_at": u.get("vless_requested_at"),

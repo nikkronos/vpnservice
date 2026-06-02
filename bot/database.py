@@ -192,6 +192,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_vless_server_traffic_table()
     _migrate_add_traffic_snapshots_table()
     _migrate_add_per_user_vless_uuids()
+    _migrate_add_vless_user_traffic_table()
     _migrate_add_subscription_columns()
     _migrate_add_password_column()
     _migrate_add_sub_token_column()
@@ -231,6 +232,44 @@ def _migrate_add_proxy_column() -> None:
         if "proxy_requested_at" not in existing:
             con.execute("ALTER TABLE users ADD COLUMN proxy_requested_at TEXT")
             logger.info("Migration: added proxy_requested_at column to users")
+
+
+def _migrate_add_vless_user_traffic_table() -> None:
+    """
+    Per-user VLESS трафик (Этап 9 миграции на per-user UUIDs).
+
+    Пишется `scripts/vless_summary_accounting.py` каждые 5 мин из
+    `xray api statsquery -pattern='user>>>tid_X@kronos>>>traffic>>>...'`.
+    Это работает после Этапа 7 (policy.levels.0.statsUser{Up,Down}link=true
+    на main/yc) и Этапа 8 (per-user UUIDs с email-маркером в config).
+
+    Структура аналогична traffic_accounting (AWG):
+      - reset-aware: при рестарте Xray счётчики обнуляются, БД продолжает копить
+      - composite PK (telegram_id, server_id) — у юзера может быть activity на
+        main И yc одновременно
+
+    Используется в /api/traffic для определения status='active' для
+    VLESS-only юзеров (закрывает gap «много тихих хотя юзают»).
+    """
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vless_user_traffic (
+                telegram_id INTEGER NOT NULL,
+                server_id   TEXT NOT NULL,
+                lifetime_rx INTEGER NOT NULL DEFAULT 0,
+                lifetime_tx INTEGER NOT NULL DEFAULT 0,
+                last_rx     INTEGER NOT NULL DEFAULT 0,
+                last_tx     INTEGER NOT NULL DEFAULT 0,
+                last_seen   TEXT,
+                PRIMARY KEY (telegram_id, server_id)
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vless_user_traffic_tid "
+            "ON vless_user_traffic(telegram_id)"
+        )
 
 
 def _migrate_add_per_user_vless_uuids() -> None:
@@ -1044,6 +1083,97 @@ def db_get_all_per_user_vless_uuids() -> List[Dict]:
             }
             for r in rows
         ]
+
+
+def db_accumulate_vless_user_traffic(server_id: str, samples: List[Dict]) -> None:
+    """
+    Per-user VLESS трафик (reset-aware), вызывается из vless_summary_accounting.py
+    после парсинга `xray api statsquery -pattern=user>>>tid_X@kronos>>>...`.
+
+    samples: [{"telegram_id": int, "rx": int, "tx": int}, ...]
+
+    Логика как в db_accumulate_traffic (AWG):
+      current < last → reset (Xray restart) → приращение = current
+      current ≥ last → приращение = current - last
+
+    last_seen обновляется при любом current > 0 (юзер реально подключался).
+    """
+    _ensure_init()
+    if not samples or not server_id:
+        return
+    with _conn() as con:
+        for s in samples:
+            tid = s.get("telegram_id")
+            if not tid:
+                continue
+            rx = int(s.get("rx") or 0)
+            tx = int(s.get("tx") or 0)
+            row = con.execute(
+                "SELECT lifetime_rx, lifetime_tx, last_rx, last_tx "
+                "FROM vless_user_traffic "
+                "WHERE telegram_id = ? AND server_id = ?",
+                (int(tid), server_id),
+            ).fetchone()
+            seen_clause = "datetime('now')" if (rx > 0 or tx > 0) else "last_seen"
+            if row is None:
+                con.execute(
+                    "INSERT INTO vless_user_traffic "
+                    f"(telegram_id, server_id, lifetime_rx, lifetime_tx, "
+                    f" last_rx, last_tx, last_seen) "
+                    f"VALUES (?, ?, ?, ?, ?, ?, {seen_clause})",
+                    (int(tid), server_id, rx, tx, rx, tx),
+                )
+                continue
+            d_rx = rx - row["last_rx"] if rx >= row["last_rx"] else rx
+            d_tx = tx - row["last_tx"] if tx >= row["last_tx"] else tx
+            con.execute(
+                f"UPDATE vless_user_traffic "
+                f"SET lifetime_rx = lifetime_rx + ?, "
+                f"    lifetime_tx = lifetime_tx + ?, "
+                f"    last_rx = ?, last_tx = ?, "
+                f"    last_seen = {seen_clause} "
+                f"WHERE telegram_id = ? AND server_id = ?",
+                (d_rx, d_tx, rx, tx, int(tid), server_id),
+            )
+
+
+def db_get_vless_user_last_seen() -> Dict[int, str]:
+    """
+    Возвращает {telegram_id: max_last_seen} — самая свежая активность юзера
+    по любому из серверов (main, yc, eu1). Для определения status='active'
+    в /api/traffic — VLESS-only юзеры, у которых нет AWG handshake.
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT telegram_id, MAX(last_seen) AS last_seen "
+            "FROM vless_user_traffic "
+            "WHERE last_seen IS NOT NULL "
+            "GROUP BY telegram_id"
+        ).fetchall()
+        return {int(r["telegram_id"]): r["last_seen"] for r in rows}
+
+
+def db_get_vless_user_lifetime() -> Dict[int, Dict]:
+    """
+    Возвращает {telegram_id: {rx, tx, total}} — суммарный lifetime VLESS трафик
+    юзера по всем серверам. Используется для отображения 'Всего' в админ-панели.
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT telegram_id, "
+            "  SUM(lifetime_rx) AS rx, "
+            "  SUM(lifetime_tx) AS tx "
+            "FROM vless_user_traffic "
+            "GROUP BY telegram_id"
+        ).fetchall()
+        out: Dict[int, Dict] = {}
+        for r in rows:
+            rx = r["rx"] or 0
+            tx = r["tx"] or 0
+            out[int(r["telegram_id"])] = {"rx": rx, "tx": tx, "total": rx + tx}
+        return out
 
 
 def db_clear_per_user_vless_uuid(telegram_id: int, server_id: str) -> None:
