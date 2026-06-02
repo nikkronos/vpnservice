@@ -200,6 +200,27 @@ def sync_one_server(server_id: str, include_shared: bool, dry_run: bool) -> bool
     inbounds[target_idx]["settings"]["clients"] = new_clients
     # decryption обязательно для VLESS — должно быть уже в конфиге, не трогаем
 
+    # 3a. Гарантируем policy.levels.0.statsUser* для per-user телеметрии
+    # (без этого `xray api statsquery -pattern=user>>>` возвращает пусто).
+    # Idempotent: если уже выставлено — ничего не меняет.
+    policy_changed = False
+    if "policy" not in config:
+        config["policy"] = {}
+    if "levels" not in config["policy"]:
+        config["policy"]["levels"] = {}
+    if "0" not in config["policy"]["levels"]:
+        config["policy"]["levels"]["0"] = {}
+        policy_changed = True
+    level0 = config["policy"]["levels"]["0"]
+    if not level0.get("statsUserUplink"):
+        level0["statsUserUplink"] = True
+        policy_changed = True
+    if not level0.get("statsUserDownlink"):
+        level0["statsUserDownlink"] = True
+        policy_changed = True
+    if policy_changed:
+        print(f"  Added policy.levels.0.statsUser{{Uplink,Downlink}} = true (per-user telemetry)")
+
     new_config_text = json.dumps(config, indent=2, ensure_ascii=False)
 
     if dry_run:
