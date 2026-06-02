@@ -1,5 +1,37 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-02 — Консолидация peers.json → SQLite (таблица `peers`), Phase 0-2
+
+«Переделать БД» (refactor-вариант — НЕ путать с Postgres-миграцией в P3). До этого peers жили **только** в `bot/data/peers.json` (таблицы `peers` в SQLite не было, вопреки старому описанию в CLAUDE.md — это был реальный второй источник правды, кусал 2026-05-29). Источник правды переведён в SQLite; публичный API storage не менялся → ~30 call sites не тронуты.
+
+**Phase 0 — схема + миграция (`bot/database.py`, commit `689e8f2`):**
+- Таблица `peers` (composite-PK `telegram_id:server_id:platform` — точная копия ключа peers.json) + индекс `public_key`. Без FK (сохранена вольность JSON: legacy/синтетические отрицательные tid).
+- `_migrate_peers_json_to_sqlite()` в цепочке `init_db()` — идемпотентно, по образцу `_migrate_from_json` (users.json). Пропуск записей без wg_ip/public_key.
+- `db_get_all_peers / db_upsert_peer / db_delete_peer`.
+- `PRAGMA busy_timeout=5000` в `_conn()` — страховка от «database is locked» (bot+web+cron пишут конкурентно).
+
+**Phase 1 — storage поверх БД (`bot/storage.py`):**
+- `_load_peers_data()` читает из таблицы, fallback на JSON если таблица пуста.
+- `upsert_peer/delete_peer` → запись в БД + dual-write зеркало `peers.json` (флаг `DUAL_WRITE_JSON=True`). Сигнатуры и dataclass `Peer` не тронуты.
+
+**Скрипты:** `scripts/migrate_peers_check.py` (бэкап + сверка JSON↔таблица), `scripts/test_peers_sqlite.py` (self-contained тест, 18 проверок).
+
+**Валидация перед прод-деплоем:** локально (Python 3.13, поставлен в эту сессию) — syntax/import + тест 18/18; **dry-run на КОПИИ реальных прод-данных** в /tmp (нулевой риск) — 26 JSON → 26 в таблице, 0 расхождений.
+
+**Cutover (Phase 2, dual-write ON):**
+- Бэкап прод (`peers.json` + `vpn.db` + старые `.py`) → `*.precutover.20260602-072957`.
+- Деплой по SCP, миграция на проде **ДО рестарта**: 26→26, 0 расхождений. Рестарт vpn-bot + vpn-web — active, журнал чист.
+- `peers_sync_check.py` поверх таблицы: **20/20 eu1-пиров == awg show**, 2 legacy LIVE-пира («НЕ ТРОГАТЬ») целы, lost=0. Веб 200.
+- Смоук владельца: статус / Получить VPN / подписка / резерв per-device — бот отдаёт.
+
+**Коммиты:** `689e8f2` (Phase 0-1), `ab215c6` (UTF-8 fix скриптов), `994973d` (CLAUDE.md sync). Велось в ветке `feat/peers-to-sqlite`, смержено в `main` (FF).
+
+**Координация:** параллельно с per-user-UUID агентом (Этапы 7-9 на паузе). Сверено перед деплоем (md5 серверного кода == база) — затирания нет. Бриф агенту — по запросу владельца.
+
+**Остаётся — Phase 3 (после ~03.06 10:45):** выключить `DUAL_WRITE_JSON` + убрать мёртвое зеркало `users.json` (`_sync_user_to_json`). После суток наблюдения за real write-path. Детали: `docs/sessions/SESSION_SUMMARY_2026-06-02.md`.
+
+---
+
 ## 2026-05-27 — Telegram Stars + ручная СБП/карта + админ-форма зачисления (Phase 3g + 3g+)
 
 Промежуточный платёжный стек до автоматизации. Stars-флоу + рабочий ручной флоу + админ-форма; авто-зачисление платежей вынесено отдельной развилкой в ROADMAP («Автоматизация платежей»).
