@@ -1,5 +1,15 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-03 — Админ-панель: активность+VLESS, /api/services из health-check; диагностика T-7
+
+**Активность учитывает VLESS** (`d9464b4`): `/api/stats` счётчики `active_24h/7d/30d` теперь по `max(AWG handshake, VLESS last_seen, vless_requested_at)` per-юзер (тот же сигнал, что бейджи). Было «3 за 24ч» (AWG-only) → стало 16.
+
+**`/api/services` из health-check state** (`d9464b4`): читает `/var/lib/vpn-health/state.json`, маппит на 5 user-facing сервисов (🛡️ AmneziaWG / 📲 VLESS Россия-main / 📲 VLESS Европа-yc / 🌐 VLESS-WS / 📎 MTProxy) + staleness (mtime>20мин→unknown, палит зависший health-check) + fallback. Убран захардкоженный неверный IP `158.160.0.1`. Фронт (index.html+main.js) — динамический рендер.
+
+**Диагностика массового T-7 reminder** (`b6d66ab`): НЕ баг. `db_users_due_for_expiry_notif` корректна. Корень — при миграции 27.05 существующим выдали 14-дн триал вместо grandfather → ~30 истекают 10.06, разом достигли T-7. Решение владельца: оставить триал (монетизация). Доки/память исправлены (enforcement ВКЛ, grandfather не делали).
+
+---
+
 ## 2026-06-03 — peers.json → SQLite Phase 3 (консолидация завершена)
 
 Завершение консолидации хранения peers. После суток наблюдения за dual-write на проде:
