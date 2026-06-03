@@ -100,6 +100,7 @@ def main() -> int:
 
     # ── 3. upsert + dual-write ──────────────────────────────────────────────
     print("\n3. upsert_peer / delete_peer + dual-write зеркало")
+    storage.DUAL_WRITE_JSON = True  # включаем зеркало для теста capability (в проде Phase 3 = False)
     storage.upsert_peer(storage.Peer(
         telegram_id=888, wg_ip="10.8.1.88", public_key="PK888", server_id="eu1", active=True, platform="pc",
     ))
@@ -120,6 +121,15 @@ def main() -> int:
     check("delete убрал из БД", not any(r["telegram_id"] == 888 for r in db.db_get_all_peers()))
     json_del = json.loads(peers_json.read_text(encoding="utf-8"))
     check("delete убрал из peers.json-зеркала", "888:eu1:pc" not in json_del)
+
+    # ── 3b. DUAL_WRITE_JSON=False (прод-дефолт Phase 3): json НЕ пишется ──────
+    storage.DUAL_WRITE_JSON = False
+    storage.upsert_peer(storage.Peer(
+        telegram_id=889, wg_ip="10.8.1.89", public_key="PK889", server_id="eu1", active=True, platform="pc",
+    ))
+    check("upsert при False добавил в БД", any(r["telegram_id"] == 889 for r in db.db_get_all_peers()))
+    json_off = json.loads(peers_json.read_text(encoding="utf-8"))
+    check("upsert при DUAL_WRITE_JSON=False НЕ пишет в peers.json", "889:eu1:pc" not in json_off)
 
     print()
     if _FAILED:

@@ -108,7 +108,7 @@ web/
   static/          — main.js, recovery.js, style.css
 bot/data/
   vpn.db           — SQLite (основная БД; таблица `peers` — источник правды для WG/AWG слотов с 2026-06-02)
-  peers.json       — dual-write зеркало (НЕ источник правды; флаг storage.DUAL_WRITE_JSON, Phase 3 выключит)
+  peers.json       — статический fallback-снимок (запись ОТКЛЮЧЕНА в Phase 3, storage.DUAL_WRITE_JSON=False; источник правды = таблица peers)
   mtproto_proxy_link.txt — текущая MTProxy ссылка (не в git)
 scripts/
   traffic_accounting.py — cron-сэмплер lifetime-трафика (*/5)

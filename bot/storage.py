@@ -9,12 +9,12 @@ PEERS_FILE = DATA_DIR / "peers.json"
 
 VALID_PLATFORMS = frozenset({"pc", "ios", "android"})
 
-# Переходный период миграции peers.json → SQLite (2026-06).
-# Источник правды — таблица `peers` в SQLite. upsert/delete дублируются в
-# peers.json как зеркало-страховка (мгновенный откат на старый storage.py).
-# Phase 3 (после нескольких дней наблюдения) — выставить False, оставить
-# только периодический export-бэкап.
-DUAL_WRITE_JSON = True
+# Консолидация peers.json → SQLite ЗАВЕРШЕНА (Phase 3, 2026-06-03).
+# Источник правды — таблица `peers` в SQLite. Запись в peers.json отключена.
+# Существующий peers.json остаётся как статический fallback-снимок (читается
+# только если таблица вдруг окажется пустой — см. _load_peers_data). Бэкап
+# peer-данных покрывается бэкапом vpn.db. Флаг оставлен на случай отладки.
+DUAL_WRITE_JSON = False
 
 
 def _normalize_platform(platform: Optional[str]) -> str:
@@ -246,29 +246,8 @@ def upsert_user(user: User) -> None:
         "email_verified": user.email_verified,
     }
     db_upsert_user(data)
-    # Синхронизируем users.json для совместимости (резервная копия)
-    _sync_user_to_json(user)
-
-
-def _sync_user_to_json(user: User) -> None:
-    """Обновляет users.json как резервную копию (не основное хранилище)."""
-    if user.telegram_id <= 0:
-        return  # email-only пользователи не идут в JSON
-    try:
-        data = _load_raw(USERS_FILE)
-        payload = {
-            "telegram_id": user.telegram_id,
-            "username": user.username,
-            "role": user.role,
-            "active": user.active,
-            "preferred_server_id": user.preferred_server_id,
-            "preferred_profile_type": user.preferred_profile_type,
-        }
-        data[str(user.telegram_id)] = payload
-        _save_raw(USERS_FILE, data)
-    except Exception as e:  # noqa: BLE001
-        import logging as _logging
-        _logging.getLogger(__name__).warning("Не удалось синхронизировать users.json: %s", e)
+    # users.json-зеркало удалено в Phase 3 (2026-06-03): SQLite — единственный
+    # источник правды для users; users.json больше не пишется.
 
 
 def is_owner(user_id: int, owner_id: int) -> bool:
