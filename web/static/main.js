@@ -32,17 +32,31 @@ function setDot(id, status) {
     el.className = 'status-dot ' + (status === 'online' ? 'dot-on' : status === 'offline' ? 'dot-off' : 'dot-unknown');
 }
 
+function _dotCls(s) {
+    return 'status-dot ' + (s === 'online' ? 'dot-on' : s === 'offline' ? 'dot-off' : 'dot-unknown');
+}
+function _esc(s) {
+    return String(s == null ? '' : s).replace(/[<>"&]/g, c => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
+}
+
 async function loadServices() {
+    const cont = document.getElementById('status-services');
+    if (!cont) return;
     try {
         const r = await fetch('/api/services', { cache: 'no-store' });
         const data = await r.json();
-        for (const s of data.services || []) {
-            if (s.service.startsWith('Amnezia')) setDot('dot-awg', s.status);
-            if (s.service.startsWith('VLESS')) setDot('dot-vless', s.status);
+        const items = (data.services || []).map(s =>
+            `<div class="status-item" title="${_esc(s.note)}">` +
+            `<span class="${_dotCls(s.status)}"></span><span>${_esc(s.service)}</span></div>`
+        );
+        const h = data.health || {};
+        if (h.stale) {
+            const mins = h.checked_ago_sec ? Math.floor(h.checked_ago_sec / 60) : '?';
+            items.push(`<div class="status-item" title="health-check не обновлялся — статусы могут быть неактуальны" style="color:#e0a800">⚠ health-check ${mins} мин назад</div>`);
         }
+        cont.innerHTML = items.join('');
     } catch (e) {
-        setDot('dot-awg', 'unknown');
-        setDot('dot-vless', 'unknown');
+        cont.innerHTML = '<div class="status-item"><span class="status-dot dot-unknown"></span><span>сервисы: ошибка</span></div>';
     }
 }
 

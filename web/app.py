@@ -551,38 +551,64 @@ def api_servers():
         return jsonify({"error": str(e)}), 500
 
 
+_HEALTH_STATE_PATH = "/var/lib/vpn-health/state.json"
+# Маппинг user-facing сервис → ключ(и) в health-check state.json.
+# health_check.py (cron */15) пишет статусы всех 23 проверок (eu1 локально +
+# main/yc по SSH). Здесь переводим в понятные владельцу сервисы.
+_SERVICE_MAP = [
+    ("🛡️ Основной VPN (AmneziaWG)", "amnezia-awg2", "eu1 · основной VPN, обход блокировок из РФ"),
+    ("📲 VLESS · 🇷🇺 Россия",        "main:xray.service", "main (Timeweb) · Мегафон/Yota · REALITY cloud.mail.ru"),
+    ("📲 VLESS · 🇪🇺 Европа",        "yc:xray.service",   "yc (Yandex Cloud) · др. операторы · REALITY www.microsoft.com"),
+    ("🌐 VLESS-WS",                  "xray.service",      "eu1 · обычные блокировки (CDN-канал)"),
+    ("📎 Telegram-прокси (MTProxy)", "mtproxy-faketls",   "eu1 · Telegram при блокировках"),
+]
+
+
 @app.route("/api/services")
 def api_services():
-    """API: статус сервисов eu1 (AmneziaWG локально + VLESS порт)."""
-    try:
-        env = _parse_env_file(pathlib.Path(__file__).parent.parent / "env_vars.txt")
-        eu1_host = env.get("WG_EU1_ENDPOINT_HOST") or env.get("WG_EU1_SSH_HOST") or "185.21.8.91"
+    """
+    API: статус сервисов из health-check state (`/var/lib/vpn-health/state.json`).
 
+    health_check.py (cron */15) — единый источник статуса всех серверов
+    (eu1 локально + main/yc по SSH). Маппим его проверки на user-facing сервисы.
+    Свежесть = mtime файла (если health-check сам умер — state устареет → unknown).
+    Fallback на лёгкую локальную AWG-проверку, если state.json недоступен.
+    """
+    try:
+        state = None
+        age_sec = None
+        try:
+            age_sec = int(time.time() - os.path.getmtime(_HEALTH_STATE_PATH))
+            with open(_HEALTH_STATE_PATH, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            state = None
+
+        if state is not None:
+            stale = age_sec is not None and age_sec > 20 * 60  # >20 мин = health-check завис
+            services_list = []
+            for label, key, note in _SERVICE_MAP:
+                raw = state.get(key)
+                st = (raw or {}).get("status") if isinstance(raw, dict) else None
+                if stale or st is None:
+                    status = "unknown"
+                else:
+                    status = "online" if st == "OK" else "offline"
+                services_list.append({"service": label, "status": status, "note": note})
+            return jsonify({
+                "services": services_list,
+                "health": {"stale": stale, "checked_ago_sec": age_sec, "source": "health-check"},
+            })
+
+        # Fallback: state.json недоступен → лёгкая локальная проверка AWG.
         dump = _get_awg_dump_eu1()
         awg_ok = bool(dump.strip())
-
-        vless_port = 443
-        vless_ok = check_port("158.160.0.1", vless_port, timeout=2.0)
-        try:
-            yc_host = env.get("VLESS_YC_HOST") or ""
-            if yc_host:
-                vless_ok = check_port(yc_host, vless_port, timeout=2.0)
-        except Exception:
-            pass
-
         services_list = [
-            {
-                "service": "AmneziaWG",
-                "status": "online" if awg_ok else "offline",
-                "note": "eu1 — обход блокировок из РФ",
-            },
-            {
-                "service": "VLESS+REALITY (мобильный)",
-                "status": "online" if vless_ok else "unknown",
-                "note": "YC VM → eu1, для LTE/5G",
-            },
+            {"service": "🛡️ Основной VPN (AmneziaWG)", "status": "online" if awg_ok else "offline",
+             "note": "eu1 (health-check недоступен — fallback)"},
+            {"service": "📲 VLESS", "status": "unknown", "note": "health-check недоступен"},
         ]
-        return jsonify({"services": services_list})
+        return jsonify({"services": services_list, "health": {"stale": True, "source": "fallback"}})
     except Exception as e:
         logger.exception(f"Ошибка API сервисов: {e}")
         return jsonify({"error": str(e)}), 500
@@ -892,9 +918,36 @@ def api_stats():
             if hs > prev:
                 latest_hs_by_user[peer.telegram_id] = hs
 
-        active_24h = sum(1 for hs in latest_hs_by_user.values() if hs >= win_24h)
-        active_7d = sum(1 for hs in latest_hs_by_user.values() if hs >= win_7d)
-        active_30d = sum(1 for hs in latest_hs_by_user.values() if hs >= win_30d)
+        # VLESS-активность: сводим к ТОМУ ЖЕ сигналу, что бейджи в /api/traffic —
+        # max(AWG handshake, VLESS last_seen, vless_requested_at) per-юзер. Иначе
+        # VLESS-юзеры (без AWG handshake) выпадают из счётчиков → «3 за 24ч».
+        try:
+            vless_last_seen_map = db_get_vless_user_last_seen()  # {tid: "YYYY-MM-DD HH:MM:SS"}
+        except Exception as _e:  # noqa: BLE001
+            logger.warning("vless last_seen read failed: %s", _e)
+            vless_last_seen_map = {}
+
+        def _dt_ts(s: object) -> int:
+            if not s:
+                return 0
+            try:
+                return int(datetime.strptime(str(s), "%Y-%m-%d %H:%M:%S").timestamp())
+            except (ValueError, TypeError):
+                return 0
+
+        latest_activity: Dict[int, int] = dict(latest_hs_by_user)
+        for u in db_users:
+            tid = u.get("telegram_id")
+            if not tid:
+                continue
+            tid = int(tid)
+            cand = max(_dt_ts(vless_last_seen_map.get(tid)), _dt_ts(u.get("vless_requested_at")))
+            if cand > latest_activity.get(tid, 0):
+                latest_activity[tid] = cand
+
+        active_24h = sum(1 for ts in latest_activity.values() if ts >= win_24h)
+        active_7d = sum(1 for ts in latest_activity.values() if ts >= win_7d)
+        active_30d = sum(1 for ts in latest_activity.values() if ts >= win_30d)
 
         # Email-verified
         email_verified = sum(1 for u in db_users if u.get("email_verified"))
