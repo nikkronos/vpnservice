@@ -208,3 +208,16 @@ Commit `4e3fe18`.
 - 1 архитектурное расследование (observable: stats пустой → нашли в journal)
 - 0 нежданных багов (Pre-deploy checklist в действии)
 - 7 юзеров получили per-user телеметрию за 5 секунд после policy fix
+
+---
+
+## Дополнение (03.06) — peers.json → SQLite Phase 3 (параллельный агент Opus)
+
+Завершение консолидации хранения peers (Phase 0-2 были 02.06). После суток dual-write на проде:
+
+- **Reconcile:** `main` = `e6d460f` (Этапы 7-9 этой сессии). `storage.py` (моя зона) агентом per-user-UUID не тронут, сервер == main. Конфликта нет — peers-слой (`storage.py` + таблица `peers`) и per-user-UUID (`database.py` колонки + `sync_xray_users`) ортогональны.
+- **Наблюдение успешно:** dual-write держался сутки — **27 peers.json == 27 таблица, 0 расхождений**, за период **3 реальных peer-write** (сигнап + enforce) → write-path отвалидирован на живом трафике.
+- **`storage.py` (commit `84c7042`):** `DUAL_WRITE_JSON=False` — запись в `peers.json` отключена (файл = статический fallback-снимок). Удалено мёртвое зеркало `users.json` (`_sync_user_to_json`).
+- **Деплой:** только `storage.py` (бэкап `storage.py.pre_phase3.*`), `database.py` агента не трогал. Тест 20/20 на сервере, рестарт vpn-bot/web, журнал чист, веб 200, consistency 27==27.
+
+**Итог:** консолидация полная — `peers.json` и `users.json` больше не пишутся, источник правды только `vpn.db`. Будущая Postgres-миграция = «одна БД → другая».
