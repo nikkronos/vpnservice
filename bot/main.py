@@ -1265,32 +1265,25 @@ def main() -> None:
         call.message._back_markup = _back_to_menu_markup()
         action = call.data
         if action == "menu_get_vpn":
-            # Подменю: 3 варианта VPN (Быстрый / Резервный / Мобильный)
-            sub_markup = types.InlineKeyboardMarkup(row_width=1)
-            sub_markup.add(
-                types.InlineKeyboardButton(
-                    "🔗 Подключить VPN — одна ссылка для всех устройств",
-                    callback_data="vpn_quick",
-                ),
-                types.InlineKeyboardButton(
-                    "💻 AmneziaWG — макс. скорость (ПК / Wi-Fi)",
-                    callback_data="menu_get_config",
-                ),
-                types.InlineKeyboardButton(
-                    "📡 Мобильный — при блокировках оператора",
-                    callback_data="menu_mobile_vpn",
-                ),
+            # Главный путь — «Подключить VPN» (подписка, работает на всех устройствах,
+            # включая мобильный). Сразу отдаём ссылку/QR (как в ЛК — главное на
+            # первом экране). AmneziaWG и Мобильный — под кнопкой «Другие способы»
+            # (она в разметке callback_vpn_quick).
+            callback_vpn_quick(call)
+        elif action == "menu_other_connect":
+            other_markup = types.InlineKeyboardMarkup(row_width=1)
+            other_markup.add(
+                types.InlineKeyboardButton("💻 AmneziaWG — макс. скорость (ПК / Wi-Fi)", callback_data="menu_get_config"),
+                types.InlineKeyboardButton("📡 Мобильный — под оператора", callback_data="menu_mobile_vpn"),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
-            sub_text = (
-                "Выбери способ подключения:\n\n"
-                "🔗 <b>Подключить VPN</b> — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
-                "Работает на телефоне и ПК.\n\n"
+            other_text = (
+                "Другие способы подключения:\n\n"
                 "💻 <b>AmneziaWG</b> — отдельный конфиг, макс. скорость на ПК / Wi-Fi. "
                 "⚠️ Не работает на мобильном интернете.\n\n"
-                "📡 <b>Мобильный</b> — отдельная ссылка под каждого оператора."
+                "📡 <b>Мобильный</b> — отдельная ссылка под конкретного оператора."
             )
-            bot.send_message(call.message.chat.id, sub_text, parse_mode="HTML", reply_markup=sub_markup)
+            bot.send_message(call.message.chat.id, other_text, parse_mode="HTML", reply_markup=other_markup)
         elif action == "menu_get_config":
             if not _check_access_or_block(call.message.chat.id, call.from_user.id):
                 return
@@ -3124,8 +3117,11 @@ def main() -> None:
             "Импортируй в <b>HAPP / Streisand / V2Box / Hiddify</b>: «+» → по ссылке или из буфера. "
             "Приложение само выберет рабочий сервер и подтянет обновления."
         )
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🔌 Другие способы подключения", callback_data="menu_other_connect"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
 
         # 1. QR картинка с инструкцией
         try:
