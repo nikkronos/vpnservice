@@ -337,7 +337,7 @@ def main() -> None:
             )
             markup.add(
                 types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
-                types.InlineKeyboardButton("🔄 Обновить конфиг", callback_data="menu_regen"),
+                types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
@@ -847,13 +847,17 @@ def main() -> None:
 
     def _awg_success_text(platform: str) -> str:
         """Текст-инструкция для AmneziaWG-конфига по платформам."""
+        mobile_warn = (
+            "\n\n⚠️ AmneziaWG — для <b>ПК / Wi-Fi</b>. На мобильном интернете "
+            "подключайся через «🔗 Подключить» (одна ссылка)."
+        )
         if platform == "pc":
             return (
                 "✅ Готово. Файл скачан.\n\n"
                 "📂 <b>Установка:</b>\n"
                 "1. Поставь <a href=\"https://amnezia.org\">AmneziaVPN</a>.\n"
                 "2. В приложении: <b>«+»</b> → <b>«Импорт из файла»</b> → выбери скачанный <code>.conf</code>.\n"
-                "3. Включи туннель."
+                "3. Включи туннель." + mobile_warn
             )
         if platform == "ios":
             return (
@@ -861,7 +865,7 @@ def main() -> None:
                 "📱 <b>Установка:</b>\n"
                 "1. Поставь <b>AmneziaWG</b> из App Store.\n"
                 "2. Нажми на файл → «Поделиться» → выбери <b>AmneziaWG</b> → «Создать из файла».\n"
-                "3. Включи туннель."
+                "3. Включи туннель." + mobile_warn
             )
         # android
         return (
@@ -869,7 +873,7 @@ def main() -> None:
             "🤖 <b>Установка:</b>\n"
             "Тапни ссылку ниже — <b>AmneziaVPN</b> откроет и импортирует конфиг автоматически.\n"
             "Если приложение ещё не установлено — поставь <a href=\"https://amnezia.org\">AmneziaVPN</a> "
-            "из Google Play."
+            "из Google Play." + mobile_warn
         )
 
     def _deliver_config(
@@ -1265,26 +1269,26 @@ def main() -> None:
             sub_markup = types.InlineKeyboardMarkup(row_width=1)
             sub_markup.add(
                 types.InlineKeyboardButton(
-                    "🔗 Быстрый VPN — одна ссылка для всех устройств",
+                    "🔗 Подключить VPN — одна ссылка для всех устройств",
                     callback_data="vpn_quick",
                 ),
                 types.InlineKeyboardButton(
-                    "📲 Резервный VPN — конфиг для AmneziaWG",
+                    "💻 AmneziaWG — макс. скорость (ПК / Wi-Fi)",
                     callback_data="menu_get_config",
                 ),
                 types.InlineKeyboardButton(
-                    "📡 Мобильный VPN — при блокировках операторов",
+                    "📡 Мобильный — при блокировках оператора",
                     callback_data="menu_mobile_vpn",
                 ),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
             sub_text = (
                 "Выбери способ подключения:\n\n"
-                "🔗 Быстрый VPN — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
-                "Приложение само выберет рабочий сервер.\n\n"
-                "📲 Резервный VPN — отдельный конфиг для AmneziaWG/AmneziaVPN. "
-                "Макс. скорость на одном сервере.\n\n"
-                "📡 Мобильный VPN — если оператор режет интернет."
+                "🔗 <b>Подключить VPN</b> — одна ссылка, импортируется в HAPP / Streisand / V2Box / Hiddify. "
+                "Работает на телефоне и ПК.\n\n"
+                "💻 <b>AmneziaWG</b> — отдельный конфиг, макс. скорость на ПК / Wi-Fi. "
+                "⚠️ Не работает на мобильном интернете.\n\n"
+                "📡 <b>Мобильный</b> — отдельная ссылка под каждого оператора."
             )
             bot.send_message(call.message.chat.id, sub_text, parse_mode="HTML", reply_markup=sub_markup)
         elif action == "menu_get_config":
@@ -1292,19 +1296,44 @@ def main() -> None:
                 return
             _show_platform_keyboard(call.message.chat.id, "get_config")
         elif action == "menu_regen":
-            # Подтверждение перед сбросом конфига (добавлено по фидбэку владельца).
+            # Разводка по проблеме: AmneziaWG (ПК) vs «Подключить» (телефон).
+            fix_markup = types.InlineKeyboardMarkup(row_width=1)
+            fix_markup.add(
+                types.InlineKeyboardButton("💻 Сбросить конфиг AmneziaWG (ПК/Wi-Fi)", callback_data="menu_regen_awg"),
+                types.InlineKeyboardButton("📱 Телефон / «Подключить» не работает", callback_data="menu_repair_sub"),
+                types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+            )
+            fix_text = (
+                "Что не работает?\n\n"
+                "💻 <b>AmneziaWG-конфиг (ПК / Wi-Fi)</b> — пересоздадим конфиг, импортируешь заново.\n\n"
+                "📱 <b>Телефон / «Подключить»</b> — дадим ссылку. Достаточно удалить старый "
+                "профиль в приложении (HAPP) и добавить новую ссылку."
+            )
+            bot.send_message(call.message.chat.id, fix_text, parse_mode="HTML", reply_markup=fix_markup)
+        elif action == "menu_regen_awg":
+            # Подтверждение перед сбросом AmneziaWG-конфига.
             confirm_markup = types.InlineKeyboardMarkup(row_width=1)
             confirm_markup.add(
-                types.InlineKeyboardButton("✅ Да, обновить", callback_data="menu_regen_confirm"),
+                types.InlineKeyboardButton("✅ Да, пересоздать", callback_data="menu_regen_confirm"),
                 types.InlineKeyboardButton("« Отмена", callback_data="go_main_menu"),
             )
             confirm_text = (
-                "⚠️ <b>Сбросить и пересоздать конфиг?</b>\n\n"
-                "Все устройства, использующие текущий <code>.conf</code> или ссылку <code>vpn://</code>, отвалятся. "
-                "После пересоздания получишь новый файл — его нужно будет вручную импортировать "
-                "в AmneziaWG/AmneziaVPN на каждом устройстве заново."
+                "⚠️ <b>Пересоздать конфиг AmneziaWG?</b>\n\n"
+                "Текущий <code>.conf</code> перестанет работать на всех устройствах. "
+                "Получишь новый файл — импортируй его в AmneziaWG/AmneziaVPN заново.\n"
+                "<i>На «Подключить» (ссылку) это не влияет.</i>"
             )
             bot.send_message(call.message.chat.id, confirm_text, parse_mode="HTML", reply_markup=confirm_markup)
+        elif action == "menu_repair_sub":
+            if not _check_access_or_block(call.message.chat.id, call.from_user.id):
+                return
+            bot.send_message(
+                call.message.chat.id,
+                "📱 Если на телефоне отвалилось: <b>удали старый профиль</b> в приложении (HAPP) "
+                "и <b>добавь ссылку заново</b>. Обновлять ссылку не нужно — она обновляется сама.",
+                parse_mode="HTML",
+            )
+            callback_vpn_quick(call)
         elif action == "menu_regen_confirm":
             if not _check_access_or_block(call.message.chat.id, call.from_user.id):
                 return
@@ -3091,7 +3120,7 @@ def main() -> None:
         sub_url = f"{sub_base}/sub/{sub_token}"
 
         caption = (
-            "🔗 <b>Быстрый VPN — одна ссылка</b>\n\n"
+            "🔗 <b>Подключить VPN — одна ссылка</b>\n\n"
             "Импортируй в <b>HAPP / Streisand / V2Box / Hiddify</b>: «+» → по ссылке или из буфера. "
             "Приложение само выберет рабочий сервер и подтянет обновления."
         )
