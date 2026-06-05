@@ -2143,24 +2143,25 @@ def main() -> None:
 
     @bot.message_handler(commands=["proxy"])
     def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
-        """Отправляет ссылку MTProto-прокси для Telegram и краткую инструкцию."""
-        fresh = load_config()
-        link = get_effective_mtproto_proxy_link(fresh)
-        if link:
-            try:
-                db_update_proxy_requested_at(message.chat.id)
-            except Exception:
-                pass
-            instr = _load_instruction_text(fresh.base_dir, "mtproto")
-            safe_reply(
-                message,
-                f"{link}\n\n{instr}",
-            )
-        else:
-            safe_reply(
-                message,
-                "Ссылка на прокси для Telegram не настроена. Обратись к владельцу бота.",
-            )
+        """MTProxy задавлен РКН на уровне протокола (06-2026) — вместо мёртвой ссылки
+        ведём юзера на VLESS («Подключить VPN»), он тоже открывает Telegram.
+        Инфра прокси на сервере оставлена (оживёт — вернём ссылку)."""
+        try:
+            db_update_proxy_requested_at(message.chat.id)
+        except Exception:
+            pass
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="vpn_quick"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
+        safe_reply(
+            message,
+            "📨 Прокси для Telegram сейчас не работает — операторы его блокируют.\n\n"
+            "Но Telegram отлично открывается через VPN: он пускает и Telegram, и весь "
+            "интернет. Нажми кнопку ниже — подключим.",
+            reply_markup=markup,
+        )
 
     @bot.message_handler(commands=["proxy_rotate"])
     def cmd_proxy_rotate(message: types.Message) -> None:  # type: ignore[override]
