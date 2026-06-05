@@ -239,21 +239,38 @@ def main() -> None:
             return True
         if db_is_access_active(telegram_id):
             return True
-        # Доступ блокируется
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
-            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
-        )
+        # Доступ неактивен. Если триал ещё НЕ использован — предлагаем активировать
+        # его бесплатно (новичок не должен видеть «заплати» вместо бесплатного триала).
+        # Если триал уже использован — предлагаем оплату.
+        trial_available = False
         try:
-            bot.send_message(
-                chat_id,
+            sub = db_get_subscription(telegram_id) or {}
+            trial_available = not sub.get("trial_used")
+        except Exception as e:
+            logger.debug("_check_access_or_block trial check failed: %s", e)
+
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        if trial_available:
+            markup.add(
+                types.InlineKeyboardButton("🎁 Активировать 14 дней бесплатно", callback_data="menu_trial_activate"),
+                types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+            )
+            text = (
+                "🎁 <b>Сначала активируй бесплатный период — 14 дней.</b>\n\n"
+                "Нажми кнопку ниже — и VPN сразу заработает. Без оплаты."
+            )
+        else:
+            markup.add(
+                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
+                types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+            )
+            text = (
                 "🔴 <b>Подписка неактивна.</b>\n\n"
                 "Продли — и VPN снова заработает. Текущие конфиги останутся теми же, "
-                "перенастраивать ничего не надо.",
-                parse_mode="HTML",
-                reply_markup=markup,
+                "перенастраивать ничего не надо."
             )
+        try:
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
         except Exception as e:
             logger.warning("_check_access_or_block: send_message failed: %s", e)
         return False
