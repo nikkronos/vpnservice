@@ -52,7 +52,7 @@ SERVERS = {
     "main": {
         "ssh": ["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"],
         "inbound_tag": "vless-tcp",
-        "flow": "xtls-rprx-vision",
+        "flow": "",  # мигрирован на xHTTP-REALITY 2026-06-06 (РКН режет TCP-REALITY) — flow убран
         "shared_uuid": "359e23cc-f90c-4e43-97af-bd1b662ff043",
         "db_column": "vless_uuid_main",
         "sudo": "",  # root user, sudo не нужен
