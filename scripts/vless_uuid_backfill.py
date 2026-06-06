@@ -42,54 +42,34 @@ def main() -> int:
         ).fetchall()
     print(f"Active users with telegram_id: {len(rows)}")
 
-    stats = {"main_new": 0, "main_existing": 0, "yc_new": 0, "yc_existing": 0}
+    # eu1 добавлен 2026-06-06 (Этап 2 закрытия фрод-зоны — перевод eu1 на per-user).
+    SERVERS = ["main", "yc", "eu1"]
+    stats = {s: {"new": 0, "existing": 0} for s in SERVERS}
 
     for r in rows:
         tid = int(r["telegram_id"])
         username = r["username"] or "—"
-        # main
-        existing_main = db_get_per_user_vless_uuid(tid, "main")
-        # yc
-        existing_yc = db_get_per_user_vless_uuid(tid, "yc")
-
-        if args.dry_run:
-            tag_m = "existing" if existing_main else "WILL CREATE"
-            tag_y = "existing" if existing_yc else "WILL CREATE"
-            print(f"  tid={tid:<12} @{username:<20} main: {tag_m:<11} | yc: {tag_y}")
-            if existing_main:
-                stats["main_existing"] += 1
+        for s in SERVERS:
+            existing = db_get_per_user_vless_uuid(tid, s)
+            if args.dry_run:
+                stats[s]["existing" if existing else "new"] += 1
+                continue
+            new = db_get_or_create_vless_uuid(tid, s)
+            if existing:
+                stats[s]["existing"] += 1
             else:
-                stats["main_new"] += 1
-            if existing_yc:
-                stats["yc_existing"] += 1
-            else:
-                stats["yc_new"] += 1
-            continue
-
-        # Реальный backfill
-        new_main = db_get_or_create_vless_uuid(tid, "main")
-        if existing_main:
-            stats["main_existing"] += 1
-        else:
-            stats["main_new"] += 1
-            print(f"  tid={tid} @{username} → main UUID created: {new_main[:8]}...")
-
-        new_yc = db_get_or_create_vless_uuid(tid, "yc")
-        if existing_yc:
-            stats["yc_existing"] += 1
-        else:
-            stats["yc_new"] += 1
-            print(f"  tid={tid} @{username} → yc UUID created: {new_yc[:8]}...")
+                stats[s]["new"] += 1
+                print(f"  tid={tid} @{username} → {s} UUID created: {new[:8]}...")
 
     print()
     print(f"{'=' * 60}")
-    print(f"Stats:")
-    print(f"  main: {stats['main_new']} new, {stats['main_existing']} existing")
-    print(f"  yc:   {stats['yc_new']} new, {stats['yc_existing']} existing")
+    print("Stats:")
+    for s in SERVERS:
+        print(f"  {s:<4}: {stats[s]['new']} new, {stats[s]['existing']} existing")
     if args.dry_run:
-        print(f"\n[DRY RUN] Ничего не записано.")
+        print("\n[DRY RUN] Ничего не записано.")
     else:
-        print(f"\nNext step: python3 scripts/sync_xray_users.py --all")
+        print("\nNext step: расширить sync_xray_users на eu1 → sync")
     return 0
 
 
