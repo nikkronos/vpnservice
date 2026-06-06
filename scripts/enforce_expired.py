@@ -253,6 +253,9 @@ def _apply_revocations(candidates: List[Dict]) -> int:
                     "text": notify_user_text,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
+                    "reply_markup": {"inline_keyboard": [[
+                        {"text": "💳 Продлить подписку", "callback_data": "pay_show"},
+                    ]]},
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     f"https://api.telegram.org/bot{bot_token}/sendMessage",

@@ -377,7 +377,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Доступ к VPN — одна ссылка для всех устройств
     if (subBlock) {
-      if (d.sub_link_path) {
+      const accessActive = d.grandfathered || (d.days_left || 0) > 0;
+      if (d.sub_link_path && accessActive) {
         subBlock.hidden = false;
         subBlock.innerHTML = '';
         const t = document.createElement('div');
@@ -394,6 +395,18 @@ document.addEventListener('DOMContentLoaded', () => {
         subBlock.appendChild(qrSpacer);
         renderQr(subBlock, d.sub_qr, 'Сканируй в приложении');
         renderLinkBlock(subBlock, location.origin + d.sub_link_path, '', 'Скопировать ссылку');
+      } else if (!accessActive) {
+        // Подписка неактивна — не показываем мёртвую ссылку, ведём на продление.
+        subBlock.hidden = false;
+        subBlock.innerHTML = '';
+        const t = document.createElement('div');
+        t.className = 'acc-subtitle';
+        t.textContent = '🔗 Подключить VPN.';
+        const note = document.createElement('p');
+        note.className = 'section-hint';
+        note.textContent = 'Подписка неактивна — продли её выше, и здесь снова появится ссылка для подключения всех устройств.';
+        subBlock.appendChild(t);
+        subBlock.appendChild(note);
       } else {
         subBlock.hidden = true;
       }

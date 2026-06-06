@@ -108,7 +108,12 @@ const STATUS_PRIORITY = {
 };
 
 function renderStatus(u) {
-    const meta = STATUS_META[u.status] || { label: u.status || '—', cls: 'st-unknown' };
+    // Подписка истекла (days_left < 0, не grandfather) → «истёк» приоритетнее активности.
+    let statusKey = u.status;
+    if (!u.is_grandfather && typeof u.days_left === 'number' && u.days_left < 0) {
+        statusKey = 'expired';
+    }
+    const meta = STATUS_META[statusKey] || { label: statusKey || '—', cls: 'st-unknown' };
     let suffix = '';
     if (u.is_grandfather) {
         suffix = ' · ∞';
