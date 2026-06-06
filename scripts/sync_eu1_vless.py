@@ -35,9 +35,10 @@ sys.path.insert(0, str(ROOT))
 
 CONFIG = "/usr/local/etc/xray/config.json"
 DB_COLUMN = "vless_uuid_eu1"
-# tag → flow (REALITY с vision; ws/xhttp без flow)
+# tag → flow. vless-tcp мигрирован на xHTTP-REALITY 2026-06-06 (РКН режет TCP-REALITY,
+# xHTTP проходит) → flow убран (xhttp vision не использует). ws/xhttp тоже без flow.
 INBOUNDS = {
-    "vless-tcp": "xtls-rprx-vision",
+    "vless-tcp": "",
     "vless-ws": "",
     "vless-xhttp": "",
 }
