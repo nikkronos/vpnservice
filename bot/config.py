@@ -21,6 +21,9 @@ class BotConfig:
     # Share-ссылка vless:// через Yandex CDN relay (XHTTP, HTTPS/443 + TLS) — приоритетный вариант
     # для Мегафон/Yota: гипотеза, что прозрачный прокси операторов ломает HTTP, но не HTTPS.
     vless_cdn_tls_share_url: str | None = None
+    # Share-ссылка vless:// на eu1 REALITY (TCP+vision, www.microsoft.com) — быстрый немецкий
+    # сервер в подписке (Этап 2 фрод-зоны 2026-06-06). Per-user UUID подставляется по vless_uuid_eu1.
+    vless_eu1_share_url: str | None = None
     # Email: Resend API
     resend_api_key: str | None = None
     resend_from_email: str = "noreply@vpn.example.com"
@@ -110,6 +113,12 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         if not vless_cdn_tls_share_url.lower().startswith("vless://"):
             vless_cdn_tls_share_url = None
 
+    vless_eu1_share_url = data.get("VLESS_EU1_SHARE_URL") or None
+    if vless_eu1_share_url:
+        vless_eu1_share_url = vless_eu1_share_url.strip()
+        if not vless_eu1_share_url.lower().startswith("vless://"):
+            vless_eu1_share_url = None
+
     resend_api_key = (data.get("RESEND_API_KEY") or "").strip() or None
     resend_from_email = (data.get("RESEND_FROM_EMAIL") or "").strip() or "noreply@vpn.example.com"
 
@@ -144,6 +153,7 @@ def load_config(env_path: str = "env_vars.txt") -> BotConfig:
         vless_reality_share_url=vless_reality_share_url,
         vless_cdn_share_url=vless_cdn_share_url,
         vless_cdn_tls_share_url=vless_cdn_tls_share_url,
+        vless_eu1_share_url=vless_eu1_share_url,
         resend_api_key=resend_api_key,
         resend_from_email=resend_from_email,
         telegram_id_whitelist=telegram_id_whitelist or None,

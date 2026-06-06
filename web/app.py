@@ -1788,6 +1788,7 @@ _SUB_LABEL_MAP = {
     # технические метки в исходных vless-ссылках → user-friendly для подписки
     "YC-Reality": "🇪🇺 Европа",
     "EU1-VLESS":  "🇪🇺 Европа",
+    "EU1-DE":     "🇩🇪 Германия",
     "RU-REALITY": "🇷🇺 Россия",
 }
 
@@ -1814,14 +1815,19 @@ def _sync_xray_after_new_uuid(server_id: str) -> None:
     """
     try:
         import subprocess as _sp
-        script_path = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+        scripts_dir = pathlib.Path(__file__).resolve().parent.parent / "scripts"
+        # eu1 — отдельный скрипт (локальный, 3 inbound, grace); main/yc — sync_xray_users.
+        if server_id == "eu1":
+            cmd = [sys.executable, str(scripts_dir / "sync_eu1_vless.py")]
+        else:
+            cmd = [sys.executable, str(scripts_dir / "sync_xray_users.py"), "--server", server_id]
         # Используем Popen — non-blocking, родительский процесс не ждёт
         _sp.Popen(
-            [sys.executable, str(script_path), "--server", server_id],
+            cmd,
             stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
             start_new_session=True,
         )
-        logger.info("Spawned async sync_xray_users for server %s", server_id)
+        logger.info("Spawned async vless sync for server %s", server_id)
     except Exception as e:
         logger.warning("Failed to spawn sync_xray_users for %s: %s", server_id, e)
 
@@ -1830,6 +1836,7 @@ def _sync_xray_after_new_uuid(server_id: str) -> None:
 _VLESS_SERVER_TO_ATTR = {
     "yc":   "vless_reality_share_url",       # YC REALITY xHTTP (T2/МТС/Билайн)
     "main": "vless_cdn_tls_share_url",       # Main REALITY (Мегафон/Yota)
+    "eu1":  "vless_eu1_share_url",           # eu1 REALITY TCP (быстрый немецкий)
 }
 
 
@@ -1870,6 +1877,7 @@ def _build_subscription_links(telegram_id: Optional[int] = None) -> List[str]:
     seen = set()
     # (env_attr, default_label, server_id для per-user UUID)
     config_list = (
+        ("vless_eu1_share_url", "🇩🇪 Германия", "eu1"),
         ("vless_reality_share_url", "🇪🇺 Европа", "yc"),
         ("vless_cdn_tls_share_url", "🇷🇺 Россия", "main"),
     )
