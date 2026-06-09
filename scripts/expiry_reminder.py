@@ -63,14 +63,23 @@ TEMPLATES = {
 }
 
 
-def send_telegram_message(bot_token: str, chat_id: int, text: str) -> bool:
+# Кнопка «Продлить подписку» под напоминаниями (callback pay_show — хендлер в боте).
+PAY_REMINDER_MARKUP = {"inline_keyboard": [[
+    {"text": "💳 Продлить подписку", "callback_data": "pay_show"},
+]]}
+
+
+def send_telegram_message(bot_token: str, chat_id: int, text: str, reply_markup: dict | None = None) -> bool:
     """Отправляет HTML-сообщение через TG API. Возвращает True при успехе."""
-    body = json.dumps({
+    payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
-    }).encode("utf-8")
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{bot_token}/sendMessage",
         data=body,
@@ -111,7 +120,7 @@ def run_reminder_cycle(bot_token: str) -> None:
             tid = u.get("telegram_id")
             if not tid:
                 continue
-            ok = send_telegram_message(bot_token, int(tid), text)
+            ok = send_telegram_message(bot_token, int(tid), text, reply_markup=PAY_REMINDER_MARKUP)
             if ok:
                 db_mark_expiry_notif_sent(int(tid), days_until)
                 total_sent += 1
