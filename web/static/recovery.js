@@ -1015,8 +1015,22 @@ document.addEventListener('DOMContentLoaded', () => {
           awgResult.appendChild(qrSpacer);
 
           renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaVPN');
+        } else if (inTelegram) {
+          // PC / iOS в Telegram Mini App: скачивание файла НЕ работает (WebApp открывает
+          // файл, а не качает). Даём QR (скан в приложении) + копию конфига текстом.
+          status.remove();
+          const hint = document.createElement('p');
+          hint.className = 'section-hint';
+          if (platform === 'ios') {
+            hint.innerHTML = '<b>iPhone / iPad:</b> поставь <b>AmneziaWG</b> из App Store → отсканируй QR ниже в приложении. Или скопируй конфиг и добавь вручную.';
+          } else {
+            hint.innerHTML = '<b>ПК:</b> поставь <b>AmneziaVPN</b> (amnezia.org) → отсканируй QR, либо скопируй конфиг и в приложении «+» → «Импорт из буфера обмена».';
+          }
+          awgResult.appendChild(hint);
+          renderQr(awgResult, data.qr, 'Сканируй QR в AmneziaWG');
+          renderLinkBlock(awgResult, cfg, '', '📋 Скопировать конфиг');
         } else {
-          // PC / iOS — скачать файл
+          // Браузер — обычное скачивание файла работает.
           downloadFile(filename, cfg);
           status.textContent = 'Готово. Файл ' + filename + ' скачан.';
           status.style.color = 'var(--green)';
