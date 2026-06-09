@@ -1113,31 +1113,60 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ── Шаг 4c: Proxy для Telegram → редирект на «Подключить VPN» ──────────────
-  // MTProxy задавлен РКН на уровне протокола (06-2026). Вместо мёртвой ссылки
-  // ведём юзера на VLESS («Подключить VPN»), который тоже открывает Telegram.
-  function fetchProxyLink() {
+  // ── Шаг 4c: MTProxy (прокси для Telegram) ─────────────────────────────────
+  // Возвращён 2026-06-09 (РКН-волна по прокси спала). + фолбэк-подсказка на VPN.
+  async function fetchProxyLink() {
     if (!proxyResult) return;
     proxyResult.innerHTML = '';
+    const status = document.createElement('p');
+    status.style.color = 'var(--green)';
+    status.textContent = 'Загружаем ссылку…';
+    proxyResult.appendChild(status);
 
-    const p = document.createElement('p');
-    p.innerHTML =
-      'Прокси для Telegram сейчас не работает — операторы его блокируют.<br><br>' +
-      'Но Telegram отлично открывается через VPN: он пускает и Telegram, и весь интернет. ' +
-      'Нажми кнопку ниже — подключим.';
-    proxyResult.appendChild(p);
+    try {
+      const resp = await fetch('/api/recovery/proxy-link-by-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        setMsg(status, 'Ошибка: ' + (data.error || resp.statusText), true);
+        return;
+      }
+      const link = data.mtproto_proxy_link || '';
+      if (!link) {
+        setMsg(status, 'Сервер не вернул ссылку.', true);
+        return;
+      }
+      status.remove();
+      renderQr(proxyResult, data.qr, 'Сканируй QR или нажми кнопку — откроется в Telegram');
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = '🔗 Подключить VPN';
-    btn.className = 'btn-recovery copy-primary';
-    btn.style.display = 'block';
-    btn.style.width = '100%';
-    btn.style.marginTop = '12px';
-    btn.addEventListener('click', () => {
-      haptic('light');
-      showStep(stepMenu);
-    });
-    proxyResult.appendChild(btn);
+      const openA = document.createElement('a');
+      openA.href = link;
+      openA.textContent = '👆 Открыть в Telegram';
+      openA.className = 'btn-recovery copy-primary';
+      openA.style.display = 'block';
+      openA.style.textAlign = 'center';
+      openA.style.textDecoration = 'none';
+      openA.style.marginBottom = '8px';
+      openA.addEventListener('click', (e) => {
+        haptic('light');
+        if (inTelegram && tg.openTelegramLink) {
+          e.preventDefault();
+          try { tg.openTelegramLink(link); } catch (_) {}
+        }
+      });
+      proxyResult.appendChild(openA);
+      renderLinkBlock(proxyResult, link, '', '📋 Копировать tg://');
+
+      const fb = document.createElement('p');
+      fb.className = 'section-hint';
+      fb.style.marginTop = '10px';
+      fb.textContent = 'Если прокси не подключается у оператора — используй «Подключить VPN»: он тоже открывает Telegram.';
+      proxyResult.appendChild(fb);
+    } catch (err) {
+      setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
+    }
   }
 });
