@@ -1879,6 +1879,7 @@ def _build_subscription_links(telegram_id: Optional[int] = None) -> List[str]:
     config_list = (
         ("vless_eu1_share_url", "🇩🇪 Германия", "eu1"),
         ("vless_reality_share_url", "🇪🇺 Европа", "yc"),
+        ("vless_yc2_share_url", "🇪🇺 Европа-2", "yc"),
         ("vless_cdn_tls_share_url", "🇷🇺 Россия", "main"),
     )
     for attr, default_label, server_id in config_list:
