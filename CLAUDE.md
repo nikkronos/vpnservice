@@ -1,6 +1,6 @@
 # CLAUDE.md — VPN Service
 
-Репозиторий: `nikkronos/vpnservice` | Путь: `Projects/VPN/`
+Репозиторий: `nikkronos/vpnservice` | Путь: `Projects/In progress/VPN/` (переехал из `Projects/VPN/` 2026-06-09)
 
 **Бренд (с 2026-05-25):** Kronos / VPN Kronos. Бот `@vpnkronos_bot` (display `vpnkronos`). Домен `supportkronos.online` (нейтральный, маскировка под support-портал). Канал `@vforfriends` legacy. **Цена**: 200 ₽/мес. Текущие 34 юзера — на старом боте, миграция broadcast'ом владельца после Phase 3b.
 
