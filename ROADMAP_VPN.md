@@ -1,6 +1,6 @@
 # ROADMAP_VPN
 
-> Последнее обновление: 2026-06-02 (РКН подано №100306737; peers.json → SQLite Phase 2, Phase 3 ждёт ~03.06; ЮKassa/Продамус на паузе до реестра РКН; eu1-мониторинг; чистка доков). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-02.md`
+> Последнее обновление: 2026-06-10 (Фаза 0 yc2 sync; реордер подписки Яндекс-первыми; **инцидент с релеем eu1 откачен** + защита; поштучный разбор eu1-shared в наблюдении; **Фаза 2 keystone стартовала** — арх-док + iplimit-наблюдение; пошли первые оплаты). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-10.md`. **NB:** yc/yc2 — фронт-релеи в eu1 (`project_vpn_yc_relay_topology`), shared на eu1 не трогать вслепую.
 > Текущее состояние: рабочий MVP, бот переехал на `@vpnkronos_bot`, **`ONBOARDING_ENABLED=1` и `ENFORCEMENT_ENABLED=1` активны** (флаги выставлены 2026-05-28). Все каналы покрыты (Yota/Мегафон/Т2/МТС/Билайн). Donation-flow + Stars (oneshot + Subscription) работают параллельно. Support Variant B (двусторонний) активен. Реферал-программа полностью работает + auto-restore при оплате после soft-revoke (enforcement gap для AWG закрыт). Лендинг + оферта + Политика ПД + контакты — после 3 раундов юр.экспертизы, готовы к ЮKassa. Скорость: AWG ~84 Мбит/с, упор в путь RU→DE. Свежие сессии: `docs/sessions/SESSION_SUMMARY_2026-06-01.md`.
 
 ---
