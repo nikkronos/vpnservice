@@ -1,7 +1,27 @@
 # ROADMAP_VPN
 
-> Последнее обновление: 2026-06-10 (Фаза 0 yc2 sync; реордер подписки Яндекс-первыми; **инцидент с релеем eu1 откачен** + защита; поштучный разбор eu1-shared в наблюдении; **Фаза 2 keystone стартовала** — арх-док + iplimit-наблюдение; пошли первые оплаты). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-10.md`. **NB:** yc/yc2 — фронт-релеи в eu1 (`project_vpn_yc_relay_topology`), shared на eu1 не трогать вслепую.
+> Последнее обновление: 2026-06-10 (большая сессия: yc2 в sync/health; реордер подписки Яндекс-первыми; **инцидент с релеем eu1 откачен** + защита; расширенный access_audit + чистка legacy + удалён untracked main-wg0; **подписка/ЛК через Яндекс-фронт** БС-резильентность; **per-device keystone B1+B2+B3 НА ПРОДЕ — баг Ани закрыт**; iplimit-наблюдение запущено; первые оплаты). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-10.md`. **NB:** yc/yc2 — фронт-релеи в eu1 (`project_vpn_yc_relay_topology`), shared на eu1 не трогать вслепую; supportkronos.online фронтится через yc/yc2 socat (правило #0.1 в CLAUDE.md).
 > Текущее состояние: рабочий MVP, бот переехал на `@vpnkronos_bot`, **`ONBOARDING_ENABLED=1` и `ENFORCEMENT_ENABLED=1` активны** (флаги выставлены 2026-05-28). Все каналы покрыты (Yota/Мегафон/Т2/МТС/Билайн). Donation-flow + Stars (oneshot + Subscription) работают параллельно. Support Variant B (двусторонний) активен. Реферал-программа полностью работает + auto-restore при оплате после soft-revoke (enforcement gap для AWG закрыт). Лендинг + оферта + Политика ПД + контакты — после 3 раундов юр.экспертизы, готовы к ЮKassa. Скорость: AWG ~84 Мбит/с, упор в путь RU→DE. Свежие сессии: `docs/sessions/SESSION_SUMMARY_2026-06-01.md`.
+
+---
+
+## ▶ СЛЕДУЮЩИЙ ЗАХОД — что делать (приоритет, для агента)
+
+Прочитай сначала `docs/sessions/SESSION_SUMMARY_2026-06-10.md` (полный контекст последней сессии) + правила #0/#0.1 в CLAUDE.md (релей yc/yc2→eu1, Яндекс-фронт supportkronos.online).
+
+1. **Тарифы 199/149** (бизнес-приоритет, не зависит от данных). Добавить в платёжный флоу (donation + Stars) опции **199 ₽/мес** и **447 ₽/3мес (149/мес)**. `users.plan` уже есть. Лимит устройств по тарифу (соло 3 / семейный 5) — per-device слоты готовы (cap сейчас 5 хардкод в боте/ЛК), привязать к plan. Enforcement шеринга — через iplimit (см. п.3). Контекст: секция «Тарифы» ниже + `docs/plan-blocking-antifraud-traffic-tariffs.md` §4.
+
+2. **B4 — устройства в ЛК (фронт).** Бэкенд ✅ готов на ветке `feature/per-device-lk` (4 эндпоинта: `/api/recovery/devices|device-add|device-regen|device-delete`, НЕ задеплоено). Осталось фронт: `web/templates/recovery.html` (step-контейнеры + кнопка входа в «Мои устройства») + `web/static/recovery.js` (флоу список/добавить/обновить/удалить, рендер download/QR/vpn:// — зеркало бот-флоу `callback_devices`) + **браузерный смоук** + merge ветки. Зеркалить бот-UX из `bot/main.py` (`callback_devices`). + переименование устройства (мелочь, авто-имя сейчас).
+
+3. **iplimit Stage 2 — enforcement** (ждёт ~неделю данных, проверять с ~2026-06-17). Глянуть `ssh fornex "cd /opt/vpnservice && venv/bin/python scripts/ip_usage_watcher.py --report"` — распределение distinct-IP/юзер. Откалибровать порог (с запасом на мобильные сети) → мягкий enforcement (уведомление юзеру / при злостном — временный ребан через sync_xray_users-механизм). НЕ рубить вслепую. Контекст: `docs/plan-phase2-keystone-architecture.md` Часть A (Stage 2).
+
+4. **Авто-вердикт 9 eu1-shared** — прилетит владельцу в TG **сам ~2026-06-16** (`eu1_share_audit_verdict.py`). Если «мертвы» → `sync_eu1_vless.py --no-shared --force` (релей сохранится сам) + снять аудит-обвязку (cron `23 */6` sync-eu1, `instrument_eu1_shares.py`, `eu1_share_audit_sampler.sh`, `eu1_share_audit_verdict.py`). Если «всплыл UUID» → живой юзер, мигрировать. Статус: `ssh fornex "cat /var/log/eu1-share-audit.log"`.
+
+5. **БС-валидация Яндекс-фронта** — когда вернутся БС: проверить, доходит ли обновление подписки (`supportkronos.online:8443` теперь на Яндекс-IP). No-regret уже сделан; если режут по SNI `supportkronos.online` — следующий шаг маскировка эндпоинта. Нужен тест с устройством при активных БС.
+
+6. **main-wg0 heavy-юзер `/5BeCINho`** (СПб, 2.6 МБ, остался после удаления Mjvdy) — вероятно «1 legacy user» из доков; оставлен. Если решим чистить main-WG legacy — поштучно (как делали).
+
+Прочее (продукт/маркетинг/инфра) — в секциях ниже по приоритетам.
 
 ---
 
