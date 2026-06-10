@@ -1876,10 +1876,17 @@ def _build_subscription_links(telegram_id: Optional[int] = None) -> List[str]:
     out: List[str] = []
     seen = set()
     # (env_attr, default_label, server_id для per-user UUID)
+    # Порядок = приоритет клиента (первый рабочий = по умолчанию). Яндекс
+    # (Европа/Европа-2) первыми — выживают на фильтрующих сетях (РКН режет по
+    # IP-репутации: немецкий eu1 и Timeweb main блокируются при БС, Яндекс — нет;
+    # см. project_vpn_rkn_ip_block). Германию (быстрая на чистой сети) и Россию
+    # (main = путь для Yota/Мегафон при БС, SNI=cloud.mail.ru) держим ниже как
+    # ниши, но не дефолтом. Реордер авто-разъезжается по клиентам за ~12ч
+    # (Profile-Update-Interval) — без broadcast. Изменено 2026-06-10.
     config_list = (
-        ("vless_eu1_share_url", "🇩🇪 Германия", "eu1"),
         ("vless_reality_share_url", "🇪🇺 Европа", "yc"),
         ("vless_yc2_share_url", "🇪🇺 Европа-2", "yc"),
+        ("vless_eu1_share_url", "🇩🇪 Германия", "eu1"),
         ("vless_cdn_tls_share_url", "🇷🇺 Россия", "main"),
     )
     for attr, default_label, server_id in config_list:
