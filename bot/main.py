@@ -15,6 +15,11 @@ from .config import (
     load_config,
 )
 from .database import (
+    db_list_devices,
+    db_get_device,
+    db_add_device,
+    db_delete_device,
+    db_count_devices,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -75,6 +80,7 @@ from .wireguard_peers import (
     WireGuardError,
     create_amneziawg_peer_and_config_for_user,
     create_peer_and_config_for_user,
+    delete_amneziawg_device,
     execute_server_command,
     generate_vpn_url,
     get_available_servers,
@@ -1291,6 +1297,7 @@ def main() -> None:
             other_markup = types.InlineKeyboardMarkup(row_width=1)
             other_markup.add(
                 types.InlineKeyboardButton("💻 AmneziaWG — макс. скорость (ПК / Wi-Fi)", callback_data="menu_get_config"),
+                types.InlineKeyboardButton("🖥 Мои устройства (AmneziaWG)", callback_data="dev_list"),
                 types.InlineKeyboardButton("📡 Мобильный — под оператора", callback_data="menu_mobile_vpn"),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
@@ -1378,6 +1385,124 @@ def main() -> None:
             _do_get_config(call.message, android_safe=android_safe, platform=platform)
         else:
             _do_regen(call.message, android_safe=android_safe, platform=platform)
+
+    # ──────────────────────────────────────────────────────────────
+    # Callbacks: «Мои устройства» (Фаза 2 B — именованные AmneziaWG-слоты)
+    # ──────────────────────────────────────────────────────────────
+    _OS_LABEL = {"pc": "💻 ПК", "ios": "🍎 iOS", "android": "🤖 Android"}
+    _DEVICE_CAP = 5
+
+    def _render_device_list(chat_id: int, uid: int) -> None:
+        devices = db_list_devices(uid)
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        for d in devices:
+            did = d["device_id"]
+            kb.add(types.InlineKeyboardButton(
+                f"{_OS_LABEL.get(d['os'], d['os'])} · {d['name']}", callback_data="dev_noop"))
+            kb.add(
+                types.InlineKeyboardButton("🔄 Обновить", callback_data=f"devregen_{did}"),
+                types.InlineKeyboardButton("🗑 Удалить", callback_data=f"devdel_{did}"),
+            )
+        if len(devices) < _DEVICE_CAP:
+            kb.add(types.InlineKeyboardButton("➕ Добавить устройство", callback_data="dev_add"))
+        else:
+            kb.add(types.InlineKeyboardButton(f"Лимит {_DEVICE_CAP} устройств", callback_data="dev_noop"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data="menu_other_connect"))
+        text = ("🖥 <b>Мои устройства (AmneziaWG)</b>\n\n" + (
+            f"Устройств: {len(devices)} из {_DEVICE_CAP}. Каждое — отдельный конфиг; "
+            "«Обновить» одно не ломает другие.\n⚠️ AmneziaWG — для ПК/Wi-Fi, не для мобильного."
+            if devices else
+            "Пока нет устройств. Добавь первое — каждому девайсу свой независимый конфиг."))
+        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+
+    def _device_autoname(uid: int, os_: str) -> str:
+        same = [d for d in db_list_devices(uid) if d["os"] == os_]
+        base = {"pc": "ПК", "ios": "iPhone/iPad", "android": "Android"}.get(os_, os_)
+        return f"{base} {len(same) + 1}"
+
+    def _add_device_and_deliver(message: types.Message, uid: int, os_: str) -> None:
+        if os_ not in ("pc", "ios", "android"):
+            return
+        if db_count_devices(uid) >= _DEVICE_CAP:
+            bot.send_message(message.chat.id, f"Достигнут лимит {_DEVICE_CAP} устройств. Удали лишнее.")
+            return
+        name = _device_autoname(uid, os_)
+        device_id = db_add_device(uid, name, os_)
+        try:
+            _, cfg = create_amneziawg_peer_and_config_for_user(
+                uid, android_safe=(os_ == "android"), server_id="eu1", platform=os_, device_id=device_id)
+        except WireGuardError as exc:
+            logger.exception("dev add %s os=%s: %s", uid, os_, exc)
+            db_delete_device(device_id)  # откат записи устройства, раз peer не создан
+            bot.send_message(message.chat.id, "Не удалось создать конфиг устройства. Попробуй позже.")
+            return
+        _deliver_config(message, cfg, f"awg_eu1_{os_}.conf", os_,
+                        f"✅ Добавлено устройство «{name}». Импортируй конфиг в AmneziaWG/AmneziaVPN.")
+        _render_device_list(message.chat.id, uid)
+
+    def _regen_device(message: types.Message, uid: int, did: str) -> None:
+        dev = db_get_device(did)
+        if not dev or int(dev["telegram_id"]) != uid:
+            bot.send_message(message.chat.id, "Устройство не найдено.")
+            return
+        os_ = dev["os"]
+        try:
+            _, cfg = regenerate_amneziawg_peer_and_config_for_user(
+                uid, android_safe=(os_ == "android"), server_id="eu1", device_id=did)
+        except WireGuardError as exc:
+            logger.exception("dev regen %s did=%s: %s", uid, did[:8], exc)
+            bot.send_message(message.chat.id, "Не удалось обновить конфиг. Попробуй позже.")
+            return
+        _deliver_config(message, cfg, f"awg_eu1_{os_}.conf", os_,
+                        f"🔄 Конфиг «{dev['name']}» пересоздан. Импортируй заново.")
+
+    @bot.callback_query_handler(func=lambda c: c.data in ("dev_list", "dev_add", "dev_noop")
+                                or c.data.startswith(("devadd_", "devregen_", "devdel_", "devdelyes_")))
+    def callback_devices(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        call.message.from_user = call.from_user
+        uid = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data
+        if data == "dev_noop":
+            return
+        if not _check_access_or_block(chat_id, uid):
+            return
+        if data == "dev_list":
+            _render_device_list(chat_id, uid)
+        elif data == "dev_add":
+            kb = types.InlineKeyboardMarkup(row_width=3)
+            kb.add(
+                types.InlineKeyboardButton("💻 ПК", callback_data="devadd_pc"),
+                types.InlineKeyboardButton("🍎 iOS", callback_data="devadd_ios"),
+                types.InlineKeyboardButton("🤖 Android", callback_data="devadd_android"),
+            )
+            kb.add(types.InlineKeyboardButton("« Назад", callback_data="dev_list"))
+            bot.send_message(chat_id, "Тип нового устройства (для формата конфига):", reply_markup=kb)
+        elif data.startswith("devadd_"):
+            _add_device_and_deliver(call.message, uid, data.split("_", 1)[1])
+        elif data.startswith("devregen_"):
+            _regen_device(call.message, uid, data.split("_", 1)[1])
+        elif data.startswith("devdelyes_"):
+            did = data.split("_", 1)[1]
+            dev = db_get_device(did)
+            if dev and int(dev["telegram_id"]) == uid:
+                delete_amneziawg_device(uid, did)
+                bot.send_message(chat_id, f"🗑 Устройство «{dev['name']}» удалено.")
+            _render_device_list(chat_id, uid)
+        elif data.startswith("devdel_"):
+            did = data.split("_", 1)[1]
+            dev = db_get_device(did)
+            if not dev or int(dev["telegram_id"]) != uid:
+                bot.send_message(chat_id, "Устройство не найдено.")
+                return
+            kb = types.InlineKeyboardMarkup(row_width=1)
+            kb.add(
+                types.InlineKeyboardButton("✅ Да, удалить", callback_data=f"devdelyes_{did}"),
+                types.InlineKeyboardButton("« Отмена", callback_data="dev_list"),
+            )
+            bot.send_message(chat_id, f"Удалить устройство «{dev['name']}»? Конфиг перестанет работать.",
+                             reply_markup=kb)
 
     # ──────────────────────────────────────────────────────────────
     # Email-авторизация и привязка

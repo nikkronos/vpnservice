@@ -940,8 +940,11 @@ def create_amneziawg_peer_and_config_for_user(
     android_safe: bool = False,
     server_id: str = "eu1",
     platform: str = "pc",
+    device_id: Optional[str] = None,
 ) -> Tuple[Peer, str]:
-    """Создаёт peer AmneziaWG на eu1 через скрипт по SSH."""
+    """Создаёт peer AmneziaWG на eu1 через скрипт по SSH.
+    device_id (Фаза 2 B): явный слот именованного устройства. Если None —
+    storage-shim переиспользует/создаёт устройство по os=platform (legacy-путь)."""
     if server_id != "eu1":
         raise WireGuardError("AmneziaWG выдаётся только для server_id eu1.")
     env = _load_env()
@@ -1011,12 +1014,13 @@ def create_amneziawg_peer_and_config_for_user(
         server_id=server_id,
         active=True,
         profile_type=None,
-        platform=platform,
+        device_id=device_id,
+        os=platform,
     )
     upsert_peer(peer)
     logger.info(
-        "Создан AmneziaWG peer для telegram_id=%s на %s, wg_ip=%s, platform=%s",
-        telegram_id, server_id, wg_ip, platform,
+        "Создан AmneziaWG peer для telegram_id=%s на %s, wg_ip=%s, os=%s, device_id=%s",
+        telegram_id, server_id, wg_ip, platform, (device_id or "")[:8],
     )
     return peer, client_config
 
@@ -1026,11 +1030,15 @@ def regenerate_amneziawg_peer_and_config_for_user(
     android_safe: bool = False,
     server_id: str = "eu1",
     platform: str = "pc",
+    device_id: Optional[str] = None,
 ) -> Tuple[Peer, str]:
-    """Регенерирует AmneziaWG peer для eu1 (тот же IP, новые ключи)."""
+    """Регенерирует AmneziaWG peer для eu1 (тот же IP, новые ключи).
+    device_id (Фаза 2 B): регенерит КОНКРЕТНОЕ устройство; если None — по os=platform."""
     if server_id != "eu1":
         raise WireGuardError("Регенерация AmneziaWG только для eu1.")
-    existing_peer = find_peer_by_telegram_id(telegram_id, server_id=server_id, platform=platform)
+    existing_peer = find_peer_by_telegram_id(
+        telegram_id, server_id=server_id, platform=platform, device_id=device_id
+    )
     if not existing_peer or not existing_peer.active:
         raise WireGuardError(
             f"Не найден активный peer для Европы ({server_id}, платформа: {platform}). "
@@ -1047,13 +1055,28 @@ def regenerate_amneziawg_peer_and_config_for_user(
         reuse_ip=existing_peer.wg_ip,
         android_safe=android_safe,
         server_id=server_id,
-        platform=platform,
+        platform=existing_peer.os,
+        device_id=existing_peer.device_id,
     )
     logger.info(
         "Регенерирован AmneziaWG peer для telegram_id=%s на %s, platform=%s",
         telegram_id, server_id, platform,
     )
     return peer, client_config
+
+
+def delete_amneziawg_device(telegram_id: int, device_id: str) -> None:
+    """Удаляет устройство (Фаза 2 B): его AWG-peer из runtime eu1 + слоты + запись
+    в devices. Идемпотентно — отсутствие peer/устройства не ошибка."""
+    existing_peer = find_peer_by_telegram_id(telegram_id, server_id="eu1", device_id=device_id)
+    if existing_peer and existing_peer.public_key:
+        try:
+            _remove_amneziawg_peer(existing_peer.public_key)
+        except WireGuardError as exc:
+            logger.warning("delete device %s: AWG peer не убран (продолжаем): %s", device_id[:8], exc)
+    from .database import db_delete_device
+    db_delete_device(device_id)  # удаляет peer-слоты device_id + запись devices
+    logger.info("Удалено устройство device_id=%s tid=%s", device_id[:8], telegram_id)
 
 
 def generate_vpn_url(config_text: str) -> str:
