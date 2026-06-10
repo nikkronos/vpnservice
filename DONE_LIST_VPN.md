@@ -1,5 +1,18 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-10 — Поштучный разбор eu1 «shared» + liveness-аудит (в наблюдении)
+
+После инцидента (см. ниже) — разобрали не-per-user UUID на eu1 поштучно, со 100% доказательством, что есть что, ПРЕЖДЕ чем удалять.
+
+- **`scripts/vless_uuid_forensics.py`** (read-only): кросс-референс каждого не-per-user UUID по inbound/outbound всех 4 серверов. Результат: **1 релей** (`359e23cc`, yc/yc2→eu1 — единственный outbound-кред во всей инфре), **9 eu1-only client-share** на vless-tcp (нигде не outbound, не на других серверах → не инфра).
+- **Liveness:** eu1 per-user STATS не работают (только `inbound>>>` агрегаты — by design, per-user телеметрия лишь на main/yc). Ловим через **access-log** (`email:` в journald). За ~16ч журнала — **0 использований всех 9**.
+- **Инструментовка (`scripts/instrument_eu1_shares.py --apply`):** добавлен tracking-email `auditshare_<id8>@kronos` 9 shared (аддитивно, релей/per-user не тронуты; backup+validate+restart, релей пережил ~3с блип). Теперь их трафик виден per-UUID в access-log.
+- **Наблюдение (`scripts/eu1_share_audit_sampler.sh`, cron `23 */6`):** durably копит в `/var/log/eu1-share-audit.log`, кто из 9 использовался (journald хранит ~16ч → sampler с lookback 8ч).
+
+**▶ Как завершить (следующие заходы):** через несколько дней глянуть `/var/log/eu1-share-audit.log`. Если все 9 = «никто не использовался» → они мертвы → удалить `sync_eu1_vless.py --no-shared --force` (RELAY_PRESERVE сам сбережёт релей) → снять sampler-cron + удалить `instrument_eu1_shares.py`/`eu1_share_audit_sampler.sh`. Если какой-то UUID появился → это живой юзер на старой ссылке: НЕ рубить вслепую, мигрировать/предупредить.
+
+---
+
 ## 2026-06-10 — Фрод-зона eu1: ПОПЫТКА Этапа 4 ОТКАЧЕНА (вскрыт релей yc/yc2→eu1)
 
 **Что хотели:** удалить 11 «shared» UUID на eu1 (vless-tcp:9 + vless-ws:1 + vless-xhttp:1), как Этап 7 для main/yc, чтобы весь VLESS стал per-user.
