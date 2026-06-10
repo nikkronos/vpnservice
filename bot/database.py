@@ -241,6 +241,91 @@ def _migrate_add_servers_table() -> None:
             logger.info("Migration: seeded servers table with eu1 (vless + awg)")
 
 
+def _migrate_peers_platform_to_device(con=None) -> None:
+    """
+    Фаза 2 B — ключ peers (telegram_id, server_id, platform) → (telegram_id,
+    server_id, device_id) + таблица devices. platform → os (свойство устройства,
+    не ключ). Миграция 1:1 — клиентские ключи (wg_ip/public_key) НЕ меняются,
+    значит старые .conf продолжают работать. Идемпотентна (повторный прогон —
+    no-op, если device_id уже есть).
+
+    Зачем: per-OS слот не даёт 2 устройства одной ОС (iPad+iPhone коллизят,
+    фидбэк Ани). Именованные device_id это снимают + база под «семейный» тариф.
+
+    ⚠️ НЕ вызывается из init_db до B1 — сначала зелёный тест
+    (`scripts/test_per_device_migration.py`) + бэкап vpn.db + go владельца.
+    Тогда же обновляются _SCHEMA / storage / wireguard_peers под device_id.
+    """
+    def _run(c) -> None:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(peers)").fetchall()}
+        if "device_id" in cols:
+            return  # уже мигрировано
+        if "platform" not in cols:
+            return  # не старый формат — нечего мигрировать
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS devices (
+                device_id    TEXT PRIMARY KEY,
+                telegram_id  INTEGER NOT NULL,
+                name         TEXT NOT NULL,
+                os           TEXT NOT NULL DEFAULT 'pc',   -- 'pc'|'ios'|'android' (формат доставки)
+                created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at   TEXT
+            )
+            """
+        )
+        c.execute("CREATE INDEX IF NOT EXISTS idx_devices_tid ON devices (telegram_id)")
+        c.execute(
+            """
+            CREATE TABLE peers_new (
+                telegram_id  INTEGER NOT NULL,
+                server_id    TEXT NOT NULL DEFAULT 'rus1',
+                device_id    TEXT NOT NULL,
+                os           TEXT NOT NULL DEFAULT 'pc',
+                wg_ip        TEXT NOT NULL,
+                public_key   TEXT NOT NULL,
+                active       INTEGER NOT NULL DEFAULT 1,
+                profile_type TEXT,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at   TEXT,
+                PRIMARY KEY (telegram_id, server_id, device_id)
+            )
+            """
+        )
+        label = {"pc": "ПК", "ios": "Устройство iOS", "android": "Android-устройство"}
+        rows = c.execute(
+            "SELECT telegram_id, server_id, platform, wg_ip, public_key, active, "
+            "profile_type, created_at, updated_at FROM peers"
+        ).fetchall()
+        for r in rows:
+            plat = (r["platform"] or "pc")
+            device_id = secrets.token_hex(4)  # стабильный hex8
+            c.execute(
+                "INSERT INTO devices (device_id, telegram_id, name, os, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (device_id, r["telegram_id"], label.get(plat, plat), plat,
+                 r["created_at"] or None),
+            )
+            c.execute(
+                "INSERT INTO peers_new (telegram_id, server_id, device_id, os, wg_ip, "
+                "public_key, active, profile_type, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (r["telegram_id"], r["server_id"], device_id, plat, r["wg_ip"],
+                 r["public_key"], r["active"], r["profile_type"],
+                 r["created_at"] or None, r["updated_at"]),
+            )
+        c.execute("DROP TABLE peers")
+        c.execute("ALTER TABLE peers_new RENAME TO peers")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_peers_public_key ON peers (public_key)")
+        logger.info("Migration B: peers platform→device_id (%d слотов → devices)", len(rows))
+
+    if con is not None:
+        _run(con)
+    else:
+        with _conn() as c:
+            _run(c)
+
+
 def _migrate_add_proxy_column() -> None:
     """Добавляет proxy_requested_at в таблицу users (идемпотентно)."""
     with _conn() as con:
