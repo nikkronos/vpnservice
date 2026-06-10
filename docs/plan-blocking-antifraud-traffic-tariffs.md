@@ -36,7 +36,7 @@
 
 **Инструмент (готов):** `scripts/access_audit.py` — энумератор всех кредов на всех серверах + инвариант «кред ↔ активный юзер И отзываем». Текущий прогон: единственная untracked-зона = **eu1 shared-пул (11 UUID)**; main/yc/yc2 — 100% per-user.
 
-**Фрод-зона eu1 (закрытие):** Этапы 0-2 сделаны (per-user backfill + grace-sync); **Этапы 3-4 (broadcast + `sync_eu1_vless.py --no-shared`) НА ПАУЗЕ** до спада РКН-волны (не рубим fallback в шторм). `/migrate_reset` (admin) — отрубить ссылки не-перешедших в новый бот — не прогонялся.
+**Фрод-зона eu1 (закрытие):** ✅ **ЗАКРЫТА 2026-06-10.** Этапы 0-2 (per-user backfill + grace-sync) + **Этап 4** (`sync_eu1_vless.py --no-shared` → удалены 11 shared + истёкший 7882817110, все 3 inbound = 50 per-user) + durable cron `17 */6` + `access_audit` расширен на yc2. Верификация: 0 проблемных кредов на всех 4 серверах. Перед удалением — pre-фикс: переупорядочили подписку (Яндекс первыми, см. §1) + тест владельца. **Этап 3 broadcast** «переподключись» — owner отправляет вслед (straggler'ы на старых shared, особенно CDN). `/migrate_reset` (admin) — не прогонялся, не нужен.
 
 **Лимит устройств (ключевая анти-фрод задача, НЕ начата):**
 - [ ] **Per-device слоты** вместо per-platform (сейчас ключ = `{tid}:{server}:{platform}`, iPad+iPhone = один `ios`). Нужны именованные устройства.
@@ -83,7 +83,7 @@ per-device слоты + Xray iplimit (п.2)  ← KEYSTONE
 ### ▶ Первым делом (в самом начале следующего захода)
 
 1. ~~**Досинхронизировать yc2**~~ — ✅ **DONE 2026-06-10.** В `sync_xray_users.py` добавлена запись `yc2` в `SERVERS` (ssh yc2 / inbound `vless-xhttp` / db_column `vless_uuid_yc` / sudo) + `--all` → `[main, yc, yc2]` (cron `--all --no-shared` теперь покрывает yc2). В `health_check.py` — yc2 в `REMOTE_HOSTS`/`REMOTE_CHECK_PLAN` (reachable/xray/:443/disk) + `vless_config_consistency` сверяет yc2 с `db_yc`. Проверено на проде: dry-run + реальный sync yc2 (50 clients, validate OK, restart OK) + health_check dry-run = 27/27 green (`cfg_yc2=50, diff 0`). Дрейф клона закрыт.
-2. **Фрод-зона eu1 Этапы 3-4** (broadcast + `sync_eu1_vless.py --no-shared` → удалить 11 shared UUID) — **когда подтвердится спад РКН-волны** (см. п.2). Закрывает анти-фрод по eu1.
+2. ~~**Фрод-зона eu1 Этапы 3-4**~~ — ✅ **DONE 2026-06-10.** Pre-фикс подписки (Яндекс первыми) + тест владельца → Этап 4 (`--no-shared`, удалены 11 shared + 7882817110) + durable cron. 0 проблемных кредов на всех 4 серверах. Этап 3 broadcast — за владельцем (вслед).
 
 **Затем — keystone большой задачи:** **per-device + iplimit** — разблокирует тарифы (п.4) И анти-фрод (п.2). Изучить механизм 3x-ui (`iplimit` + лог IP), спроектировать per-device слоты (миграция ключа peer'а `{tid}:{server}:{platform}` → именованные устройства), затем тарифы 199/149.
 

@@ -71,7 +71,7 @@ def read_config(server_id: str) -> dict:
 
 def audit_vless(active: Set[int], in_db: Set[int]) -> Dict:
     out: Dict[str, dict] = {}
-    for srv in ("eu1", "main", "yc"):
+    for srv in ("eu1", "main", "yc", "yc2"):  # yc2 — клон yc, те же per-user UUID
         try:
             cfg = read_config(srv)
         except Exception as e:  # noqa: BLE001
