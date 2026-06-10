@@ -137,6 +137,73 @@ def audit_awg(active: Set[int]) -> Dict:
     return res
 
 
+def _main_wg0_dump() -> Set[str]:
+    """pubkey'и main wg0 runtime (legacy WireGuard на Timeweb)."""
+    from sync_xray_users import _ssh_run, SERVERS  # noqa: E402
+    pks: Set[str] = set()
+    r = _ssh_run(SERVERS["main"]["ssh"], "wg show wg0 dump", timeout=15)
+    if r.returncode == 0:
+        for ln in r.stdout.strip().split("\n")[1:]:  # skip interface-line
+            f = ln.split("\t")
+            if f and f[0]:
+                pks.add(f[0].strip())
+    return pks
+
+
+def audit_main_wg0() -> Dict:
+    """
+    main wg0 (legacy WireGuard, Timeweb) runtime peers. По факту 06-10 они ВНЕ
+    таблицы peers (rus1-строки не совпадают с runtime). Классификация по жизни.
+    """
+    from sync_xray_users import _ssh_run, SERVERS  # noqa: E402
+    try:
+        r = _ssh_run(SERVERS["main"]["ssh"], "wg show wg0 dump", timeout=15)
+        if r.returncode != 0:
+            return {"error": (r.stderr or "wg show failed")[:120]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:120]}
+    res = {"runtime": 0, "live": 0, "dead": 0, "live_list": []}
+    for ln in r.stdout.strip().split("\n")[1:]:
+        f = ln.split("\t")
+        if len(f) < 7:
+            continue
+        res["runtime"] += 1
+        try:
+            hs, rx, tx = int(f[4] or 0), int(f[5] or 0), int(f[6] or 0)
+        except ValueError:
+            hs = rx = tx = 0
+        if hs > 0 or rx > 0 or tx > 0:
+            res["live"] += 1
+            res["live_list"].append(f"{f[0][:12]}…(tx={tx // 1024 // 1024}MB)")
+        else:
+            res["dead"] += 1
+    return res
+
+
+def audit_legacy_peer_rows(main_wg0_pks: Set[str]) -> Dict:
+    """
+    peer-table строки на серверах ВНЕ {eu1} (eu2/rus1/rus2 = legacy). Живы ли
+    где-то в runtime (eu1-awg / main-wg0) или мёртвый DB-cruft (доступа не дают).
+    """
+    try:
+        awg_pks, _ = get_awg_dump()
+    except Exception:  # noqa: BLE001
+        awg_pks = set()
+    runtime_all = set(awg_pks) | set(main_wg0_pks)
+    rows = [p for p in get_all_peers() if p.server_id not in ("eu1",)]
+    res = {"rows": len(rows), "live_elsewhere": 0, "dead_cruft": 0,
+           "by_server": {}, "dead_list": []}
+    for p in rows:
+        res["by_server"][p.server_id] = res["by_server"].get(p.server_id, 0) + 1
+        pk = (p.public_key or "").strip()
+        if pk and pk in runtime_all:
+            res["live_elsewhere"] += 1
+        else:
+            res["dead_cruft"] += 1
+            res["dead_list"].append(f"{p.server_id}:{p.telegram_id}")
+    return res
+
+
 def main() -> int:
     print("=" * 72)
     print("АУДИТ ЗОН ДОСТУПА (Phase 0)")
@@ -179,6 +246,24 @@ def main() -> int:
         if a["legacy_list"]:
             print(f"      legacy-live pubkeys: {a['legacy_list']}")
 
+    print("\n── WireGuard main (wg0, legacy Timeweb) ──")
+    mw = audit_main_wg0()
+    main_pks = _main_wg0_dump() if "error" not in mw else set()
+    if "error" in mw:
+        print(f"  ОШИБКА: {mw['error']}")
+    else:
+        print(f"  runtime={mw['runtime']} | live={mw['live']} (вне таблицы — НЕ атрибутированы) "
+              f"dead={mw['dead']}")
+        if mw["live_list"]:
+            print(f"      live peers: {mw['live_list']}  ← untracked-зона, разобрать кто это")
+
+    print("\n── Legacy peer-строки (server вне eu1) ──")
+    lg = audit_legacy_peer_rows(main_pks)
+    print(f"  строк={lg['rows']} by_server={lg['by_server']} | "
+          f"live-где-то={lg['live_elsewhere']} мёртвый-cruft={lg['dead_cruft']}")
+    if lg["dead_list"]:
+        print(f"      DEAD-cruft (нет ни в одном runtime → можно чистить): {lg['dead_list']}")
+
     print("\n" + "=" * 72)
     print("ИТОГ — НЕОТСЛЕЖИВАЕМАЯ / НЕДООТЗЫВАЕМАЯ ПОВЕРХНОСТЬ")
     print("=" * 72)
@@ -189,7 +274,10 @@ def main() -> int:
     awg_exp = a.get("expired", 0) if "error" not in a else "?"
     awg_leg = a.get("legacy_live", 0) if "error" not in a else "?"
     print(f"  AWG EXPIRED   (в runtime, доступ истёк)     : {awg_exp}")
-    print(f"  AWG legacy-live (вне таблицы, работают)     : {awg_leg}  — известны, отдельно")
+    print(f"  AWG legacy-live eu1 (вне таблицы, работают) : {awg_leg}  — известны, отдельно")
+    mw_live = mw.get("live", 0) if "error" not in mw else "?"
+    print(f"  WG main-wg0 live (вне таблицы, untracked)   : {mw_live}  — разобрать кто это")
+    print(f"  Legacy peer-cruft (мёртвые DB-строки)       : {lg['dead_cruft']}  — можно чистить")
     problems = tot_shared + tot_expired + tot_orphan + (awg_exp if isinstance(awg_exp, int) else 0)
     print(f"\n  Проблемных кредов (SHARED+EXPIRED+ORPHAN)   : {problems}")
     print("  Цель миграции: довести SHARED/EXPIRED/ORPHAN до 0 (legacy-live AWG — разбирать вручную).")
