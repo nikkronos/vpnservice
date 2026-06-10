@@ -190,7 +190,8 @@ def audit_legacy_peer_rows(main_wg0_pks: Set[str]) -> Dict:
     except Exception:  # noqa: BLE001
         awg_pks = set()
     runtime_all = set(awg_pks) | set(main_wg0_pks)
-    rows = [p for p in get_all_peers() if p.server_id not in ("eu1",)]
+    # только АКТИВНЫЕ строки: active=0 = уже обработанная история (soft-clean), не флагаем
+    rows = [p for p in get_all_peers() if p.server_id not in ("eu1",) and p.active]
     res = {"rows": len(rows), "live_elsewhere": 0, "dead_cruft": 0,
            "by_server": {}, "dead_list": []}
     for p in rows:
