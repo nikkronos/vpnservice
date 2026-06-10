@@ -47,12 +47,10 @@ def main() -> int:
     db.DB_PATH = tmp / "vpn.db"
     db.USERS_JSON_PATH = tmp / "users.json"
     db.PEERS_JSON_PATH = tmp / "peers.json"
-    db._db_initialized = False
+    # init_db теперь САМ мигрирует platform→device, поэтому создаём СТАРУЮ схему
+    # peers вручную (как на проде ДО B) и не зовём init_db. _ensure_init глушим.
+    db._db_initialized = True
 
-    # init_db создаёт ТЕКУЩУЮ (старую, platform) схему peers (peers.json нет → пусто)
-    db.init_db()
-
-    # Синтетические старые слоты (как на проде до B)
     old = [
         (111, "eu1", "pc", "10.8.1.11", "PK111PC", 1, None),
         (111, "eu1", "ios", "10.8.1.12", "PK111IOS", 1, None),   # тот же юзер, 2-я ОС
@@ -60,6 +58,13 @@ def main() -> int:
         (444, "eu1", "android", "10.8.1.44", "PK444", 0, None),  # active=0 сохранить
     ]
     with db._conn() as c:
+        c.execute(
+            "CREATE TABLE peers (telegram_id INTEGER NOT NULL, server_id TEXT NOT NULL, "
+            "platform TEXT NOT NULL DEFAULT 'pc', wg_ip TEXT NOT NULL, public_key TEXT NOT NULL, "
+            "active INTEGER NOT NULL DEFAULT 1, profile_type TEXT, "
+            "created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT, "
+            "PRIMARY KEY (telegram_id, server_id, platform))"
+        )
         for tid, sid, plat, ip, pk, act, pt in old:
             c.execute(
                 "INSERT INTO peers (telegram_id, server_id, platform, wg_ip, public_key, "

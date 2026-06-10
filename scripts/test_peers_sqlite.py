@@ -66,70 +66,68 @@ def main() -> int:
     storage.PEERS_FILE = peers_json
     storage.USERS_FILE = tmp / "users.json"
 
-    # ── 1. Миграция ─────────────────────────────────────────────────────────
+    # ── 1. Миграция json→SQLite → platform→device (init_db) ──────────────────
     db.init_db()
     rows = db.db_get_all_peers()
-    keys = {f'{r["telegram_id"]}:{r["server_id"]}:{r["platform"]}' for r in rows}
+    by_os = {(r["telegram_id"], r["server_id"], r["os"]) for r in rows}  # device-формат
 
-    print("1. Авто-миграция peers.json → SQLite")
+    print("1. Авто-миграция peers.json → SQLite → device")
     check("мигрировано 5 валидных слотов (битый 555 пропущен)", len(rows) == 5)
-    check("111:eu1:pc присутствует", "111:eu1:pc" in keys)
-    check("111:eu1:ios присутствует", "111:eu1:ios" in keys)
-    check("222 нормализован main→rus1, +pc (222:rus1:pc)", "222:rus1:pc" in keys)
-    check("333 старый формат → 333:eu1:pc", "333:eu1:pc" in keys)
-    check("555 (без public_key) НЕ мигрирован", "555:eu1:pc" not in keys)
+    check("строки в device-формате (device_id+os)", all("device_id" in r and "os" in r for r in rows))
+    check("111/eu1/pc присутствует", (111, "eu1", "pc") in by_os)
+    check("111/eu1/ios присутствует", (111, "eu1", "ios") in by_os)
+    check("222 нормализован main→rus1, +pc", (222, "rus1", "pc") in by_os)
+    check("333 старый формат → eu1/pc", (333, "eu1", "pc") in by_os)
+    check("555 (без public_key) НЕ мигрирован", not any(r["telegram_id"] == 555 for r in rows))
     p444 = next((r for r in rows if r["telegram_id"] == 444), None)
-    check("444 active=False сохранён", p444 is not None and p444["active"] == 0)
+    check("444 active=False + os=android сохранены", p444 is not None and p444["active"] == 0 and p444["os"] == "android")
+    check("devices: у 111 два устройства (pc+ios)", db.db_count_devices(111) == 2)
 
-    # ── 2. Идемпотентность ──────────────────────────────────────────────────
-    db._migrate_peers_json_to_sqlite()
-    check("повторная миграция не плодит дубли", len(db.db_get_all_peers()) == 5)
+    # ── 2. Идемпотентность платформа→device ──────────────────────────────────
+    db._migrate_peers_platform_to_device()
+    check("повторная device-миграция — no-op (5)", len(db.db_get_all_peers()) == 5)
 
-    print("\n2. storage API поверх БД")
-    all_peers = storage.get_all_peers()
-    check("get_all_peers() вернул 5", len(all_peers) == 5)
+    print("\n2. storage shim (platform-API поверх device-схемы)")
+    check("get_all_peers() вернул 5", len(storage.get_all_peers()) == 5)
 
     exact = storage.find_peer_by_telegram_id(111, server_id="eu1", platform="pc")
-    check("точная выборка 111/eu1/pc", exact is not None and exact.public_key == "PK111PC")
+    check("shim find(platform=pc) → PK111PC", exact is not None and exact.public_key == "PK111PC")
 
     prio = storage.find_peer_by_telegram_id(111, server_id="eu1")
-    check("приоритет pc при server_id без platform", prio is not None and prio.platform == "pc")
+    check("приоритет pc при server_id без platform", prio is not None and prio.os == "pc")
 
     any_peer = storage.find_peer_by_telegram_id(333)
     check("поиск без server_id находит активный eu1", any_peer is not None and any_peer.server_id == "eu1")
 
-    # ── 3. upsert + dual-write ──────────────────────────────────────────────
-    print("\n3. upsert_peer / delete_peer + dual-write зеркало")
-    storage.DUAL_WRITE_JSON = True  # включаем зеркало для теста capability (в проде Phase 3 = False)
+    # ── 3. upsert/delete через shim (platform) — поведение как раньше ─────────
+    print("\n3. upsert/delete через shim (platform)")
     storage.upsert_peer(storage.Peer(
         telegram_id=888, wg_ip="10.8.1.88", public_key="PK888", server_id="eu1", active=True, platform="pc",
     ))
-    rows_after = db.db_get_all_peers()
-    check("upsert добавил строку в БД", any(r["telegram_id"] == 888 for r in rows_after))
-    json_after = json.loads(peers_json.read_text(encoding="utf-8"))
-    check("upsert зеркалирован в peers.json", "888:eu1:pc" in json_after)
+    check("upsert(platform) добавил слот + создал устройство",
+          any(r["telegram_id"] == 888 for r in db.db_get_all_peers()) and db.db_count_devices(888) == 1)
 
-    # update существующего (тот же ключ, новый pubkey)
     storage.upsert_peer(storage.Peer(
         telegram_id=888, wg_ip="10.8.1.88", public_key="PK888_NEW", server_id="eu1", active=True, platform="pc",
     ))
     upd = storage.find_peer_by_telegram_id(888, server_id="eu1", platform="pc")
-    check("повторный upsert обновил pubkey (не дубль)", upd is not None and upd.public_key == "PK888_NEW")
-    check("update не увеличил число строк", len(db.db_get_all_peers()) == 6)
+    check("повторный upsert(platform) обновил pubkey, НЕ дубль", upd is not None and upd.public_key == "PK888_NEW")
+    check("update не плодит устройства (888→1) и слоты (всего 6)",
+          db.db_count_devices(888) == 1 and len(db.db_get_all_peers()) == 6)
 
     storage.delete_peer(888, "eu1", "pc")
-    check("delete убрал из БД", not any(r["telegram_id"] == 888 for r in db.db_get_all_peers()))
-    json_del = json.loads(peers_json.read_text(encoding="utf-8"))
-    check("delete убрал из peers.json-зеркала", "888:eu1:pc" not in json_del)
+    check("delete(platform) убрал слот", not any(r["telegram_id"] == 888 for r in db.db_get_all_peers()))
 
-    # ── 3b. DUAL_WRITE_JSON=False (прод-дефолт Phase 3): json НЕ пишется ──────
-    storage.DUAL_WRITE_JSON = False
+    # ── 4. Новый device-API сосуществует с shim ──────────────────────────────
+    print("\n4. device-API (путь B3)")
+    did = db.db_add_device(999, "iPad", "ios")
     storage.upsert_peer(storage.Peer(
-        telegram_id=889, wg_ip="10.8.1.89", public_key="PK889", server_id="eu1", active=True, platform="pc",
+        telegram_id=999, wg_ip="10.8.1.99", public_key="PK999", server_id="eu1", active=True, device_id=did, os="ios",
     ))
-    check("upsert при False добавил в БД", any(r["telegram_id"] == 889 for r in db.db_get_all_peers()))
-    json_off = json.loads(peers_json.read_text(encoding="utf-8"))
-    check("upsert при DUAL_WRITE_JSON=False НЕ пишет в peers.json", "889:eu1:pc" not in json_off)
+    byd = storage.find_peer_by_telegram_id(999, device_id=did)
+    check("find(device_id) находит слот PK999", byd is not None and byd.public_key == "PK999")
+    dev999 = db.db_get_device(did)
+    check("device 999 = iPad/ios", dev999 is not None and dev999["name"] == "iPad" and dev999["os"] == "ios")
 
     print()
     if _FAILED:

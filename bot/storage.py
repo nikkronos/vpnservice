@@ -110,8 +110,10 @@ class User:
 class Peer:
     """
     Один VPN-слот для одного устройства пользователя.
-    Ключ в peers.json: f"{telegram_id}:{server_id}:{platform}".
-    Несколько peers на одного пользователя — разные устройства (platform) или серверы.
+    Ключ (Фаза 2 B): (telegram_id, server_id, device_id). `os` — формат доставки
+    ('pc'|'ios'|'android'). `platform` оставлен как legacy-алиас `os`, чтобы
+    старые вызовы `Peer(platform=...)` и чтение `peer.platform` в боте/ЛК
+    продолжали работать без правок (backward-compat shim до B3-UX).
     """
 
     telegram_id: int
@@ -120,7 +122,15 @@ class Peer:
     server_id: str = "rus1"
     active: bool = True
     profile_type: Optional[str] = None
-    platform: str = "pc"  # "pc" | "ios" | "android"
+    device_id: Optional[str] = None
+    os: Optional[str] = None
+    platform: Optional[str] = None  # legacy-алиас os
+
+    def __post_init__(self) -> None:
+        # os приоритетнее; если не задан — берём из platform (legacy). Держим
+        # platform синхронным с os для старых читателей (peer.platform).
+        self.os = _normalize_platform(self.os or self.platform)
+        self.platform = self.os
 
 
 def _ensure_data_dir() -> None:
@@ -144,40 +154,27 @@ def _save_raw(path: pathlib.Path, data: Dict[str, dict]) -> None:
 
 def _load_peers_data() -> Dict[str, dict]:
     """
-    Возвращает {storage_key: payload} как раньше, но источник правды — таблица
-    `peers` в SQLite. storage_key = "{tid}:{server_id}:{platform}".
-
-    Fallback: таблица пуста, а peers.json непустой → читаем JSON. После
-    init_db()._migrate_peers_json_to_sqlite этого не должно случаться, но для
-    критичных данных (клиентские конфиги) оставляем подстраховку на случай
-    если миграция ещё не отработала.
+    {storage_key: payload} из таблицы peers (источник правды — SQLite).
+    storage_key = "{tid}:{server_id}:{device_id}" (Фаза 2 B). payload содержит
+    device_id + os. peers.json-fallback убран (на проде JSON мёртв, Phase 3).
     """
     from .database import db_get_all_peers
 
-    rows = db_get_all_peers()
-    if rows:
-        out: Dict[str, dict] = {}
-        for r in rows:
-            sid = normalize_peer_server_id(r.get("server_id"))
-            plat = _normalize_platform(r.get("platform"))
-            key = f'{r["telegram_id"]}:{sid}:{plat}'
-            out[key] = {
-                "telegram_id": int(r["telegram_id"]),
-                "wg_ip": r["wg_ip"],
-                "public_key": r["public_key"],
-                "server_id": sid,
-                "active": bool(r["active"]),
-                "profile_type": r.get("profile_type"),
-                "platform": plat,
-            }
-        return out
-
-    # Fallback на сырой JSON (таблица пуста)
-    raw = _load_raw(PEERS_FILE)
-    migrated = _migrate_peers_json_on_load(raw)
-    if migrated != raw:
-        _save_raw(PEERS_FILE, migrated)
-    return migrated
+    out: Dict[str, dict] = {}
+    for r in db_get_all_peers():
+        sid = normalize_peer_server_id(r.get("server_id"))
+        did = r.get("device_id") or ""
+        out[f'{r["telegram_id"]}:{sid}:{did}'] = {
+            "telegram_id": int(r["telegram_id"]),
+            "wg_ip": r["wg_ip"],
+            "public_key": r["public_key"],
+            "server_id": sid,
+            "active": bool(r["active"]),
+            "profile_type": r.get("profile_type"),
+            "device_id": did,
+            "os": _normalize_platform(r.get("os")),
+        }
+    return out
 
 
 def _upsert_peer_json(peer_norm: "Peer") -> None:
@@ -254,29 +251,35 @@ def is_owner(user_id: int, owner_id: int) -> bool:
     return user_id == owner_id
 
 
+def _device_label(os_: str) -> str:
+    return {"pc": "ПК", "ios": "Устройство iOS", "android": "Android-устройство"}.get(os_, os_)
+
+
+def _peer_from_payload(payload: dict) -> Peer:
+    return Peer(
+        telegram_id=int(payload["telegram_id"]),
+        wg_ip=payload["wg_ip"],
+        public_key=payload["public_key"],
+        server_id=normalize_peer_server_id(payload.get("server_id", "rus1")),
+        active=bool(payload.get("active", True)),
+        profile_type=payload.get("profile_type"),
+        device_id=payload.get("device_id"),
+        os=_normalize_platform(payload.get("os") or payload.get("platform")),
+    )
+
+
+def _pick_active(cands: List[Peer]) -> Optional[Peer]:
+    for p in cands:
+        if p.active:
+            return p
+    return cands[0] if cands else None
+
+
 def get_all_peers() -> List[Peer]:
-    data = _load_peers_data()
     peers: List[Peer] = []
-    for key, payload in data.items():
-        sk = str(key)
-        parts = sk.split(":")
+    for payload in _load_peers_data().values():
         try:
-            # platform: из ключа (3-я часть) или из payload
-            if len(parts) == 3:
-                plat = _normalize_platform(parts[2])
-            else:
-                plat = _normalize_platform(payload.get("platform"))
-            peers.append(
-                Peer(
-                    telegram_id=int(payload.get("telegram_id", parts[0])),
-                    wg_ip=payload["wg_ip"],
-                    public_key=payload["public_key"],
-                    server_id=normalize_peer_server_id(payload.get("server_id", "rus1")),
-                    active=bool(payload.get("active", True)),
-                    profile_type=payload.get("profile_type"),
-                    platform=plat,
-                )
-            )
+            peers.append(_peer_from_payload(payload))
         except (ValueError, KeyError):
             continue
     return peers
@@ -286,148 +289,84 @@ def find_peer_by_telegram_id(
     telegram_id: int,
     server_id: Optional[str] = None,
     platform: Optional[str] = None,
+    device_id: Optional[str] = None,
 ) -> Optional[Peer]:
     """
-    Ищет peer для пользователя.
+    Ищет peer-слот пользователя (Фаза 2 B).
 
-    - server_id + platform → точная выборка слота (tid:sid:platform).
-    - server_id без platform → ищет среди всех платформ для этого сервера;
-      приоритет: pc → ios → android → первый активный.
-    - без server_id → приоритет: eu1, первый активный (любая платформа).
-
-    main в server_id нормализуется в rus1.
+    - device_id → точный слот по device_id (server опционален).
+    - platform (legacy-shim) → слот с os==platform (на server, если задан).
+    - server_id без platform/device → приоритет pc→ios→android, затем активный.
+    - без всего → eu1-приоритет, первый активный.
+    main в server_id → rus1.
     """
-    data = _load_peers_data()
+    sid = normalize_peer_server_id(server_id) if server_id is not None else None
+    mine = [p for p in get_all_peers() if p.telegram_id == int(telegram_id)]
+    if sid is not None:
+        mine = [p for p in mine if p.server_id == sid]
 
-    if server_id is not None and platform is not None:
-        # Точное совпадение: tid:sid:platform
-        sid = normalize_peer_server_id(server_id)
+    if device_id is not None:
+        return _pick_active([p for p in mine if p.device_id == device_id])
+
+    if platform is not None:
         plat = _normalize_platform(platform)
-        key = _peer_storage_key(telegram_id, sid, plat)
-        payload = data.get(key)
-        if not payload:
-            return None
-        try:
-            return Peer(
-                telegram_id=int(payload.get("telegram_id", telegram_id)),
-                wg_ip=payload["wg_ip"],
-                public_key=payload["public_key"],
-                server_id=normalize_peer_server_id(payload.get("server_id", sid)),
-                active=bool(payload.get("active", True)),
-                profile_type=payload.get("profile_type"),
-                platform=plat,
-            )
-        except (ValueError, KeyError):
-            return None
+        return _pick_active([p for p in mine if p.os == plat])
 
-    if server_id is not None:
-        # Поиск по tid:sid:* — любая платформа, приоритет pc → ios → android
-        sid = normalize_peer_server_id(server_id)
-        candidates: List[Peer] = []
-        for plat_try in ("pc", "ios", "android"):
-            key = _peer_storage_key(telegram_id, sid, plat_try)
-            payload = data.get(key)
-            if payload:
-                try:
-                    candidates.append(
-                        Peer(
-                            telegram_id=int(payload.get("telegram_id", telegram_id)),
-                            wg_ip=payload["wg_ip"],
-                            public_key=payload["public_key"],
-                            server_id=normalize_peer_server_id(payload.get("server_id", sid)),
-                            active=bool(payload.get("active", True)),
-                            profile_type=payload.get("profile_type"),
-                            platform=_normalize_platform(payload.get("platform", plat_try)),
-                        )
-                    )
-                except (ValueError, KeyError):
-                    continue
-        for p in candidates:
-            if p.active:
-                return p
-        return candidates[0] if candidates else None
+    if sid is not None:
+        for plat in ("pc", "ios", "android"):
+            picked = _pick_active([p for p in mine if p.os == plat])
+            if picked:
+                return picked
+        return _pick_active(mine)
 
-    # Нет server_id: ищем среди всех peers пользователя
-    prefix = f"{telegram_id}:"
-    candidates_all: List[Peer] = []
-    for key, payload in data.items():
-        sk = str(key)
-        if not sk.startswith(prefix):
-            continue
-        parts = sk.split(":")
-        try:
-            plat = _normalize_platform(parts[2] if len(parts) >= 3 else payload.get("platform"))
-            sid_part = parts[1] if len(parts) >= 2 else "rus1"
-            candidates_all.append(
-                Peer(
-                    telegram_id=int(payload.get("telegram_id", telegram_id)),
-                    wg_ip=payload["wg_ip"],
-                    public_key=payload["public_key"],
-                    server_id=normalize_peer_server_id(payload.get("server_id", sid_part)),
-                    active=bool(payload.get("active", True)),
-                    profile_type=payload.get("profile_type"),
-                    platform=plat,
-                )
-            )
-        except (ValueError, KeyError):
-            continue
-
-    if not candidates_all:
-        return None
-
-    # Приоритет: eu1, первый активный
-    for sid in ("eu1",):
-        for p in candidates_all:
-            if p.server_id == sid and p.active:
-                return p
-    for p in candidates_all:
-        if p.active:
-            return p
-    return candidates_all[0]
+    eu1 = _pick_active([p for p in mine if p.server_id == "eu1"])
+    return eu1 if eu1 else _pick_active(mine)
 
 
 def upsert_peer(peer: Peer) -> None:
     """
-    Вставляет/обновляет peer-слот. Источник правды — таблица `peers` в SQLite;
-    peers.json зеркалится пока DUAL_WRITE_JSON=True (страховка отката).
+    Вставляет/обновляет peer-слот (источник правды — таблица peers, Фаза 2 B).
+    Ключ — device_id. Backward-compat shim: если device_id не задан (старый
+    вызов с platform/os), берём device_id существующего слота этого юзера на
+    этом сервере с тем же os; иначе создаём новое устройство (db_add_device).
+    Так бот/ЛК работают без правок до B3-UX.
     """
+    from .database import db_upsert_peer, db_add_device
+
     sid = normalize_peer_server_id(peer.server_id)
-    plat = _normalize_platform(getattr(peer, "platform", "pc"))
-    peer_norm = Peer(
-        telegram_id=peer.telegram_id,
-        wg_ip=peer.wg_ip,
-        public_key=peer.public_key,
-        server_id=sid,
-        active=peer.active,
-        profile_type=peer.profile_type,
-        platform=plat,
-    )
-    from .database import db_upsert_peer
+    os_ = _normalize_platform(peer.os or peer.platform)
+    device_id = peer.device_id
+    if not device_id:
+        existing = find_peer_by_telegram_id(peer.telegram_id, server_id=sid, platform=os_)
+        device_id = existing.device_id if (existing and existing.device_id) \
+            else db_add_device(peer.telegram_id, _device_label(os_), os_)
 
-    db_upsert_peer(
-        {
-            "telegram_id": peer_norm.telegram_id,
-            "server_id": sid,
-            "platform": plat,
-            "wg_ip": peer_norm.wg_ip,
-            "public_key": peer_norm.public_key,
-            "active": peer_norm.active,
-            "profile_type": peer_norm.profile_type,
-        }
-    )
-    if DUAL_WRITE_JSON:
-        _upsert_peer_json(peer_norm)
+    db_upsert_peer({
+        "telegram_id": peer.telegram_id,
+        "server_id": sid,
+        "device_id": device_id,
+        "os": os_,
+        "wg_ip": peer.wg_ip,
+        "public_key": peer.public_key,
+        "active": peer.active,
+        "profile_type": peer.profile_type,
+    })
 
 
-def delete_peer(telegram_id: int, server_id: str, platform: str = "pc") -> None:
+def delete_peer(telegram_id: int, server_id: str, platform: Optional[str] = "pc",
+                device_id: Optional[str] = None) -> None:
     """
-    Удаляет peer-слот (редко нужно). Источник правды — SQLite; peers.json
-    зеркалится пока DUAL_WRITE_JSON=True.
+    Удаляет peer-слот. По device_id (точно) либо по platform (legacy-shim:
+    слот этого юзера на сервере с os==platform). Само устройство (devices) НЕ
+    удаляется — у него могут быть слоты на других серверах (см. db_delete_device).
     """
-    sid = normalize_peer_server_id(server_id)
-    plat = _normalize_platform(platform)
     from .database import db_delete_peer
 
-    db_delete_peer(telegram_id, sid, plat)
-    if DUAL_WRITE_JSON:
-        _delete_peer_json(telegram_id, sid, plat)
+    sid = normalize_peer_server_id(server_id)
+    if not device_id:
+        existing = find_peer_by_telegram_id(telegram_id, server_id=sid,
+                                            platform=_normalize_platform(platform))
+        if not existing or not existing.device_id:
+            return
+        device_id = existing.device_id
+    db_delete_peer(int(telegram_id), sid, device_id)

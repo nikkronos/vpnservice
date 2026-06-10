@@ -88,6 +88,19 @@ CREATE TABLE IF NOT EXISTS peers (
 );
 CREATE INDEX IF NOT EXISTS idx_peers_public_key ON peers (public_key);
 
+-- Именованные устройства (Фаза 2 B). Слот peers ссылается на device_id вместо
+-- platform — каждый девайс отдельный (фикс коллизии iPad/iPhone). os = формат
+-- доставки. Создаётся также миграцией _migrate_peers_platform_to_device.
+CREATE TABLE IF NOT EXISTS devices (
+    device_id    TEXT PRIMARY KEY,
+    telegram_id  INTEGER NOT NULL,
+    name         TEXT NOT NULL,
+    os           TEXT NOT NULL DEFAULT 'pc',          -- 'pc' | 'ios' | 'android'
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_devices_tid ON devices (telegram_id);
+
 CREATE TABLE IF NOT EXISTS otp_codes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     email       TEXT NOT NULL,
@@ -215,6 +228,9 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_referral_bonus_paid_column()
     _migrate_add_expiry_notif_columns()
     _migrate_add_migrated_at_column()
+    # B (Фаза 2): peers platform→device_id + devices. ПОСЛЕДНЕЙ — после того как
+    # все peer-данные (json→sqlite и пр.) уже в старом формате, конвертируем 1:1.
+    _migrate_peers_platform_to_device()
     if whitelist_seed:
         _seed_whitelist(whitelist_seed)
     _db_initialized = True
@@ -904,30 +920,32 @@ def db_get_effective_telegram_id(user_row: Dict) -> int:
 # хелперов — здесь «глупое» хранилище, значения кладутся как есть.
 
 def db_get_all_peers() -> List[Dict]:
-    """Все peer-слоты. Возвращает list[dict] (как строки таблицы peers)."""
+    """Все peer-слоты. Возвращает list[dict] (как строки таблицы peers).
+    После Фазы 2 B строки содержат device_id + os (вместо platform)."""
     _ensure_init()
     with _conn() as con:
         rows = con.execute(
-            "SELECT * FROM peers ORDER BY telegram_id, server_id, platform"
+            "SELECT * FROM peers ORDER BY telegram_id, server_id, device_id"
         ).fetchall()
         return [dict(r) for r in rows]
 
 
 def db_upsert_peer(data: Dict) -> None:
     """
-    Вставляет/обновляет peer-слот по ключу (telegram_id, server_id, platform).
-    Ожидает уже нормализованные server_id/platform (см. storage.upsert_peer).
-    created_at сохраняется при обновлении (его трогает только INSERT).
+    Вставляет/обновляет peer-слот по ключу (telegram_id, server_id, device_id).
+    Ожидает device_id + os (см. storage.upsert_peer). created_at трогает только
+    INSERT (сохраняется при обновлении).
     """
     _ensure_init()
     with _conn() as con:
         con.execute(
             """
             INSERT INTO peers
-                (telegram_id, server_id, platform, wg_ip, public_key, active, profile_type, updated_at)
+                (telegram_id, server_id, device_id, os, wg_ip, public_key, active, profile_type, updated_at)
             VALUES
-                (:telegram_id, :server_id, :platform, :wg_ip, :public_key, :active, :profile_type, datetime('now'))
-            ON CONFLICT(telegram_id, server_id, platform) DO UPDATE SET
+                (:telegram_id, :server_id, :device_id, :os, :wg_ip, :public_key, :active, :profile_type, datetime('now'))
+            ON CONFLICT(telegram_id, server_id, device_id) DO UPDATE SET
+                os           = :os,
                 wg_ip        = :wg_ip,
                 public_key   = :public_key,
                 active       = :active,
@@ -937,7 +955,8 @@ def db_upsert_peer(data: Dict) -> None:
             {
                 "telegram_id": int(data["telegram_id"]),
                 "server_id": data["server_id"],
-                "platform": data["platform"],
+                "device_id": data["device_id"],
+                "os": data.get("os", "pc"),
                 "wg_ip": data["wg_ip"],
                 "public_key": data["public_key"],
                 "active": 1 if data.get("active", True) else 0,
@@ -946,14 +965,71 @@ def db_upsert_peer(data: Dict) -> None:
         )
 
 
-def db_delete_peer(telegram_id: int, server_id: str, platform: str) -> None:
-    """Удаляет peer-слот по composite-ключу (ожидает нормализованные значения)."""
+def db_delete_peer(telegram_id: int, server_id: str, device_id: str) -> None:
+    """Удаляет peer-слот по composite-ключу (telegram_id, server_id, device_id)."""
     _ensure_init()
     with _conn() as con:
         con.execute(
-            "DELETE FROM peers WHERE telegram_id = ? AND server_id = ? AND platform = ?",
-            (int(telegram_id), server_id, platform),
+            "DELETE FROM peers WHERE telegram_id = ? AND server_id = ? AND device_id = ?",
+            (int(telegram_id), server_id, device_id),
         )
+
+
+# ─── Devices (именованные устройства, Фаза 2 B) ───────────────────────────────
+
+def db_list_devices(telegram_id: int) -> List[Dict]:
+    """Устройства пользователя (по порядку создания)."""
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM devices WHERE telegram_id = ? ORDER BY created_at, device_id",
+            (int(telegram_id),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def db_get_device(device_id: str) -> Optional[Dict]:
+    _ensure_init()
+    with _conn() as con:
+        r = con.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def db_add_device(telegram_id: int, name: str, os: str = "pc") -> str:
+    """Создаёт устройство, возвращает новый device_id (hex8)."""
+    _ensure_init()
+    device_id = secrets.token_hex(4)
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO devices (device_id, telegram_id, name, os) VALUES (?, ?, ?, ?)",
+            (device_id, int(telegram_id), name, os or "pc"),
+        )
+    return device_id
+
+
+def db_rename_device(device_id: str, name: str) -> None:
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE devices SET name = ?, updated_at = datetime('now') WHERE device_id = ?",
+            (name, device_id),
+        )
+
+
+def db_delete_device(device_id: str) -> None:
+    """Удаляет устройство + его peer-слоты (на всех серверах)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute("DELETE FROM peers WHERE device_id = ?", (device_id,))
+        con.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+
+
+def db_count_devices(telegram_id: int) -> int:
+    _ensure_init()
+    with _conn() as con:
+        return con.execute(
+            "SELECT COUNT(*) FROM devices WHERE telegram_id = ?", (int(telegram_id),)
+        ).fetchone()[0]
 
 
 # ─── OTP ──────────────────────────────────────────────────────────────────────
