@@ -1,5 +1,19 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-10 — Фаза 2 B1+B2: per-device слой данных НА ПРОДЕ (cutover)
+
+Заменили per-OS слоты на именованные устройства — фикс коллизии iPad/iPhone (Аня) + база под «семейный» тариф. Делали на ветке `feature/per-device` (B0 тест → B1 БД → B2 storage+shim), деплой — отдельным проверенным cutover'ом.
+
+**Что:** ключ `peers` `(tid,server,platform)` → `(tid,server,device_id)` + таблица `devices`. `platform`→`os` (свойство). **Backward-compat shim** в storage (принимает `platform=`, мапит на device; `Peer.platform`=алиас `os`) → бот/ЛК/wireguard_peers **без правок**. db-хелперы + device-хелперы. Миграция `_migrate_peers_platform_to_device` (1:1, ключи клиента не меняются → старые .conf живут) + guard в `_migrate_peers_json_to_sqlite` (скип на device-схеме).
+
+**Cutover (staged, с откатом):** бэкап БД (`vpn.db.bak.preB.*`) + кода (`*.bak.preB.*`) → stop vpn-bot/vpn-web → деплой → миграция (init_db) → start → smoke. **Инцидент по ходу:** `_migrate_peers_json_to_sqlite` падал на колонке platform (не был device-aware) → сервисы крешились → пофикшен guard'ом за минуты.
+
+**Верификация на проде:** миграция **31→31 peer (1:1, без потерь)** + 31 device, схема device_id. Сервисы active, `/api/stats`+`/api/traffic` HTTP 200. Синтетика (read/write/regen/cleanup через shim) ✓. **Реальный смоук владельца на тест-аккаунте: AmneziaWG-конфиг + регенерация — ок.** Тесты `test_per_device_migration` + `test_peers_sqlite` зелёные.
+
+**Осталось в B:** B3 — UX «Мои устройства» в боте (добавить именованное / обновить конкретное / удалить), B4 — то же в ЛК. Сейчас работает через shim (per-OS поведение), мультидевайс одной ОС схемно уже возможен. Имплемент-док: `docs/plan-phase2B-per-device-impl.md`.
+
+---
+
 ## 2026-06-10 — access_audit расширен на main-wg0 + legacy-строки (блайнд-спот закрыт)
 
 **Зачем:** аудит видел только VLESS (4 сервера) + AWG-eu1, но НЕ main-wg0 (legacy WireGuard) и не peer-строки на снятых серверах. Это «сколько зон пропустили».
