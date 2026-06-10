@@ -171,6 +171,22 @@ CREATE TABLE IF NOT EXISTS payment_claims (
     notify_msg_id INTEGER                           -- message_id уведомления владельцу (для edit_message_text)
 );
 CREATE INDEX IF NOT EXISTS idx_payment_claims_tid_status ON payment_claims (telegram_id, status);
+
+-- iplimit-НАБЛЮДЕНИЕ (Фаза 2 A-Stage1, 2026-06-10): кто с каких IP ходит.
+-- Источник — access-log Xray на входах (real client IP + email tid_X@kronos),
+-- собирает scripts/ip_usage_watcher.py (cron). ТОЛЬКО ЗАМЕР, без enforcement.
+-- distinct IP per юзер за окно = сигнал шеринга (разные люди/локации), НЕ счёт
+-- устройств на одной сети. Пороги калибруются по этим данным. Retention ~48ч.
+CREATE TABLE IF NOT EXISTS ip_usage (
+    telegram_id  INTEGER NOT NULL,
+    ip           TEXT NOT NULL,
+    server_id    TEXT NOT NULL,                     -- где замечен (eu1/main/yc/yc2)
+    first_seen   TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen    TEXT NOT NULL DEFAULT (datetime('now')),
+    hits         INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (telegram_id, ip)
+);
+CREATE INDEX IF NOT EXISTS idx_ip_usage_tid_seen ON ip_usage (telegram_id, last_seen);
 """
 
 
