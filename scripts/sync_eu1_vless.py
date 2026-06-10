@@ -9,6 +9,16 @@ Source of truth — users.vless_uuid_eu1 (backfill сделан 2026-06-06).
 ВАРИАНТ A (решение владельца): CDN-канал обхода СОХРАНЯЕМ — per-user-им все inbound,
 ничего из методов обхода не удаляем.
 
+⛔⛔ ИНЦИДЕНТ 2026-06-10 — НЕ ЗАПУСКАТЬ `--no-shared` ВСЛЕПУЮ ⛔⛔
+eu1 vless-ws — НЕ только клиентский CDN-канал, но и ПРИЁМНИК РЕЛЕЯ:
+**yc и yc2 (Яндекс-входы) релеят ВЕСЬ трафик в eu1 vless-ws** (их outbound vless+ws
+→ 185.21.8.91:80/vpn). Релей-credential = `359e23cc-f90c-4e43-97af-bd1b662ff043`
+(RELAY_PRESERVE ниже). У него НЕТ tid-email → access_audit метит его «SHARED», но
+это НЕ фрод, а несущая инфра. `--no-shared` 06-10 снёс его → выход Европы (yc/yc2)
+перерубило, откатывали из бэкапа. Урок: [[feedback_no_delete_runtime_blind]].
+Теперь RELAY_PRESERVE бережётся ВСЕГДА; `--no-shared` требует `--force`. Прочие
+eu1-shared (9 на vless-tcp) — статус не доказан, не трогать без поштучной проверки.
+
 Режимы:
   (default = grace): per-user clients ДОБАВЛЯЮТСЯ, существующие (legacy/shared)
                      СОХРАНЯЮТСЯ → старые ссылки работают до broadcast+грейса.
@@ -43,6 +53,13 @@ INBOUNDS = {
     "vless-xhttp": "",
 }
 
+# UUID, которые НИКОГДА не удаляются (даже в --no-shared) — несущая инфра, не фрод.
+# 359e23cc… = релей-credential: yc И yc2 релеят весь трафик в eu1 vless-ws этим UUID.
+# Снос (инцидент 2026-06-10) → выход Европы умирает. См. докстринг сверху.
+RELAY_PRESERVE = {
+    "359e23cc-f90c-4e43-97af-bd1b662ff043",  # yc/yc2 → eu1 vless-ws relay
+}
+
 
 def fetch_active_users() -> list[dict]:
     """active=1, доступ в силе (grace 12h), есть vless_uuid_eu1 — как enforce_expired."""
@@ -71,6 +88,12 @@ def build_clients(users: list[dict], flow: str, existing: list[dict], include_sh
         for c in existing:
             if c.get("id") not in per_user_uuids:
                 clients.append(c)
+    else:
+        # --no-shared: shared снимаем, НО релей-credential'ы (RELAY_PRESERVE) бережём
+        # ВСЕГДА — иначе перерубается выход Европы (yc/yc2 → eu1). Инцидент 2026-06-10.
+        for c in existing:
+            if c.get("id") in RELAY_PRESERVE and c.get("id") not in per_user_uuids:
+                clients.append(c)
     # dedup по id
     seen, out = set(), []
     for c in clients:
@@ -85,9 +108,22 @@ def build_clients(users: list[dict], flow: str, existing: list[dict], include_sh
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sync per-user VLESS UUIDs в eu1 Xray config")
     ap.add_argument("--no-shared", action="store_true",
-                    help="Только per-user (ПОСЛЕ broadcast+грейса — удаляет legacy/shared)")
+                    help="Только per-user (ОПАСНО: см. докстринг; требует --force; релей бережётся)")
+    ap.add_argument("--force", action="store_true",
+                    help="Подтвердить осознанный --no-shared (без него реальный прогон отказывает)")
     ap.add_argument("--dry-run", action="store_true", help="Показать, не применять")
     args = ap.parse_args()
+
+    # Гейт: --no-shared на eu1 опасен (06-10 перерубил выход Европы, удалив релей-
+    # credential). RELAY_PRESERVE теперь бережёт релей, но прочие eu1-shared не
+    # доказаны как мусор → реальный --no-shared только с явным --force. dry-run можно.
+    if args.no_shared and not args.dry_run and not args.force:
+        print("⛔ ОТКАЗ: --no-shared на eu1 без --force.")
+        print("   eu1 vless-ws — приёмник релея yc/yc2 (см. докстринг, инцидент 2026-06-10).")
+        print("   Релей-credential защищён RELAY_PRESERVE, но прочие shared не проверены.")
+        print("   Если точно понимаешь — добавь --force. Сначала прогони с --dry-run.")
+        return 2
+
     include_shared = not args.no_shared
 
     users = fetch_active_users()

@@ -1,18 +1,20 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
-## 2026-06-10 — Фрод-зона eu1 ЗАКРЫТА (Этап 4 + durable)
+## 2026-06-10 — Фрод-зона eu1: ПОПЫТКА Этапа 4 ОТКАЧЕНА (вскрыт релей yc/yc2→eu1)
 
-**Контекст:** на eu1 оставались **11 shared UUID** (vless-tcp:9 + vless-ws:1 + vless-xhttp:1) — общие, неатрибутируемые, неотзываемые, небиллингуемые ссылки + завис истёкший `7882817110` (eu1 не было в рекуррентном sync). main/yc закрыли Этапом 7 (03.06), eu1 откладывали.
+**Что хотели:** удалить 11 «shared» UUID на eu1 (vless-tcp:9 + vless-ws:1 + vless-xhttp:1), как Этап 7 для main/yc, чтобы весь VLESS стал per-user.
 
-**Сделано (после теста владельца, что переупорядоченная подписка работает):**
-- **Этап 4** — `sync_eu1_vless.py --no-shared`: все 3 inbound eu1 → 50 per-user (vless-ws 52→50, vless-xhttp 52→50, vless-tcp 60→50). Удалены 11 shared + истёкший `7882817110`. Backup сделан, validate OK, xray active. Метод обхода (CDN `vless-ws`) сохранён, просто per-user (Вариант A владельца).
-- **Durable: cron `17 */6 * * * sync_eu1_vless.py --no-shared`** — eu1 больше не дрейфит (раньше истёкшие висели). Минута :17 вне сетки health-check/sync-xray.
-- **`access_audit.py` расширен на yc2** (server-loop eu1/main/yc → +yc2).
-- **Верификация:** `access_audit` после = **0 проблемных кредов** на всех 4 серверах (eu1/main/yc/yc2: tracked=50, shared=0, expired=0, orphan=0). AWG: 2 legacy-live owner-пира (НЕ ТРОГАТЬ) + 1 unused.
+**Что пошло не так:** `sync_eu1_vless.py --no-shared` снёс shared → **выход «Европы» перерубило.** Владелец: «Европа не грузит, Германия/Россия — плохо». Диагностика логов: yc xray падал на VLESS-**outbound** по ws; eu1 отбивал `invalid request user id: 359e23cc… from 127.0.0.1`.
 
-**Эффект:** весь VLESS на всех 4 серверах = 100% per-user (счётный/отзываемый/биллингуемый). Последняя untracked-зона закрыта. Разблокирует keystone (per-device + iplimit) — лимит устройств теперь некуда обойти через shared.
+**Корень (критический недокументированный факт):** **yc и yc2 («Европа») — НЕ прямые выходы, а фронт-релеи.** Их routing шлёт ВЕСЬ трафик в outbound `vless+ws → 185.21.8.91:80/vpn` (eu1 vless-ws). UUID `359e23cc-…` = **релей-credential**, общий для yc/yc2. У него нет tid-email → `access_audit` метил его «SHARED/фрод», но это несущая инфра. «243 ГБ tx на vless-ws» = релей-трафик Европы, а не фрод-юзер. Классический [[feedback_no_delete_runtime_blind]]. Память: `project_vpn_yc_relay_topology`.
 
-**Broadcast** «переподключись» (Этап 3) — owner отправляет вслед (текст готов), чтобы редкие straggler'ы на старых shared-ссылках (особенно CDN `vless-ws`) переехали на подписку.
+**Восстановление:** откат eu1-конфига из бэкапа `config.json.bak.eu1sync.*` (валидировать `xray run -test -format=json` — имя .bak не даёт авто-детект формата) → рестарт xray → 0 ошибок на eu1/yc/yc2. Снят опасный cron `17 */6 sync_eu1_vless --no-shared`.
+
+**Защита (чтобы не повторилось):**
+- `sync_eu1_vless.py`: `RELAY_PRESERVE={359e23cc…}` бережётся ВСЕГДА (даже в `--no-shared`); реальный `--no-shared` теперь требует `--force` (dry-run можно). Прочие 9 shared на vless-tcp — статус не доказан, не трогать без поштучной проверки.
+- `access_audit.py` расширен на yc2 + релей-UUID помечается отдельно (не «фрод»).
+
+**Статус фрод-зоны eu1:** НЕ закрыта и в текущем виде закрывать нельзя — eu1 vless-ws несёт релей. Per-user enforcement на eu1 относится к ПРЯМЫМ входам (vless-tcp/xhttp), которые уже per-user (grace-режим). Broadcast Этапа 3 НЕ нужен (ничего не удаляли). Реордер подписки (Яндекс первыми) — остаётся, он корректен.
 
 ---
 

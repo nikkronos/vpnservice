@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # для импорта соседних скриптов
 
 from sync_xray_users import SERVERS, _ssh_read_file, CONFIG_PATH  # noqa: E402
+from sync_eu1_vless import RELAY_PRESERVE  # noqa: E402  релей-креды (yc/yc2→eu1), не фрод
 from peers_sync_check import get_awg_dump  # noqa: E402
 from bot.database import _conn, _ensure_init  # noqa: E402
 from bot.storage import get_all_peers  # noqa: E402
@@ -77,13 +78,18 @@ def audit_vless(active: Set[int], in_db: Set[int]) -> Dict:
         except Exception as e:  # noqa: BLE001
             out[srv] = {"error": str(e)[:160]}
             continue
-        rec = {"tracked": 0, "shared": 0, "expired": [], "orphan": [], "inbounds": {}}
+        rec = {"tracked": 0, "shared": 0, "relay": 0, "expired": [], "orphan": [], "inbounds": {}}
         for ib in cfg.get("inbounds", []):
             if ib.get("protocol") != "vless":
                 continue
             tag = ib.get("tag", "?")
-            s = {"tracked": 0, "shared": 0, "expired": 0, "orphan": 0}
+            s = {"tracked": 0, "shared": 0, "relay": 0, "expired": 0, "orphan": 0}
             for c in (ib.get("settings") or {}).get("clients") or []:
+                if c.get("id") in RELAY_PRESERVE:
+                    # релей-инфра (yc/yc2 → eu1 vless-ws), НЕ фрод — см. RELAY_PRESERVE
+                    s["relay"] += 1
+                    rec["relay"] += 1
+                    continue
                 m = TID_EMAIL_RE.search(c.get("email", "") or "")
                 if not m:
                     s["shared"] += 1
@@ -141,22 +147,24 @@ def main() -> int:
 
     print("── VLESS (по серверам / inbound) ──")
     v = audit_vless(active, in_db)
-    tot_shared = tot_orphan = tot_expired = 0
+    tot_shared = tot_orphan = tot_expired = tot_relay = 0
     for srv, r in v.items():
         if "error" in r:
             print(f"  {srv}: ОШИБКА {r['error']}")
             continue
-        print(f"  {srv}: tracked={r['tracked']} shared={r['shared']} "
+        print(f"  {srv}: tracked={r['tracked']} shared={r['shared']} relay={r.get('relay', 0)} "
               f"expired={len(r['expired'])} orphan={len(r['orphan'])}")
         for tag, s in r["inbounds"].items():
             flag = "  🔴" if (s["shared"] or s["expired"] or s["orphan"]) else ""
-            print(f"      [{tag}] tracked={s['tracked']} shared={s['shared']} "
+            relay_str = f" relay={s['relay']}" if s.get("relay") else ""
+            print(f"      [{tag}] tracked={s['tracked']} shared={s['shared']}{relay_str} "
                   f"expired={s['expired']} orphan={s['orphan']}{flag}")
         if r["expired"]:
             print(f"      expired tids: {sorted(set(r['expired']))[:12]}")
         if r["orphan"]:
             print(f"      orphan tids: {sorted(set(r['orphan']))[:12]}")
         tot_shared += r["shared"]
+        tot_relay += r.get("relay", 0)
         tot_orphan += len(set(r["orphan"]))
         tot_expired += len(set(r["expired"]))
 
@@ -174,6 +182,7 @@ def main() -> int:
     print("\n" + "=" * 72)
     print("ИТОГ — НЕОТСЛЕЖИВАЕМАЯ / НЕДООТЗЫВАЕМАЯ ПОВЕРХНОСТЬ")
     print("=" * 72)
+    print(f"  VLESS RELAY   (инфра yc/yc2→eu1, НЕ фрод)   : {tot_relay}")
     print(f"  VLESS SHARED  (общие UUID — фрод-зона)      : {tot_shared}")
     print(f"  VLESS EXPIRED (в конфиге, но доступ истёк)  : {tot_expired}")
     print(f"  VLESS ORPHAN  (tid не в БД — мусор)         : {tot_orphan}")
