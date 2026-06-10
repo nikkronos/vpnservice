@@ -2,14 +2,16 @@
 """
 Health-check / alerting для VPN-инфраструктуры (Fornex + main + yc + yc2).
 
-Каждые 15 минут проходит ~27 проверок:
+Каждые 15 минут проходит ~29 проверок:
   * Fornex (13, локально): systemd сервисы, docker контейнеры, AWG peer-count,
     peers.json/awg consistency, диск, swap, LE сертификат, HTTPS endpoint,
     vless_config_consistency (БД ↔ config на main/yc/yc2).
   * main (Timeweb, 6, через SSH): reachable, xray, wg-quick@wg0, :443/tcp,
     :51820/udp, диск.
-  * yc (Yandex Cloud, 4, через SSH): reachable, xray, :443/tcp, диск.
-  * yc2 (Yandex Cloud, РФ-резерв, 4, через SSH): reachable, xray, :443/tcp, диск.
+  * yc (Yandex Cloud, 5, через SSH): reachable, xray, :443/tcp, :8443/tcp
+    (socat sub-forward), диск.
+  * yc2 (Yandex Cloud, РФ-резерв, 5, через SSH): reachable, xray, :443/tcp,
+    :8443/tcp (socat sub-forward), диск.
 
 При **смене статуса** (OK→FAIL или FAIL→OK) шлёт алерт владельцу в Telegram
 через прямой HTTP API (urllib, без инстанса бота — алерт уйдёт даже если упал
@@ -108,11 +110,13 @@ REMOTE_CHECK_PLAN: Dict[str, List[Tuple]] = {
     "yc": [
         ("systemd", "xray.service"),
         ("port",    443,   "tcp"),
+        ("port",    8443,  "tcp"),   # socat sub-forward (ЛК/подписка через Яндекс-фронт, 2026-06-10)
         ("disk",    "/"),
     ],
     "yc2": [
         ("systemd", "xray.service"),
         ("port",    443,   "tcp"),
+        ("port",    8443,  "tcp"),   # socat sub-forward
         ("disk",    "/"),
     ],
 }
