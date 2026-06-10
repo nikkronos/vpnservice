@@ -14,3 +14,9 @@ if [ -z "$SEEN" ]; then SEEN="(никто из 9 не использовался
 echo "$TS  $SEEN" >> "$LOG"
 # self-trim
 tail -n 500 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
+
+# вердикт + авто-нудж владельцу в TG, когда набрана статистика (dedup внутри).
+# Вывод вердикта — в ОТДЕЛЬНЫЙ файл, чтобы не засорять сэмпл-лог (иначе его
+# строки попадут в подсчёт сэмплов).
+cd /opt/vpnservice && /opt/vpnservice/venv/bin/python scripts/eu1_share_audit_verdict.py \
+    >> /var/log/eu1-share-audit-verdict.log 2>&1
