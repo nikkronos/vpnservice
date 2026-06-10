@@ -676,6 +676,12 @@ def _migrate_peers_json_to_sqlite() -> None:
     которого ещё нет в таблице). peers.json остаётся как dual-write зеркало
     на время переходного периода (см. storage.DUAL_WRITE_JSON).
     """
+    # Фаза 2 B: если peers уже в device-формате — эта платформенная json-миграция
+    # (peers.json мёртв в Phase 3) обсолетна и сломается на колонке platform. Скип.
+    with _conn() as con:
+        _cols = {r[1] for r in con.execute("PRAGMA table_info(peers)").fetchall()}
+    if "device_id" in _cols or "platform" not in _cols:
+        return
     if not PEERS_JSON_PATH.exists():
         return
     try:
