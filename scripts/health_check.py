@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Health-check / alerting для VPN-инфраструктуры (Fornex + main + yc).
+Health-check / alerting для VPN-инфраструктуры (Fornex + main + yc + yc2).
 
-Каждые 15 минут проходит ~22 проверки:
-  * Fornex (12, локально): systemd сервисы, docker контейнеры, AWG peer-count,
-    peers.json/awg consistency, диск, swap, LE сертификат, HTTPS endpoint.
+Каждые 15 минут проходит ~27 проверок:
+  * Fornex (13, локально): systemd сервисы, docker контейнеры, AWG peer-count,
+    peers.json/awg consistency, диск, swap, LE сертификат, HTTPS endpoint,
+    vless_config_consistency (БД ↔ config на main/yc/yc2).
   * main (Timeweb, 6, через SSH): reachable, xray, wg-quick@wg0, :443/tcp,
     :51820/udp, диск.
   * yc (Yandex Cloud, 4, через SSH): reachable, xray, :443/tcp, диск.
+  * yc2 (Yandex Cloud, РФ-резерв, 4, через SSH): reachable, xray, :443/tcp, диск.
 
 При **смене статуса** (OK→FAIL или FAIL→OK) шлёт алерт владельцу в Telegram
 через прямой HTTP API (urllib, без инстанса бота — алерт уйдёт даже если упал
@@ -90,6 +92,7 @@ SSH_OPTS = [
 REMOTE_HOSTS: Dict[str, List[str]] = {
     "main": ["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"],
     "yc":   ["ssh"] + SSH_OPTS + ["yc"],
+    "yc2":  ["ssh"] + SSH_OPTS + ["yc2"],  # РФ-резерв, клон yc
 }
 
 # План проверок на каждом удалённом хосте.
@@ -103,6 +106,11 @@ REMOTE_CHECK_PLAN: Dict[str, List[Tuple]] = {
         ("disk",    "/"),
     ],
     "yc": [
+        ("systemd", "xray.service"),
+        ("port",    443,   "tcp"),
+        ("disk",    "/"),
+    ],
+    "yc2": [
         ("systemd", "xray.service"),
         ("port",    443,   "tcp"),
         ("disk",    "/"),
@@ -344,9 +352,13 @@ def check_le_cert() -> CheckResult:
 def check_vless_config_consistency() -> CheckResult:
     """
     Cross-server consistency check: count(per-user UUIDs в БД) vs count(clients[]
-    в Xray config.json на main и yc). Если разошлось > 2 (буфер для гонок sync) —
-    FAIL: значит cron safety net (`sync_xray_users.py --all --no-shared`) не
-    сработал или sync упал.
+    в Xray config.json на main, yc и yc2). Если разошлось > 2 (буфер для гонок
+    sync) — FAIL: значит cron safety net (`sync_xray_users.py --all --no-shared`)
+    не сработал или sync упал.
+
+    yc2 — клон yc (та же колонка vless_uuid_yc), поэтому сверяется с db_yc.
+    Это главный детектор дрейфа статичного клона: если yc2 выпал из sync,
+    оплаты/истечения на yc разойдутся с застывшим yc2 → здесь поймаем.
 
     Допуск ±2: один юзер может быть в процессе оплаты/revoke между БД и config,
     плюс возможна гонка между sync_xray_users и health_check.
@@ -372,14 +384,18 @@ def check_vless_config_consistency() -> CheckResult:
         db_main = (row["db_main"] or 0) if row else 0
         db_yc = (row["db_yc"] or 0) if row else 0
 
-        # SSH к main и yc — забираем count(clients) из config.json
+        # SSH к main, yc, yc2 — забираем count(clients) из config.json.
+        # yc2 — клон yc (vless-xhttp), сверяется с db_yc.
         ssh_main = REMOTE_HOSTS["main"]
         ssh_yc = REMOTE_HOSTS["yc"]
+        ssh_yc2 = REMOTE_HOSTS["yc2"]
         cmd_main = "jq '[.inbounds[] | select(.tag==\"vless-tcp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
         cmd_yc = "sudo jq '[.inbounds[] | select(.tag==\"vless-xhttp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
+        cmd_yc2 = cmd_yc  # yc2 — тот же inbound-tag vless-xhttp
 
         r_m = subprocess.run(ssh_main + [cmd_main], capture_output=True, text=True, timeout=15)
         r_y = subprocess.run(ssh_yc + [cmd_yc], capture_output=True, text=True, timeout=15)
+        r_y2 = subprocess.run(ssh_yc2 + [cmd_yc2], capture_output=True, text=True, timeout=15)
 
         try:
             cfg_main = int(r_m.stdout.strip()) if r_m.returncode == 0 else -1
@@ -389,19 +405,28 @@ def check_vless_config_consistency() -> CheckResult:
             cfg_yc = int(r_y.stdout.strip()) if r_y.returncode == 0 else -1
         except ValueError:
             cfg_yc = -1
+        try:
+            cfg_yc2 = int(r_y2.stdout.strip()) if r_y2.returncode == 0 else -1
+        except ValueError:
+            cfg_yc2 = -1
 
-        if cfg_main < 0 or cfg_yc < 0:
+        if cfg_main < 0 or cfg_yc < 0 or cfg_yc2 < 0:
             return CheckResult(
                 name, "FAIL",
-                f"не удалось прочитать count(clients) на main/yc",
-                f"main_rc={r_m.returncode} yc_rc={r_y.returncode}",
+                f"не удалось прочитать count(clients) на main/yc/yc2",
+                f"main_rc={r_m.returncode} yc_rc={r_y.returncode} yc2_rc={r_y2.returncode}",
             )
 
         diff_main = abs(db_main - cfg_main)
         diff_yc = abs(db_yc - cfg_yc)
-        msg = f"db_main={db_main} cfg_main={cfg_main} (diff {diff_main}), db_yc={db_yc} cfg_yc={cfg_yc} (diff {diff_yc})"
+        diff_yc2 = abs(db_yc - cfg_yc2)  # yc2 = клон yc → сверяем с db_yc
+        msg = (
+            f"db_main={db_main} cfg_main={cfg_main} (diff {diff_main}), "
+            f"db_yc={db_yc} cfg_yc={cfg_yc} (diff {diff_yc}), "
+            f"cfg_yc2={cfg_yc2} (diff {diff_yc2})"
+        )
 
-        if diff_main > 2 or diff_yc > 2:
+        if diff_main > 2 or diff_yc > 2 or diff_yc2 > 2:
             return CheckResult(name, "FAIL", f"разошлось > 2 ({msg})", msg)
         return CheckResult(name, "OK", msg)
     except Exception as e:  # noqa: BLE001

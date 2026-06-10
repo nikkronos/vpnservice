@@ -82,7 +82,7 @@ per-device слоты + Xray iplimit (п.2)  ← KEYSTONE
 
 ### ▶ Первым делом (в самом начале следующего захода)
 
-1. **Досинхронизировать yc2** — добавить в `sync_xray_users.py` (SERVERS: `ssh yc2`, inbound `vless-xhttp`, db_column `vless_uuid_yc` — yc2 клон yc) + в `health_check.py` (мониторинг). ~20 мин. **Важно:** сейчас yc2 — статичный клон, без этого его клиенты дрейфнут при оплатах/истечениях (yc обновится sync'ом, yc2 — нет).
+1. ~~**Досинхронизировать yc2**~~ — ✅ **DONE 2026-06-10.** В `sync_xray_users.py` добавлена запись `yc2` в `SERVERS` (ssh yc2 / inbound `vless-xhttp` / db_column `vless_uuid_yc` / sudo) + `--all` → `[main, yc, yc2]` (cron `--all --no-shared` теперь покрывает yc2). В `health_check.py` — yc2 в `REMOTE_HOSTS`/`REMOTE_CHECK_PLAN` (reachable/xray/:443/disk) + `vless_config_consistency` сверяет yc2 с `db_yc`. Проверено на проде: dry-run + реальный sync yc2 (50 clients, validate OK, restart OK) + health_check dry-run = 27/27 green (`cfg_yc2=50, diff 0`). Дрейф клона закрыт.
 2. **Фрод-зона eu1 Этапы 3-4** (broadcast + `sync_eu1_vless.py --no-shared` → удалить 11 shared UUID) — **когда подтвердится спад РКН-волны** (см. п.2). Закрывает анти-фрод по eu1.
 
 **Затем — keystone большой задачи:** **per-device + iplimit** — разблокирует тарифы (п.4) И анти-фрод (п.2). Изучить механизм 3x-ui (`iplimit` + лог IP), спроектировать per-device слоты (миграция ключа peer'а `{tid}:{server}:{platform}` → именованные устройства), затем тарифы 199/149.

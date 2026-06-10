@@ -17,7 +17,10 @@ broadcast+48h).
     # Sync yc (REALITY tag=vless-xhttp на yc)
     python3 scripts/sync_xray_users.py --server yc
 
-    # Все серверы
+    # Sync yc2 (РФ-резерв, клон yc — те же UUID из колонки vless_uuid_yc)
+    python3 scripts/sync_xray_users.py --server yc2
+
+    # Все серверы (main + yc + yc2)
     python3 scripts/sync_xray_users.py --all
 
     # Dry-run — показать какой config был бы записан, не применяя
@@ -62,6 +65,18 @@ SERVERS = {
         "inbound_tag": "vless-xhttp",
         "flow": "",  # xhttp без flow
         "shared_uuid": "11dd653c-944b-4320-b29e-f1a9f2d75db8",
+        "db_column": "vless_uuid_yc",
+        "sudo": "sudo ",  # ubuntu user с passwordless sudo
+    },
+    "yc2": {
+        # yc2 — РФ-облачный резерв, клон yc (те же REALITY-ключи + per-user UUID).
+        # Использует ТУ ЖЕ колонку vless_uuid_yc — у юзера один UUID на оба
+        # Яндекс-эндпоинта (failover). Без этой записи в --all yc2 дрейфует:
+        # оплаты/истечения синкаются на yc, а статичный клон yc2 застывает.
+        "ssh": ["ssh"] + SSH_OPTS + ["yc2"],
+        "inbound_tag": "vless-xhttp",
+        "flow": "",  # xhttp без flow
+        "shared_uuid": "11dd653c-944b-4320-b29e-f1a9f2d75db8",  # как yc; не пишется при --no-shared
         "db_column": "vless_uuid_yc",
         "sudo": "sudo ",  # ubuntu user с passwordless sudo
     },
@@ -297,15 +312,15 @@ def sync_one_server(server_id: str, include_shared: bool, dry_run: bool) -> bool
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync per-user VLESS UUIDs to Xray config.json on main/yc")
     g = parser.add_mutually_exclusive_group(required=True)
-    g.add_argument("--server", choices=["main", "yc"], help="Sync only this server")
-    g.add_argument("--all", action="store_true", help="Sync all servers (main + yc)")
+    g.add_argument("--server", choices=["main", "yc", "yc2"], help="Sync only this server")
+    g.add_argument("--all", action="store_true", help="Sync all servers (main + yc + yc2)")
     parser.add_argument("--no-shared", action="store_true",
                         help="Don't include legacy shared UUID (use AFTER broadcast+48h, etap 7)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be written, don't apply")
     args = parser.parse_args()
 
-    targets = ["main", "yc"] if args.all else [args.server]
+    targets = ["main", "yc", "yc2"] if args.all else [args.server]
     include_shared = not args.no_shared
 
     ok_count = 0

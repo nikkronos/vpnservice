@@ -1,5 +1,19 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-10 — yc2 досинхронизирован (sync_xray_users + health_check)
+
+**Проблема:** yc2 (РФ-резерв, заведён 06-09 как статичный клон yc) не входил в cron-sync и мониторинг. cron `sync_xray_users.py --all --no-shared` держал main/yc актуальными, а yc2 застывал → с первыми оплатами/истечениями (~10.06) клиенты на yc2 дрейфнули бы: оплаченный без UUID на yc2 не пускается, истёкший с оставшимся UUID ходит бесплатно (мини-фрод-зона на резерве).
+
+**Фикс:**
+- `scripts/sync_xray_users.py`: запись `yc2` в `SERVERS` (ssh `yc2` / inbound `vless-xhttp` / flow="" / `db_column=vless_uuid_yc` — клон yc, общая колонка / sudo). `--server` choices += `yc2`; `--all` → `[main, yc, yc2]` (crontab не трогали — `--all` подхватил).
+- `scripts/health_check.py`: yc2 в `REMOTE_HOSTS` + `REMOTE_CHECK_PLAN` (reachable/xray/:443/disk); `check_vless_config_consistency` расширен — yc2 сверяется с `db_yc` (детектор дрейфа клона). Счётчик проверок 23 → 27.
+
+**Верификация (на проде, read-only сначала):** yc2 reachable через Fornex-jump, user `ubuntu`+passwordless sudo, inbound `vless-xhttp`, паритет 50/50/50 (db_yc / yc / yc2). Локальный+серверный AST OK. Dry-run sync yc2 (50 per-user, 0 shared). Реальный sync yc2: backup → validate OK → restart → xray active, :443 listening. `health_check --dry-run` = 27/27 green, `vless_config_consistency: cfg_yc2=50 (diff 0)`.
+
+**Эффект:** оплаты/истечения теперь синхронизируются на yc2 автоматически; дрейф клона ловится health-check'ом. Первый шаг мастер-плана `docs/plan-blocking-antifraud-traffic-tariffs.md` закрыт.
+
+---
+
 ## 2026-06-04 — UX-фикс: единый путь подключения (фидбэк @veryvoro)
 
 **Диагностика:** @veryvoro «на мобильном ничего не работает». Сервер был исправен (23 OK/0 FAIL весь день). Корень клиентский: (1) AmneziaWG не работает на мобильном (UDP, by design); (2) её VLESS был на старой shared-ссылке, убитой Этапом 7 (03.06), новую персональную подписку не переимпортировала. Путь фрагментирован — юзер не знает, какой механизм нужен.
@@ -886,7 +900,7 @@ vless://359e23cc-f90c-4e43-97af-bd1b662ff043@81.200.146.32:443?encryption=none&f
 - Создана базовая структура документации для проекта VPN:
   - добавлен `ROADMAP_VPN.md` с этапами развития (MVP, бот, масштабирование, коммерциализация);
   - подготовлен шаблон для `SESSION_SUMMARY_2026-02-09.md` (см. файл сессии);
-  - проект VPN интегрирован в центральные документы (`RULES_CURSOR.md`, `PROJECTS.md`, `ROAD_MAP_AI.md`, `QUICK_START_AGENT.md`, `docs/AGENT_PROMPTS.md`).
+  - проект VPN интегрирован в центральные документы (`RULES.md`, `PROJECTS.md`, `ROAD_MAP_AI.md`, `QUICK_START_AGENT.md`, `docs/AGENT_PROMPTS.md`).
 - Инициализирован отдельный Git-репозиторий для проекта VPN:
   - создан локальный репозиторий в папке `VPN/` (`git init`);
   - привязан к GitHub-репозиторию `nikkronos/vpnservice` (`git remote add origin`);
