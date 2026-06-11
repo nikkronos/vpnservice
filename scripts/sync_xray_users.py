@@ -219,7 +219,8 @@ def sync_one_server(server_id: str, include_shared: bool, dry_run: bool) -> bool
     if target_idx is None:
         raise RuntimeError(f"Inbound tag '{inbound_tag}' not found in {server_id} config")
 
-    old_clients_count = len((inbounds[target_idx].get("settings") or {}).get("clients") or [])
+    old_clients = (inbounds[target_idx].get("settings") or {}).get("clients") or []
+    old_clients_count = len(old_clients)
     print(f"  Current clients[] count in {inbound_tag}: {old_clients_count}")
 
     # 3. Заменить clients
@@ -252,15 +253,31 @@ def sync_one_server(server_id: str, include_shared: bool, dry_run: bool) -> bool
     if policy_changed:
         print(f"  Added policy.levels.0.statsUser{{Uplink,Downlink}} = true (per-user telemetry)")
 
+    # Guard «нет изменений → не рестартим Xray»: clients[] поддерживается этим же
+    # скриптом, поэтому сравниваем по содержимому (order-independent). Нужно для
+    # перевода cron на ежечасный sync без лишних рестартов (раньше КАЖДЫЙ прогон
+    # рестартил всегда → ~5с downtime ×3 сервера). 2026-06-11.
+    def _norm_clients(cl):
+        return sorted(json.dumps(c, sort_keys=True, ensure_ascii=False) for c in cl)
+    no_change = (not policy_changed) and _norm_clients(new_clients) == _norm_clients(old_clients)
+
     new_config_text = json.dumps(config, indent=2, ensure_ascii=False)
 
     if dry_run:
-        print("\n  [DRY RUN] Resulting clients[] preview:")
+        print(f"\n  [DRY RUN] no_change={no_change}"
+              + ("  (изменений нет → реальный прогон пропустил бы рестарт)" if no_change
+                 else "  (есть изменения → реальный прогон обновил бы config + рестарт)"))
+        print("  [DRY RUN] Resulting clients[] preview:")
         for c in new_clients[:5]:
             print(f"    {c}")
         if len(new_clients) > 5:
             print(f"    ... и ещё {len(new_clients) - 5}")
         print("\n  [DRY RUN] Не записываем, не рестартим.")
+        return True
+
+    # Guard: ничего не изменилось — не трогаем config и НЕ рестартим Xray.
+    if no_change:
+        print("  ✓ Нет изменений (clients/policy) — config не трогаем, Xray не рестартим.")
         return True
 
     # 4. Backup + write

@@ -1,5 +1,18 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-11 — VLESS enforcement-лаг закрыт (sync ежечасно + no-change guard)
+
+**Проблема (вскрыта алертом `vless_config_consistency` 11:00 UTC, diff 26):** `enforce_expired` режет AWG ежечасно, а `sync_xray_users` убирал истёкшие VLESS-UUID лишь раз в 6 ч (`7 */6`). → истёкший юзер до ~6 ч сохранял **VLESS (главный путь)** после grace = enforcement-лик; плюс в окне grace→sync БД и Xray-config законно расходятся на размер когорты → ложные FAIL-алерты (сегодня когорта 26 истёкших триалов, «DOWN 74 мин», само-вылечилось 12:07-синком).
+
+**Фикс (`scripts/sync_xray_users.py`):**
+- **No-change guard** в `sync_one_server`: сравнение new vs old `clients[]` (order-independent) + `policy_changed`; идентично → config не трогаем, Xray НЕ рестартим. Бонус: прежние 4 ежедневных safety-net-прогона перестали зря рестартить.
+- **Cron `7 */6` → `7 *`** (ежечасно): VLESS-отзыв догоняет AWG. Лик 6ч→~1ч; окно ложного FAIL 74мин→≤~1ч.
+- **Деплой:** бэкап (`scripts/sync_xray_users.py.bak.*`) + scp + server AST OK; **guard провалидирован на проде** — реальный прогон `--all --no-shared` дал «✓ нет изменений, не рестартим» ×3, Xray на yc2 не перезапущен (ActiveEnterTimestamp 12:07:23 до == после). Cron заменён (12/12 строк целы, off-grid :07 сохранён).
+
+**Остаток (опц.):** краткий ложный FAIL на когорте истечений ещё возможен (≤1 цикл) — добивается debounce'ом чека (алерт если diff держится ≥2 циклов). Не критично (лик закрыт). Задокументировано в CLAUDE.md (правило #10 + описание `vless_config_consistency`).
+
+---
+
 ## 2026-06-11 — fail2ban на main/yc/yc2 (подавление SSH brute-force)
 
 Закрывает follow-up из записи «yc2 ночной false-FAIL» ниже: точечный SSH-ретрай (`645cb63`) лечил симптом, а сам ночной brute-force (76 sshd-событий/5 мин: socksuser/obi/root с разных IP) оставался — шум в логах, нагрузка, риск дропов мониторинга. fail2ban на серверах не стоял.
