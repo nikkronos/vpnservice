@@ -56,6 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let sessionToken = '';
   let currentEmail = '';
   const refCode = new URLSearchParams(location.search).get('ref') || '';
+  // Выбор тарифа в payBlock (устройства × срок) + тарифная сетка с бэка.
+  let payDevices = 3;
+  let payMonths = 1;
+  let acctTariffs = [];
 
   // ── Telegram WebApp context ───────────────────────────────────────────────
   // SDK telegram-web-app.js хостится у нас локально (telegram.org из РФ нестабилен).
@@ -516,19 +520,88 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Блок «Продлить подписку» — Telegram Stars (нативно) + ручной СБП/карта.
   // Показываем ВСЕМ (включая grandfather/owner) — пусть видят, что доступно.
+  function findTariff(devices, months) {
+    return (acctTariffs || []).find(t => t.devices === devices && t.months === months) || null;
+  }
+
+  // Сегментированный выбор: подпись + варианты-кнопки (выбранный подсвечен).
+  function _payChooserRow(label, options, selected, onPick) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:10px;';
+    const cap = document.createElement('div');
+    cap.className = 'section-hint';
+    cap.style.cssText = 'margin:0 0 4px;';
+    cap.textContent = label + ':';
+    wrap.appendChild(cap);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+    options.forEach(opt => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const active = opt.val === selected;
+      b.className = 'btn-recovery' + (active ? ' copy-primary' : ' btn-recovery-secondary');
+      b.style.cssText = 'flex:1 1 auto; min-width:120px; margin-top:0;' + (active ? '' : ' opacity:0.7;');
+      b.textContent = (active ? '✓ ' : '') + opt.label;
+      b.addEventListener('click', () => { haptic('light'); onPick(opt.val); });
+      row.appendChild(b);
+    });
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  // Кнопка Stars (one-time / recurring) — несёт текущий тариф (devices, months).
+  function _starsBtn(label, recurring, secondary) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-recovery copy-primary' + (secondary ? ' btn-recovery-secondary' : '');
+    btn.style.marginTop = '8px';
+    btn.textContent = label;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      haptic('light');
+      try {
+        const r = await fetch('/api/billing/create-stars-invoice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, devices: payDevices, months: payMonths, recurring }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.invoice_link) {
+          haptic('error'); notify(data.error || 'Не удалось создать счёт.'); btn.disabled = false; return;
+        }
+        if (!tg.openInvoice) {
+          haptic('error'); notify('Эта версия Telegram не поддерживает Stars-оплату.'); btn.disabled = false; return;
+        }
+        tg.openInvoice(data.invoice_link, (status) => {
+          btn.disabled = false;
+          if (status === 'paid') {
+            haptic('success');
+            notify(recurring
+              ? 'Подписка оформлена. Будет продлеваться автоматически каждый месяц.'
+              : 'Оплата получена. Подписка продлена.');
+            loadAccount();
+          } else if (status === 'cancelled') {
+            haptic('warning');
+          } else if (status === 'failed') {
+            haptic('error'); notify('Платёж не прошёл.');
+          }
+        });
+      } catch (e) {
+        haptic('error'); btn.disabled = false;
+      }
+    });
+    return btn;
+  }
+
   function renderPayBlock(d) {
     if (!payBlock) return;
     payBlock.hidden = false;
     payBlock.innerHTML = '';
-
-    const mp = d.manual_pay || {};
-    const rub = d.subscription_rub_price || mp.rub || 200;
-    const stars = d.stars_monthly_price || 150;
-    const days = d.subscription_days || 30;
+    acctTariffs = d.tariffs || [];
 
     const title = document.createElement('div');
     title.className = 'acc-subtitle';
-    title.textContent = `💳 Продлить подписку — ${days} дней`;
+    title.textContent = '💳 Оформить подписку';
     payBlock.appendChild(title);
 
     // ── Pending-режим: заявка уже отправлена владельцу, ждём решения ─────────
@@ -544,78 +617,51 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const note = document.createElement('p');
-    note.className = 'section-hint';
-    note.textContent = `Цена: ${rub} ₽ (или ${stars} ⭐ Telegram Stars). Подписка продлевается на ${days} дней.`;
-    payBlock.appendChild(note);
-
-    // Telegram Stars (только в TG WebApp — снаружи tg.openInvoice не работает).
-    // Две кнопки: разовая оплата + авто-продление (Bot API 8.0 subscription_period).
-    if (inTelegram) {
-      const makeStarsBtn = (label, recurring, secondary) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-recovery copy-primary' + (secondary ? ' btn-recovery-secondary' : '');
-        if (secondary) btn.style.marginTop = '8px';
-        btn.textContent = label;
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          haptic('light');
-          try {
-            const r = await fetch('/api/billing/create-stars-invoice', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: sessionToken, recurring }),
-            });
-            const data = await r.json().catch(() => ({}));
-            if (!r.ok || !data.invoice_link) {
-              haptic('error');
-              notify(data.error || 'Не удалось создать счёт.');
-              btn.disabled = false;
-              return;
-            }
-            if (!tg.openInvoice) {
-              haptic('error');
-              notify('Эта версия Telegram не поддерживает Stars-оплату.');
-              btn.disabled = false;
-              return;
-            }
-            tg.openInvoice(data.invoice_link, (status) => {
-              btn.disabled = false;
-              if (status === 'paid') {
-                haptic('success');
-                notify(recurring
-                  ? 'Подписка оформлена. Будет продлеваться автоматически каждый месяц.'
-                  : 'Оплата получена. Подписка продлена.');
-                loadAccount();
-              } else if (status === 'cancelled') {
-                haptic('warning');
-              } else if (status === 'failed') {
-                haptic('error');
-                notify('Платёж не прошёл.');
-              }
-            });
-          } catch (e) {
-            haptic('error');
-            btn.disabled = false;
-          }
-        });
-        return btn;
-      };
-      payBlock.appendChild(makeStarsBtn(`⭐ Подписка Stars (${stars} ⭐/мес, авто)`, true, false));
-      payBlock.appendChild(makeStarsBtn(`⭐ Оплатить Stars один раз (${stars} ⭐)`, false, true));
+    // Fallback на простую ручную оплату, если бэк не прислал тарифы.
+    if (!acctTariffs.length) {
+      const mbtn = document.createElement('button');
+      mbtn.type = 'button';
+      mbtn.className = 'btn-recovery copy-primary';
+      mbtn.textContent = '💳 Оплатить СБП / картой (Т-Банк)';
+      mbtn.addEventListener('click', () => { haptic('light'); renderManualPay(d); showStep(stepManualPay); });
+      payBlock.appendChild(mbtn);
+      return;
     }
 
-    // ── Ручная оплата (СБП / карта Т-Банк) — навигация на отдельный substep ─
+    // Шаг 1: устройства. Шаг 2: срок. Выбор перерисовывает блок (цены/кнопки).
+    payBlock.appendChild(_payChooserRow('Устройства', [
+      { label: '3 устройства', val: 3 },
+      { label: '5 устройств', val: 5 },
+    ], payDevices, (v) => { payDevices = v; renderPayBlock(d); }));
+    payBlock.appendChild(_payChooserRow('Срок', [
+      { label: '1 месяц', val: 1 },
+      { label: '3 месяца', val: 3 },
+    ], payMonths, (v) => { payMonths = v; renderPayBlock(d); }));
+
+    const t = findTariff(payDevices, payMonths);
+    if (!t) return;
+    const per = payMonths === 1 ? '' : ` (${Math.round(t.price_rub / payMonths)} ₽/мес)`;
+    const priceLine = document.createElement('p');
+    priceLine.className = 'section-hint';
+    priceLine.style.marginTop = '10px';
+    priceLine.innerHTML = `Итого: <b>${t.price_rub} ₽</b>${per} · ${payDevices} устр. · ${t.days} дней`
+      + (inTelegram ? ` · или ${t.price_stars} ⭐` : '');
+    payBlock.appendChild(priceLine);
+
+    // Stars — только в TG WebApp. Авто-продление — только для 1-месячного тарифа.
+    if (inTelegram) {
+      payBlock.appendChild(_starsBtn(`⭐ Оплатить ${t.price_stars} ⭐`, false, false));
+      if (payMonths === 1) {
+        payBlock.appendChild(_starsBtn(`⭐ Подписка ${t.price_stars} ⭐/мес (авто)`, true, true));
+      }
+    }
+
     const manualBtn = document.createElement('button');
     manualBtn.type = 'button';
     manualBtn.className = 'btn-recovery btn-recovery-secondary copy-primary';
     manualBtn.style.marginTop = '8px';
-    manualBtn.textContent = '💳 Оплатить СБП / картой (Т-Банк)';
-    manualBtn.addEventListener('click', () => {
-      haptic('light');
-      showStep(stepManualPay);
-    });
+    manualBtn.textContent = `💳 Оплатить ${t.price_rub} ₽ СБП / картой`;
+    manualBtn.addEventListener('click', () => { haptic('light'); renderManualPay(d); showStep(stepManualPay); });
     payBlock.appendChild(manualBtn);
   }
 
@@ -625,8 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!manualPayContent) return;
     manualPayContent.innerHTML = '';
     const mp = d.manual_pay || {};
-    const rub = d.subscription_rub_price || mp.rub || 200;
-    const days = d.subscription_days || 30;
+    const t = findTariff(payDevices, payMonths);
+    const rub = t ? t.price_rub : (d.subscription_rub_price || mp.rub || 200);
 
     // Если есть pending-заявка — показываем «ждём подтверждения» вместо реквизитов,
     // чтобы юзер случайно не нажал «Я перевёл» второй раз и не плодил уведомлений.
@@ -646,7 +692,8 @@ document.addEventListener('DOMContentLoaded', () => {
     intro.className = 'section-hint';
     intro.style.marginTop = '0';
     intro.innerHTML = (
-      `1. Переведи <b>${rub} ₽</b> на номер или карту ниже.<br>` +
+      `Тариф: <b>${payDevices} устр., ${payMonths} мес — ${rub} ₽</b>.<br>` +
+      `1. Переведи <b>ровно ${rub} ₽</b> на номер или карту ниже.<br>` +
       `2. Нажми <b>«✅ Я перевёл деньги»</b> — владельцу придёт уведомление.<br>` +
       `3. Он проверит поступление и зачислит подписку (обычно в течение часа).`
     );
@@ -674,7 +721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     claimBtn.type = 'button';
     claimBtn.className = 'btn-recovery copy-primary';
     claimBtn.style.marginTop = '14px';
-    claimBtn.textContent = '✅ Я перевёл деньги, подтверди';
+    claimBtn.textContent = `✅ Я перевёл ${rub} ₽, подтверди`;
     claimBtn.addEventListener('click', async () => {
       claimBtn.disabled = true;
       haptic('light');
@@ -684,7 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const r = await fetch('/api/billing/claim-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: sessionToken, source: 'webapp' }),
+          body: JSON.stringify({ token: sessionToken, source: 'webapp', devices: payDevices, months: payMonths }),
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {

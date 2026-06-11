@@ -36,6 +36,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
+from bot import tariffs
 from bot.database import (
     db_list_devices,
     db_get_device,
@@ -43,6 +44,7 @@ from bot.database import (
     db_delete_device,
     db_rename_device,
     db_count_devices,
+    db_get_device_limit,
     db_create_otp,
     db_verify_otp,
     db_create_session,
@@ -135,6 +137,21 @@ MANUAL_PAY = {
     "owner_tg": "nikkronos",
     "rub": SUBSCRIPTION_RUB_PRICE,
 }
+
+
+def _resolve_tariff(body: dict):
+    """(devices, months) из тела запроса → запись тарифа (bot/tariffs) или None.
+
+    None = не передано/невалидно → вызывающий применяет legacy-дефолт
+    (30 дней / 5 устройств). Цена/дни/лимит берутся ТОЛЬКО из таблицы на сервере,
+    клиент шлёт лишь (devices, months).
+    """
+    try:
+        d = int(body.get("devices"))
+        m = int(body.get("months"))
+    except (TypeError, ValueError):
+        return None
+    return tariffs.get_tariff(d, m)
 
 
 def _notify_inviter_about_signup(referral_code: str) -> None:
@@ -1202,7 +1219,7 @@ def api_recovery_awg_config_by_email():
 
 
 # ── Фаза 2 B4: именованные устройства в ЛК (зеркало бот-флоу «Мои устройства») ──
-_DEVICE_CAP = 5
+# Лимит устройств — per-user по тарифу (db_get_device_limit; грандфазер/триал = 5).
 
 
 def _device_autoname_web(telegram_id: int, os_: str) -> str:
@@ -1238,7 +1255,7 @@ def api_recovery_devices():
         _u, telegram_id = auth
         devices = [{"device_id": d["device_id"], "name": d["name"], "os": d["os"]}
                    for d in db_list_devices(telegram_id)]
-        return jsonify({"ok": True, "devices": devices, "cap": _DEVICE_CAP})
+        return jsonify({"ok": True, "devices": devices, "cap": db_get_device_limit(telegram_id)})
     except Exception as e:
         logger.exception("Ошибка api/recovery/devices: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -1260,8 +1277,9 @@ def api_recovery_device_add():
             return jsonify({"error": "os must be pc/ios/android"}), 400
         if not is_amneziawg_eu1_configured():
             return jsonify({"error": "AmneziaWG не настроен на сервере."}), 503
-        if db_count_devices(telegram_id) >= _DEVICE_CAP:
-            return jsonify({"error": f"Достигнут лимит {_DEVICE_CAP} устройств."}), 409
+        cap = db_get_device_limit(telegram_id)
+        if db_count_devices(telegram_id) >= cap:
+            return jsonify({"error": f"Достигнут лимит {cap} устройств по тарифу."}), 409
         name = _device_autoname_web(telegram_id, os_)
         device_id = db_add_device(telegram_id, name, os_)
         try:
@@ -1474,6 +1492,14 @@ def api_account_info():
             "subscription_rub_price": SUBSCRIPTION_RUB_PRICE,
             "stars_monthly_price": STARS_MONTHLY_PRICE,
             "subscription_days": SUBSCRIPTION_DAYS_PER_PAYMENT,
+            "device_limit": db_get_device_limit(telegram_id),
+            # Тарифная сетка (единый источник bot/tariffs) — ЛК рендерит из неё,
+            # цены на клиенте не хардкодим.
+            "tariffs": [
+                {"devices": dd, "months": mm, "days": tt["days"],
+                 "price_rub": tt["price_rub"], "price_stars": tt["price_stars"]}
+                for (dd, mm), tt in tariffs.TARIFFS.items()
+            ],
             "referral_code": code,
             "referral_link_path": f"/recovery?ref={code}" if code else None,
             "invited_count": db_count_referrals(code) if code else 0,
@@ -1530,6 +1556,13 @@ def api_billing_create_stars_invoice():
             return err
         _row, telegram_id = auth
         recurring = bool(body.get("recurring", False))
+        # Тариф из тела (devices, months). recurring (авто-продление) — только
+        # помесячно (subscription_period=30д), поэтому форсим months=1.
+        _t = _resolve_tariff({"devices": body.get("devices"), "months": 1} if recurring else body)
+        if _t:
+            inv_days, inv_stars, inv_dev = _t["days"], _t["price_stars"], _t["device_limit"]
+        else:
+            inv_days, inv_stars, inv_dev = SUBSCRIPTION_DAYS_PER_PAYMENT, STARS_MONTHLY_PRICE, 5
 
         bot_token = getattr(config, "bot_token", None) if config else None
         if not bot_token:
@@ -1538,17 +1571,17 @@ def api_billing_create_stars_invoice():
         # Payload — самоидентифицируется в successful_payment-хендлере бота.
         # Префикс stars_sub один и тот же для one-time и recurring: хендлер всегда
         # продлевает на N дней из payload, что корректно и для авто-продления.
-        payload = f"stars_sub:{telegram_id}:{SUBSCRIPTION_DAYS_PER_PAYMENT}:{int(time.time())}"
+        payload = f"stars_sub:{telegram_id}:{inv_days}:{inv_dev}:{int(time.time())}"
 
         api_body_dict = {
             "title": "VPN Kronos — подписка" + (" (авто-продление)" if recurring else ""),
             "description": (
-                f"Доступ на {SUBSCRIPTION_DAYS_PER_PAYMENT} дней"
+                f"Доступ на {inv_days} дней, {inv_dev} устройств"
                 + (", обновляется автоматически каждый месяц" if recurring else "")
             ),
             "payload": payload,
             "currency": "XTR",
-            "prices": [{"label": f"{SUBSCRIPTION_DAYS_PER_PAYMENT} дней", "amount": STARS_MONTHLY_PRICE}],
+            "prices": [{"label": f"{inv_days} дней · {inv_dev} устр.", "amount": inv_stars}],
         }
         if recurring:
             # Bot API 8.0: subscription_period=2592000 (30 дней) → нативный recurring биллинг.
@@ -1574,8 +1607,9 @@ def api_billing_create_stars_invoice():
         return jsonify({
             "ok": True,
             "invoice_link": invoice_link,
-            "amount_stars": STARS_MONTHLY_PRICE,
-            "days": SUBSCRIPTION_DAYS_PER_PAYMENT,
+            "amount_stars": inv_stars,
+            "days": inv_days,
+            "device_limit": inv_dev,
             "recurring": recurring,
         })
     except Exception as e:
@@ -1600,6 +1634,11 @@ def api_billing_claim_payment():
             return err
         row, telegram_id = auth
         source = (body.get("source") or "webapp").strip()[:32]
+        _t = _resolve_tariff(body)
+        if _t:
+            cl_days, cl_dev, cl_price = _t["days"], _t["device_limit"], _t["price_rub"]
+        else:
+            cl_days, cl_dev, cl_price = SUBSCRIPTION_DAYS_PER_PAYMENT, 5, SUBSCRIPTION_RUB_PRICE
 
         if not ADMIN_ID:
             return jsonify({"error": "ADMIN_TELEGRAM_ID не настроен"}), 503
@@ -1611,8 +1650,9 @@ def api_billing_claim_payment():
         existing = db_get_pending_claim(telegram_id)
         claim_id = db_create_payment_claim(
             telegram_id,
-            days=SUBSCRIPTION_DAYS_PER_PAYMENT,
+            days=cl_days,
             source=source,
+            device_limit=cl_dev,
         )
         if not claim_id:
             return jsonify({"error": "Не удалось создать заявку"}), 500
@@ -1632,16 +1672,16 @@ def api_billing_claim_payment():
         else:
             status_line = "Подписка неактивна"
         text = (
-            f"💳 <b>Новая оплата — {SUBSCRIPTION_DAYS_PER_PAYMENT} дней</b>\n\n"
+            f"💳 <b>Новая оплата — {cl_dev} устр., {cl_days // 30} мес ({cl_price} ₽)</b>\n\n"
             f"👤 @{username} (id: <code>{telegram_id}</code>)\n"
             f"📧 {email}\n"
             f"📅 Сейчас: {status_line}\n"
-            f"🪵 Источник: {source}"
+            f"🪵 Источник: {source} · +{cl_days} дн"
             + ("\n♻️ Переотправка существующей заявки" if reused else "")
         )
         inline_keyboard = {
             "inline_keyboard": [[
-                {"text": f"✅ Подтвердить +{SUBSCRIPTION_DAYS_PER_PAYMENT} дн",
+                {"text": f"✅ Подтвердить +{cl_days} дн · {cl_dev} устр.",
                  "callback_data": f"claim_approve:{claim_id}"},
                 {"text": "❌ Отклонить",
                  "callback_data": f"claim_decline:{claim_id}"},
@@ -1729,6 +1769,13 @@ _ADMIN_CREDIT_TEMPLATE = """<!DOCTYPE html>
   <label>Дней продления</label>
   <input type="number" name="days" value="{{ form.days or 30 }}" min="1" max="3650" required>
 
+  <label>Лимит устройств <span class="hint">(тариф; «не менять» сохранит текущий)</span></label>
+  <select name="device_limit">
+    <option value="" {% if not form.device_limit %}selected{% endif %}>(не менять)</option>
+    <option value="3" {% if form.device_limit == '3' %}selected{% endif %}>3 устройства</option>
+    <option value="5" {% if form.device_limit == '5' %}selected{% endif %}>5 устройств</option>
+  </select>
+
   <label>Сумма оплаты</label>
   <input type="number" name="amount" step="0.01" value="{{ form.amount or 200 }}" required>
 
@@ -1787,6 +1834,7 @@ def admin_credit():
             "email": (request.form.get("email") or "").strip().lower(),
             "telegram_id": (request.form.get("telegram_id") or "").strip(),
             "days": (request.form.get("days") or "").strip(),
+            "device_limit": (request.form.get("device_limit") or "").strip(),
             "amount": (request.form.get("amount") or "").strip(),
             "currency": (request.form.get("currency") or "RUB").strip(),
             "provider": (request.form.get("provider") or "manual_sbp").strip(),
@@ -1826,6 +1874,15 @@ def admin_credit():
                 amount = float(form["amount"])
             except ValueError:
                 raise ValueError("Сумма должна быть числом")
+            # device_limit опционален: пусто → None (не менять текущий лимит).
+            dev_limit = None
+            if form["device_limit"]:
+                try:
+                    dev_limit = int(form["device_limit"])
+                    if dev_limit not in (3, 5):
+                        raise ValueError
+                except ValueError:
+                    raise ValueError("Лимит устройств: 3 или 5")
 
             # Идемпотентность по external_id
             if form["external_id"]:
@@ -1848,8 +1905,10 @@ def admin_credit():
                 days=days,
                 status="succeeded",
             )
-            # 2) Продление подписки
-            new_exp = db_extend_subscription(telegram_id, days=days, plan="paid", status="active")
+            # 2) Продление подписки (+ device_limit, если задан в форме)
+            new_exp = db_extend_subscription(
+                telegram_id, days=days, plan="paid", status="active", device_limit=dev_limit,
+            )
             # 2a) Auto-restore (enforcement gap hook): AWG + VLESS soft-restore.
             restored_awg = []
             restored_vless = False
