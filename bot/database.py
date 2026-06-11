@@ -2129,6 +2129,13 @@ def db_create_payment_claim(
     _ensure_init()
     existing = db_get_pending_claim(telegram_id)
     if existing:
+        # Уже есть pending — обновляем тариф (последний выбор юзера побеждает),
+        # не плодим дубли. id сохраняется → кнопки approve у владельца валидны.
+        with _conn() as con:
+            con.execute(
+                "UPDATE payment_claims SET days = ?, device_limit = ? WHERE id = ?",
+                (days, device_limit, int(existing["id"])),
+            )
         return int(existing["id"])
     with _conn() as con:
         cur = con.execute(

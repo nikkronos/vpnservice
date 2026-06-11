@@ -14,6 +14,7 @@ from .config import (
     get_effective_mtproto_proxy_link,
     load_config,
 )
+from . import tariffs
 from .database import (
     db_list_devices,
     db_get_device,
@@ -2953,6 +2954,16 @@ def main() -> None:
                 days = int(parts[2])
             except ValueError:
                 days = 30
+            # device_limit (тариф 3/5) — в новом payload это parts[3]
+            # (stars_sub:tid:days:device_limit:ts). Старый формат (4 части,
+            # stars_sub:tid:days:ts) → дефолт 5.
+            device_limit = 5
+            if len(parts) >= 5:
+                try:
+                    _dl = int(parts[3])
+                    device_limit = _dl if _dl in (3, 5) else 5
+                except ValueError:
+                    device_limit = 5
 
             # Идемпотентность: если уже обрабатывали этот charge_id — выходим
             if charge_id and db_find_payment_by_external_id(charge_id):
@@ -2966,11 +2977,14 @@ def main() -> None:
                 currency=currency,
                 telegram_id=tid,
                 external_id=charge_id,
-                plan="monthly",
+                plan=f"stars_{device_limit}dev",
                 days=days,
                 status="succeeded",
             )
-            new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            new_exp = db_extend_subscription(
+                tid, days=days, plan=f"stars_{device_limit}dev",
+                status="active", device_limit=device_limit,
+            )
             logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
@@ -3054,6 +3068,11 @@ def main() -> None:
 
         tid = int(claim["telegram_id"])
         days = int(claim.get("days") or 30)
+        dev_limit = int(claim.get("device_limit") or 5)
+        _months = 3 if days >= 90 else 1
+        _tariff = tariffs.get_tariff(dev_limit, _months)
+        _price = float(_tariff["price_rub"]) if _tariff else 200.0
+        _plan = f"{dev_limit}dev_{_months}m"
         user_row = db_find_user_by_telegram_id(tid) or {}
         uname = user_row.get("username") or "—"
         email = user_row.get("email") or "—"
@@ -3067,17 +3086,19 @@ def main() -> None:
             try:
                 db_record_payment(
                     provider="manual",
-                    amount=200.0,
+                    amount=_price,
                     currency="RUB",
                     telegram_id=tid,
                     external_id=f"claim:{claim_id}",
-                    plan="monthly",
+                    plan=_plan,
                     days=days,
                     status="succeeded",
                 )
             except Exception as e:
                 logger.warning("db_record_payment failed for claim %s: %s", claim_id, e)
-            new_exp = db_extend_subscription(tid, days=days, plan="monthly", status="active")
+            new_exp = db_extend_subscription(
+                tid, days=days, plan=_plan, status="active", device_limit=dev_limit,
+            )
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
             inviter_tid = None
@@ -3172,19 +3193,29 @@ def main() -> None:
             return
 
     # ── Donation-flow: «Я оплатил» как inline-кнопка в ботовском payment-меню ─
-    @bot.callback_query_handler(func=lambda call: call.data == "pay_claim")
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("pay_claim"))
     def callback_pay_claim(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
         if not call.from_user:
             return
         tid = call.from_user.id
+        # Тариф из callback: pay_claim:{devices}:{months}. Без суффикса — 5 устр./1 мес.
+        _d, _m = 5, 1
+        _parts = (call.data or "").split(":")
+        if len(_parts) == 3:
+            try:
+                _d, _m = int(_parts[1]), int(_parts[2])
+            except ValueError:
+                _d, _m = 5, 1
+        _t = tariffs.get_tariff(_d, _m) or tariffs.get_tariff(5, 1)
+        _days, _dev_limit, _price = _t["days"], _t["device_limit"], _t["price_rub"]
         # Проверим, что юзер вообще зарегистрирован
         user_row = db_find_user_by_telegram_id(tid)
         if not user_row:
             bot.send_message(call.message.chat.id, "Сначала зарегистрируйся через /start.")
             return
         existing = db_get_pending_claim(tid)
-        claim_id = db_create_payment_claim(tid, days=30, source="bot")
+        claim_id = db_create_payment_claim(tid, days=_days, source="bot", device_limit=_dev_limit)
         if not claim_id:
             bot.send_message(call.message.chat.id, "Не удалось создать заявку. Напиши @nikkronos.")
             return
@@ -3202,16 +3233,19 @@ def main() -> None:
         uname = user_row.get("username") or "—"
         email = user_row.get("email") or "—"
         text = (
-            f"💳 <b>Новая оплата — 30 дней</b>\n\n"
+            f"💳 <b>Новая оплата — {_dev_limit} устр., {_m} мес ({_price} ₽)</b>\n\n"
             f"👤 @{uname} (id: <code>{tid}</code>)\n"
             f"📧 {email}\n"
             f"📅 Сейчас: {status_line}\n"
-            f"🪵 Источник: bot"
+            f"🪵 Источник: bot · +{_days} дн"
             + ("\n♻️ Переотправка существующей заявки" if existing else "")
         )
         markup = types.InlineKeyboardMarkup()
         markup.add(
-            types.InlineKeyboardButton("✅ Подтвердить +30 дн", callback_data=f"claim_approve:{claim_id}"),
+            types.InlineKeyboardButton(
+                f"✅ Подтвердить +{_days} дн · {_dev_limit} устр.",
+                callback_data=f"claim_approve:{claim_id}",
+            ),
             types.InlineKeyboardButton("❌ Отклонить", callback_data=f"claim_decline:{claim_id}"),
         )
         try:
@@ -3304,25 +3338,80 @@ def main() -> None:
             disable_web_page_preview=True,
         )
 
-    # ── Donation-flow: показать реквизиты + кнопка «Я оплатил» в боте ─────────
+    # ── Donation-flow: выбор тарифа (устройства → срок) → реквизиты ───────────
+    def _pay_devices_kb() -> types.InlineKeyboardMarkup:
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            types.InlineKeyboardButton("📱 3 устройства", callback_data="paytar_dev:3"),
+            types.InlineKeyboardButton("📱 5 устройств", callback_data="paytar_dev:5"),
+        )
+        kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        return kb
+
     @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
     def callback_pay_show(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "💳 <b>Оформить подписку</b>\n\n"
+            "Шаг 1 — сколько устройств подключаешь?\n"
+            "3 — дешевле; 5 — для нескольких гаджетов или семьи.",
+            parse_mode="HTML", reply_markup=_pay_devices_kb(),
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("paytar_dev:"))
+    def callback_pay_devices(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        try:
+            d = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        t1, t3 = tariffs.get_tariff(d, 1), tariffs.get_tariff(d, 3)
+        if not t1 or not t3:
+            return
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(
+            types.InlineKeyboardButton(f"1 месяц — {t1['price_rub']} ₽", callback_data=f"paytar:{d}:1"),
+            types.InlineKeyboardButton(
+                f"3 месяца — {t3['price_rub']} ₽ ({t3['price_rub'] // 3} ₽/мес)",
+                callback_data=f"paytar:{d}:3"),
+        )
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data="pay_show"))
+        bot.send_message(
+            call.message.chat.id,
+            f"💳 <b>{d} устройств</b>\n\nШаг 2 — на какой срок? (3 месяца выгоднее)",
+            parse_mode="HTML", reply_markup=kb,
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("paytar:"))
+    def callback_pay_tariff(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        try:
+            _, ds, ms = call.data.split(":")
+            d, m = int(ds), int(ms)
+        except (ValueError, IndexError):
+            return
+        t = tariffs.get_tariff(d, m)
+        if not t:
+            return
+        price = t["price_rub"]
+        per = "" if m == 1 else f" ({price // m} ₽/мес)"
         text = (
-            "💳 <b>Продлить подписку — 30 дней</b>\n"
-            "Цена: <b>200 ₽</b>\n\n"
+            f"💳 <b>{d} устройств · {m} мес</b>\n"
+            f"Цена: <b>{price} ₽</b>{per} · доступ на {t['days']} дней\n\n"
             "Переведи на Т-Банк любым способом:\n"
             "📱 СБП по телефону: <code>+79213032918</code>\n"
             "💳 Карта: <code>2200 7007 6046 4759</code>\n\n"
-            "После перевода нажми кнопку — владелец проверит и зачислит подписку."
+            f"⚠️ Переведи <b>ровно {price} ₽</b>, затем нажми кнопку — владелец проверит и зачислит."
         )
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("✅ Я перевёл деньги", callback_data="pay_claim"))
-        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton(f"✅ Я перевёл {price} ₽", callback_data=f"pay_claim:{d}:{m}"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data=f"paytar_dev:{d}"))
+        kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         try:
-            bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=kb)
         except Exception as e:
-            logger.exception("pay_show failed: %s", e)
+            logger.exception("pay_tariff failed: %s", e)
 
     # ── Support: Variant B — двусторонняя переписка через бот ──────────────────
 
