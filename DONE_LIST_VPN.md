@@ -1,5 +1,25 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-11 — fail2ban на main/yc/yc2 (подавление SSH brute-force)
+
+Закрывает follow-up из записи «yc2 ночной false-FAIL» ниже: точечный SSH-ретрай (`645cb63`) лечил симптом, а сам ночной brute-force (76 sshd-событий/5 мин: socksuser/obi/root с разных IP) оставался — шум в логах, нагрузка, риск дропов мониторинга. fail2ban на серверах не стоял.
+
+**Сделано (canary yc2 → yc → main, согласовано с владельцем):**
+- `apt install fail2ban python3-systemd` на **yc2, yc, main** (все Ubuntu 24.04, fail2ban 1.0.2). **Fornex НЕ трогали** — он jump/мониторинг-хост, его IP в whitelist.
+- `/etc/fail2ban/jail.local` (идентичен на трёх): `[sshd] enabled`, `backend=systemd`, `maxretry=5`, `findtime=10m`, `bantime=1h`, **`ignoreip = 127.0.0.1/8 ::1 185.21.8.91`**. `185.21.8.91 = Fornex`: health_check / ip_usage_watcher / sync_xray_users / vless_summary_accounting ходят по SSH с Fornex на yc/yc2/main каждые 5–15 мин → без whitelist fail2ban забанил бы мониторинг = каскадный сбой.
+- **Готча Ubuntu:** systemd-юнит SSH называется `ssh.service`, не `sshd.service` → стоковый sshd-фильтр ловил бы **0 событий**. Пин: `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`.
+- `systemctl enable --now fail2ban` на трёх.
+
+**Верификация (на каждом):** jail `active`+`enabled`; `ignoreip` содержит Fornex; `fail2ban-regex` против живого журнала ловит реальные события (yc2 95882 / yc 2598 / main 53419 matched → фильтр реально работает, готча закрыта); тест-бан `203.0.113.66` (TEST-NET) вставляет правило в **nft** (banaction nft-backend на 24.04; на **yc сосуществует с активным ufw** — отдельная таблица `inet f2b-table`) → снят. **main (`PasswordAuthentication yes` + `PermitRootLogin yes`, активная атака):** fail2ban забанил **7 реальных IP за секунды** (вкл. `43.99.57.203` из журнала диагностики). **Fornex НИ НА ОДНОМ не забанен**; свежий Fornex→host SSH работает.
+
+**health_check (`scripts/health_check.py`):** `+("systemd","fail2ban.service")` в `REMOTE_CHECK_PLAN` для main/yc/yc2 (29→32 проверки), поверх `645cb63` (`_run_remote_resilient` сохранён). Задеплоен на Fornex (бэкап `scripts/health_check.py.bak.20260611-110259`), AST + `--dry-run` зелёные: `main/yc/yc2:fail2ban.service OK`. Теперь алертит, если fail2ban упадёт. Cron `*/15` подхватит сам (скрипт, не демон).
+
+**НЕ делали (по решению владельца):** MaxStartups оставили дефолтным (`10:30:100`) — минимальное изменение; fail2ban косвенно снижает флуд.
+
+**Открытые follow-up:** (1) Fornex без fail2ban — jump-хост, заходишь с динамического домашнего IP (не в whitelist) → риск самобана; решать отдельно. (2) main: `PasswordAuthentication`+root-login включены — кандидат на key-only хардненг, но там 1 legacy WG-user → отдельной задачей.
+
+---
+
 ## 2026-06-11 — Фаза 2 B4: устройства в ЛК (фронт) НА ПРОДЕ + rename → Фаза 2 B ЗАВЕРШЕНА
 
 Закрыт последний кусок per-device — те же «Мои устройства» в веб-ЛК (зеркало бот-флоу). Бэкенд B4 (4 эндпоинта) лежал на ветке `feature/per-device-lk` с 06-10; добавлен 5-й (rename) + весь фронт.
