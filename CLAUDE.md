@@ -2,7 +2,7 @@
 
 Репозиторий: `nikkronos/vpnservice` | Путь: `Projects/In progress/VPN/` (переехал из `Projects/VPN/` 2026-06-09)
 
-**Бренд (с 2026-05-25):** Kronos / VPN Kronos. Бот `@vpnkronos_bot` (display `vpnkronos`). Домен `supportkronos.online` (нейтральный, маскировка под support-портал). Канал `@vforfriends` legacy. **Цена**: 200 ₽/мес. Текущие 34 юзера — на старом боте, миграция broadcast'ом владельца после Phase 3b.
+**Бренд (с 2026-05-25):** Kronos / VPN Kronos. Бот `@vpnkronos_bot` (display `vpnkronos`). Домен `supportkronos.online` (нейтральный, маскировка под support-портал). Канал `@vforfriends` legacy. **Тарифы (с 2026-06-11):** 3 устр. — 199 ₽/мес или 449 ₽/3мес; 5 устр. — 249 ₽/мес или 599 ₽/3мес (Stars 150/200/350/450 ⭐). Единый источник — `bot/tariffs.py`; cap устройств по тарифу через `users.device_limit` (3/5; грандфазер существующих + триал = 5). 2-шаговый выбор (устройства→срок) в боте и ЛК.
 
 ---
 
@@ -132,7 +132,7 @@ scripts/
 ### Ключевые концепции
 
 - **server_id:** `eu1` (AmneziaWG, Docker), логически был `eu2` — нормализован в `eu1` через `storage.py`
-- **peer key формат (с 2026-06-10, Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` — composite-PK таблицы `peers`. Раньше был `platform` (per-OS), сменён на **именованные устройства** (`devices` table: device_id/telegram_id/name/os) — фикс коллизии iPad/iPhone (фидбэк Ани) + база под «семейный» тариф. **`os`** (`pc`/`ios`/`android`) — свойство устройства, формат доставки. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут). **Backward-compat shim в `storage.py`:** функции принимают `platform=` (legacy) и мапят на device с нужным os; `Peer.platform` — алиас `Peer.os`. Поэтому бот/ЛК/wireguard_peers работают без правок. **UX «Мои устройства» НА ПРОДЕ в боте (B3, 06-10) И в ЛК (B4, 06-11): список/добавить/обновить/удалить/переименовать, cap 5.** ЛК-эндпоинты: `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Фаза 2 B завершена.
+- **peer key формат (с 2026-06-10, Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` — composite-PK таблицы `peers`. Раньше был `platform` (per-OS), сменён на **именованные устройства** (`devices` table: device_id/telegram_id/name/os) — фикс коллизии iPad/iPhone (фидбэк Ани) + база под «семейный» тариф. **`os`** (`pc`/`ios`/`android`) — свойство устройства, формат доставки. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут). **Backward-compat shim в `storage.py`:** функции принимают `platform=` (legacy) и мапят на device с нужным os; `Peer.platform` — алиас `Peer.os`. Поэтому бот/ЛК/wireguard_peers работают без правок. **UX «Мои устройства» НА ПРОДЕ в боте (B3, 06-10) И в ЛК (B4, 06-11): список/добавить/обновить/удалить/переименовать. cap по тарифу — `db_get_device_limit` (3/5; грандфазер/триал=5), не хардкод.** ЛК-эндпоинты: `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Фаза 2 B завершена.
 - **Платформы/os:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
 - **device-хелперы** (`bot/database.py`): `db_list_devices`/`db_get_device`/`db_add_device`/`db_rename_device`/`db_delete_device`/`db_count_devices`.
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`

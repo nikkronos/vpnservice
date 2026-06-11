@@ -1,5 +1,27 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-11 — Тарифы 199/249/449/599 НА ПРОДЕ (3/5 устр. × 1/3 мес)
+
+Бизнес-приоритет #1 из ROADMAP. 2-шаговый выбор (устройства → срок), cap устройств привязан к тарифу. Ветка `feature/tariffs` → main (`51292f3`). Смоук владельца (бот + ЛК) ок.
+
+**Тарифная сетка** (единый источник `bot/tariffs.py`; цена считается на сервере, клиент шлёт только devices+months):
+
+| Устройств | 1 мес | 3 мес |
+|---|---|---|
+| 3 | 199 ₽ / 150 ⭐ | 449 ₽ / 350 ⭐ (30 дн / 90 дн) |
+| 5 | 249 ₽ / 200 ⭐ | 599 ₽ / 450 ⭐ |
+
+- **DB:** `users.device_limit` + `payment_claims.device_limit` (миграции, DEFAULT 5 = **грандфазер** существующих + триал; на проде применилось — все 58 юзеров = 5). `db_extend_subscription`/`db_create_payment_claim` несут device_limit; `db_get_device_limit`.
+- **Cap по тарифу:** бот + ЛК читают `db_get_device_limit` (хардкод 5 убран). Существующим = 5; при покупке 3-тарифа лишние устройства **не удаляются**, только блок добавления сверх лимита (решение владельца).
+- **Бот:** `pay_show` → выбор устройств (3/5) → срок (1/3) → экран тарифа + реквизиты + «Я перевёл {₽}». Тариф несётся через claim → approve проставляет device_limit+дни+цену. Stars `successful_payment` читает device_limit из payload (`stars_sub:tid:days:dl:ts`).
+- **ЛК (`recovery.js`):** 2-шаговый picker в payBlock (перерисовка цен), Stars one-time + авто (авто только для 1 мес — Stars subscription = 30 дн), ручная оплата несёт тариф. Цены с бэка (`/api/account/info` → `tariffs`). `?v=20260611b`.
+- **web:** `create-stars-invoice`/`claim-payment` принимают (devices, months), валидируют по таблице (`_resolve_tariff`). `/admin/credit` — поле «лимит устройств» (3/5/не менять).
+- **Деплой:** бэкап кода (`*.bak.20260611-170210`) + **БД** (`vpn.db.bak.tariffs.20260611-140150`) → scp 6 файлов → AST+import-чеки → restart bot+web (active, журнал чист) → миграция применена → роуты 401 (живы) → health 0 FAIL.
+
+**Открыто (мелочи):** бот-админ-кредит (`callback_admin_credit_user`) device_limit не трогает (COALESCE сохраняет; веб-`/admin/credit` поле есть). Триал = 5 устр. (грандфазер-дефолт).
+
+---
+
 ## 2026-06-11 — VLESS enforcement-лаг закрыт (sync ежечасно + no-change guard)
 
 **Проблема (вскрыта алертом `vless_config_consistency` 11:00 UTC, diff 26):** `enforce_expired` режет AWG ежечасно, а `sync_xray_users` убирал истёкшие VLESS-UUID лишь раз в 6 ч (`7 */6`). → истёкший юзер до ~6 ч сохранял **VLESS (главный путь)** после grace = enforcement-лик; плюс в окне grace→sync БД и Xray-config законно расходятся на размер когорты → ложные FAIL-алерты (сегодня когорта 26 истёкших триалов, «DOWN 74 мин», само-вылечилось 12:07-синком).

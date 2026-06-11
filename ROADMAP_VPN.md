@@ -1,27 +1,27 @@
 # ROADMAP_VPN
 
-> Последнее обновление: 2026-06-11 (**Фаза 2 B ЗАВЕРШЕНА — B4 устройства в ЛК (фронт) + rename НА ПРОДЕ**; **yc2 ночной false-FAIL мониторинга устранён** ретраем SSH в `vless_config_consistency` + swappiness=10; гигиена доков RULES_CURSOR→RULES). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-11.md`. Предыдущая большая: `SESSION_SUMMARY_2026-06-10.md` (yc2 в sync/health; реордер подписки Яндекс-первыми; инцидент с релеем eu1 откачен + защита; access_audit + чистка legacy; подписка/ЛК через Яндекс-фронт; per-device B1+B2+B3; iplimit-наблюдение; первые оплаты). **NB:** yc/yc2 — фронт-релеи в eu1 (`project_vpn_yc_relay_topology`), shared на eu1 не трогать вслепую; supportkronos.online фронтится через yc/yc2 socat (правило #0.1 в CLAUDE.md).
+> Последнее обновление: 2026-06-11 (вечер — большая сессия: **тарифы 199/249/449/599 (3/5 устр. × 1/3 мес) НА ПРОДЕ** + cap по тарифу; **Фаза 2 B завершена — B4 устройства в ЛК + rename**; **VLESS enforcement-лаг закрыт** (sync ежечасно + no-change guard); **yc2 ночной false-FAIL устранён** ретраем SSH + swappiness=10; **fail2ban на main/yc/yc2**; гигиена доков). Сессия: `docs/sessions/SESSION_SUMMARY_2026-06-11.md`. Предыдущая большая: `SESSION_SUMMARY_2026-06-10.md` (релей eu1; Яндекс-фронт; per-device B1+B2+B3; iplimit-наблюдение; первые оплаты). **NB:** yc/yc2 — фронт-релеи в eu1 (`project_vpn_yc_relay_topology`), shared на eu1 не трогать вслепую; supportkronos.online фронтится через yc/yc2 socat (правило #0.1 в CLAUDE.md).
 > Текущее состояние: рабочий MVP, бот переехал на `@vpnkronos_bot`, **`ONBOARDING_ENABLED=1` и `ENFORCEMENT_ENABLED=1` активны** (флаги выставлены 2026-05-28). Все каналы покрыты (Yota/Мегафон/Т2/МТС/Билайн). Donation-flow + Stars (oneshot + Subscription) работают параллельно. Support Variant B (двусторонний) активен. Реферал-программа полностью работает + auto-restore при оплате после soft-revoke (enforcement gap для AWG закрыт). Лендинг + оферта + Политика ПД + контакты — после 3 раундов юр.экспертизы, готовы к ЮKassa. Скорость: AWG ~84 Мбит/с, упор в путь RU→DE. Свежие сессии: `docs/sessions/SESSION_SUMMARY_2026-06-01.md`.
 
 ---
 
 ## ▶ СЛЕДУЮЩИЙ ЗАХОД — что делать (приоритет, для агента)
 
-Прочитай сначала `docs/sessions/SESSION_SUMMARY_2026-06-11.md` + предыдущую `SESSION_SUMMARY_2026-06-10.md` (полный контекст) + правила #0/#0.1 в CLAUDE.md (релей yc/yc2→eu1, Яндекс-фронт supportkronos.online).
+Прочитай сначала `docs/sessions/SESSION_SUMMARY_2026-06-11.md` (полный контекст) + правила #0/#0.1 в CLAUDE.md (релей yc/yc2→eu1, Яндекс-фронт supportkronos.online).
 
-1. **Тарифы 199/149** (бизнес-приоритет #1, не зависит от данных). Добавить в платёжный флоу (donation + Stars) опции **199 ₽/мес** и **447 ₽/3мес (149/мес)**. `users.plan` уже есть. **Лимит устройств по тарифу (соло 3 / семейный 5) — per-device слоты готовы в боте И в ЛК** (Фаза 2 B завершена 06-11). cap сейчас 5 хардкод — привязать к `plan`: `_DEVICE_CAP` в `bot/main.py` И в `web/app.py` (+ JS `DEVICE_CAP` в `recovery.js` — но это просто UI-подсказка, сервер решает). Enforcement шеринга — через iplimit (см. п.2). Контекст: секция «Тарифы» ниже + `docs/plan-blocking-antifraud-traffic-tariffs.md` §4.
+1. **iplimit Stage 2 — enforcement** (ждёт ~неделю данных, проверять с ~2026-06-17). Глянуть `ssh fornex "cd /opt/vpnservice && venv/bin/python scripts/ip_usage_watcher.py --report"` — распределение distinct-IP/юзер. Откалибровать порог (с запасом на мобильные сети) → мягкий enforcement (уведомление юзеру / при злостном — временный ребан через sync_xray_users-механизм). НЕ рубить вслепую. Контекст: `docs/plan-phase2-keystone-architecture.md` Часть A (Stage 2). **Связь с тарифами (06-11):** у юзеров теперь есть `device_limit` (3/5) — iplimit ловит шеринг сверх лимита.
 
-2. **iplimit Stage 2 — enforcement** (ждёт ~неделю данных, проверять с ~2026-06-17). Глянуть `ssh fornex "cd /opt/vpnservice && venv/bin/python scripts/ip_usage_watcher.py --report"` — распределение distinct-IP/юзер. Откалибровать порог (с запасом на мобильные сети) → мягкий enforcement (уведомление юзеру / при злостном — временный ребан через sync_xray_users-механизм). НЕ рубить вслепую. Контекст: `docs/plan-phase2-keystone-architecture.md` Часть A (Stage 2).
+2. **Авто-вердикт 9 eu1-shared** — прилетит владельцу в TG **сам ~2026-06-16** (`eu1_share_audit_verdict.py`). Если «мертвы» → `sync_eu1_vless.py --no-shared --force` (релей сохранится сам) + снять аудит-обвязку (cron `23 */6` sync-eu1, `instrument_eu1_shares.py`, `eu1_share_audit_sampler.sh`, `eu1_share_audit_verdict.py`). Если «всплыл UUID» → живой юзер, мигрировать. Статус: `ssh fornex "cat /var/log/eu1-share-audit.log"`.
 
-3. **Авто-вердикт 9 eu1-shared** — прилетит владельцу в TG **сам ~2026-06-16** (`eu1_share_audit_verdict.py`). Если «мертвы» → `sync_eu1_vless.py --no-shared --force` (релей сохранится сам) + снять аудит-обвязку (cron `23 */6` sync-eu1, `instrument_eu1_shares.py`, `eu1_share_audit_sampler.sh`, `eu1_share_audit_verdict.py`). Если «всплыл UUID» → живой юзер, мигрировать. Статус: `ssh fornex "cat /var/log/eu1-share-audit.log"`.
+3. **БС-валидация Яндекс-фронта** — когда вернутся БС: проверить, доходит ли обновление подписки (`supportkronos.online:8443` теперь на Яндекс-IP). No-regret уже сделан; если режут по SNI `supportkronos.online` — следующий шаг маскировка эндпоинта. Нужен тест с устройством при активных БС.
 
-4. **fail2ban на yc/yc2/main** (follow-up из 06-11, зафлагован отдельной задачей). Ночной SSH brute-force на серверах создаёт шум и иногда роняет SSH-пробу мониторинга (точечный ретрай уже добавлен в `health_check.py`, но сам флуд остаётся). Поставить fail2ban (sshd jail). **⚠️ Критично:** whitelist Fornex-IP `185.21.8.91` в `ignoreip` — иначе забанит хост мониторинга/кронов (health_check/ip_usage_watcher/sync_xray_users ходят с Fornex) → каскадный сбой. Начать с yc2, проверить доступ, потом yc/main.
+4. **main-wg0 heavy-юзер `/5BeCINho`** (СПб, 2.6 МБ, остался после удаления Mjvdy) — вероятно «1 legacy user» из доков; оставлен. Если решим чистить main-WG legacy — поштучно (как делали).
 
-5. **БС-валидация Яндекс-фронта** — когда вернутся БС: проверить, доходит ли обновление подписки (`supportkronos.online:8443` теперь на Яндекс-IP). No-regret уже сделан; если режут по SNI `supportkronos.online` — следующий шаг маскировка эндпоинта. Нужен тест с устройством при активных БС.
-
-6. **main-wg0 heavy-юзер `/5BeCINho`** (СПб, 2.6 МБ, остался после удаления Mjvdy) — вероятно «1 legacy user» из доков; оставлен. Если решим чистить main-WG legacy — поштучно (как делали).
+5. *(опц., низкий приоритет)* **AWG endpoint-diversity детектор шеринга** — зафлагован чипом `task_7262cac0`. Семплить endpoint-IP AWG-peer'ов на eu1, ловить «один конфиг с кучи IP/городов». iplimit покрывает только VLESS; AWG-шеринг само-лимитируется WireGuard'ом → не горит.
 
 Прочее (продукт/маркетинг/инфра) — в секциях ниже по приоритетам.
+
+**Сделано 2026-06-11 (не повторять):** тарифы 199/249/449/599 ✅; Фаза 2 B (B4 ЛК) ✅; VLESS enforcement-лаг ✅; yc2 false-FAIL ✅; fail2ban на main/yc/yc2 ✅.
 
 ---
 
