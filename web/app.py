@@ -41,6 +41,7 @@ from bot.database import (
     db_get_device,
     db_add_device,
     db_delete_device,
+    db_rename_device,
     db_count_devices,
     db_create_otp,
     db_verify_otp,
@@ -1319,6 +1320,29 @@ def api_recovery_device_delete():
         return jsonify({"ok": True})
     except Exception as e:
         logger.exception("Ошибка api/recovery/device-delete: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/device-rename", methods=["POST"])
+def api_recovery_device_rename():
+    """Переименовать устройство. Тело: {token, device_id, name}. Конфиг не трогается."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        device_id = str(body.get("device_id") or "").strip()
+        name = str(body.get("name") or "").strip()[:40]
+        if not name:
+            return jsonify({"error": "Пустое имя."}), 400
+        dev = db_get_device(device_id)
+        if not dev or int(dev["telegram_id"]) != telegram_id:
+            return jsonify({"error": "Устройство не найдено."}), 404
+        db_rename_device(device_id, name)
+        return jsonify({"ok": True, "name": name})
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/device-rename: %s", e)
         return jsonify({"error": str(e)}), 500
 
 

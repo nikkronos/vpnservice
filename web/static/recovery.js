@@ -13,6 +13,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepOperator     = document.getElementById('stepOperator');
   const stepMobileResult = document.getElementById('stepMobileResult');
   const stepProxy        = document.getElementById('stepProxy');
+  const stepDevices       = document.getElementById('stepDevices');
+  const stepDeviceResult  = document.getElementById('stepDeviceResult');
+  const devicesList       = document.getElementById('devicesList');
+  const deviceResult      = document.getElementById('deviceResult');
+  const deviceResultTitle = document.getElementById('deviceResultTitle');
   const awgResultTitle    = document.getElementById('awgResultTitle');
   const mobileResultTitle = document.getElementById('mobileResultTitle');
 
@@ -157,6 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const allSteps = [
     stepEmail, stepOtp, stepMenu,
     stepBilling, stepManualPay, stepConnect, stepReferral, stepSettings,
+    stepDevices, stepDeviceResult,
     stepPlatform, stepAwgResult, stepOperator, stepMobileResult, stepProxy,
   ];
 
@@ -176,6 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // stepProxy теперь доступен прямо из главного меню (по запросу владельца 2026-05-27),
   // а не через stepConnect — Telegram-прокси логически независим от VPN.
   stepParent.set(stepProxy,        stepMenu);
+  stepParent.set(stepDevices,      stepMenu);
+  stepParent.set(stepDeviceResult, stepDevices);
 
   function showStep(step) {
     allSteps.forEach(s => { if (s) s.hidden = true; });
@@ -903,6 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
     connect:  stepConnect,
     referral: stepReferral,
     settings: stepSettings,
+    devices:  stepDevices,
   };
   document.querySelectorAll('[data-substep]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -912,6 +921,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!target) return;
       showStep(target);
       if (key === 'proxy') fetchProxyLink();
+      if (key === 'devices') loadDevices();
     });
   });
 
@@ -929,6 +939,301 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // В браузере — preventDefault НЕ вызывается, href сработает естественно.
     });
+  }
+
+  // ── «Мои устройства» (Фаза 2 B4 — именованные AmneziaWG-слоты) ─────────────
+  // Зеркало бот-флоу callback_devices: список / добавить / обновить / удалить /
+  // переименовать. Бэкенд: /api/recovery/devices|device-add|device-regen|
+  // device-delete|device-rename (все принимают {token}). Конфиг отдаётся тем же
+  // форматом, что awg-config-by-email → renderAwgPayload зеркалит выдачу.
+  const _osLabel = { pc: '💻 ПК', ios: '🍎 iOS', android: '🤖 Android' };
+  const DEVICE_CAP = 5;
+
+  // Рендер выданного конфига (config/qr/vpn_url) — та же логика, что в
+  // [data-platform]-флоу (android → vpn://+QR; в TG → QR+копия; браузер → файл).
+  function renderAwgPayload(container, data) {
+    const cfg = data.config || '';
+    const filename = data.filename || 'awg_eu1.conf';
+    const os = data.os || 'pc';
+    if (os === 'android' && data.vpn_url) {
+      const blockHint = (
+        'Тапни ссылку — AmneziaVPN откроет и импортирует конфиг автоматически. ' +
+        'Если приложение ещё не установлено — поставь AmneziaVPN из Google Play (amnezia.org).'
+      );
+      renderLinkBlock(container, data.vpn_url, blockHint, 'Копировать vpn://');
+      const aWrap = document.createElement('p');
+      aWrap.style.textAlign = 'center';
+      aWrap.style.marginTop = '12px';
+      const a = document.createElement('a');
+      a.href = data.vpn_url;
+      a.textContent = '👆 Открыть в AmneziaVPN';
+      a.className = 'btn-recovery';
+      a.style.display = 'inline-block';
+      aWrap.appendChild(a);
+      container.appendChild(aWrap);
+      const qrSpacer = document.createElement('div');
+      qrSpacer.style.height = '20px';
+      container.appendChild(qrSpacer);
+      renderQr(container, data.qr, 'Или сканируй QR в AmneziaVPN');
+    } else if (inTelegram) {
+      // PC / iOS в Mini App: скачивание файла не работает → QR + копия конфига.
+      const hint = document.createElement('p');
+      hint.className = 'section-hint';
+      if (os === 'ios') {
+        hint.innerHTML = '<b>iPhone / iPad:</b> поставь <b>AmneziaWG</b> из App Store → отсканируй QR ниже. Или скопируй конфиг и добавь вручную.';
+      } else {
+        hint.innerHTML = '<b>ПК:</b> поставь <b>AmneziaVPN</b> (amnezia.org) → «+» → «Импорт из буфера обмена» (скопируй конфиг ниже).';
+      }
+      container.appendChild(hint);
+      renderQr(container, data.qr, 'Сканируй QR в AmneziaWG');
+      renderLinkBlock(container, cfg, '', '📋 Скопировать конфиг');
+    } else {
+      // Браузер — обычное скачивание файла работает.
+      downloadFile(filename, cfg);
+      const done = document.createElement('p');
+      done.style.color = 'var(--green)';
+      done.textContent = 'Готово. Файл ' + filename + ' скачан.';
+      container.appendChild(done);
+      const hint = document.createElement('p');
+      hint.className = 'section-hint';
+      if (os === 'ios') {
+        hint.innerHTML = '<b>iPhone / iPad:</b> поставь <b>AmneziaWG</b> из App Store, открой файл → «Поделиться» → AmneziaWG → «Создать из файла».';
+      } else {
+        hint.innerHTML = '<b>ПК:</b> поставь <a href="https://amnezia.org" target="_blank">AmneziaVPN</a>: «+» → «Импорт из файла» → выбери <code>' + filename + '</code>.';
+      }
+      container.appendChild(hint);
+      renderQr(container, data.qr, 'Или сканируй QR в AmneziaWG');
+    }
+  }
+
+  function _devBtn(label, primary, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn-recovery' + (primary ? ' copy-primary' : ' btn-recovery-secondary');
+    b.textContent = label;
+    b.addEventListener('click', () => { haptic('light'); onClick(); });
+    return b;
+  }
+
+  // Нативный confirm: tg.showConfirm в Mini App, window.confirm в браузере.
+  function confirmAction(message, cb) {
+    if (inTelegram && tg.showConfirm) {
+      try { tg.showConfirm(message, (ok) => { if (ok) cb(); }); return; } catch (e) {}
+    }
+    if (window.confirm(message)) cb();
+  }
+
+  async function loadDevices() {
+    if (!devicesList) return;
+    devicesList.textContent = 'Загружаем…';
+    try {
+      const r = await fetch('/api/recovery/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        devicesList.textContent = 'Не удалось загрузить устройства: ' + (d.error || r.statusText);
+        return;
+      }
+      renderDevicesList(d.devices || [], d.cap || DEVICE_CAP);
+    } catch (e) {
+      devicesList.textContent = 'Сетевая ошибка при загрузке устройств.';
+    }
+  }
+
+  function renderDevicesList(devices, cap) {
+    devicesList.innerHTML = '';
+    if (!devices.length) {
+      const p = document.createElement('p');
+      p.className = 'section-hint';
+      p.style.marginTop = '0';
+      p.textContent = 'Пока нет устройств. Добавь первое — каждому девайсу свой независимый конфиг.';
+      devicesList.appendChild(p);
+    } else {
+      const count = document.createElement('p');
+      count.className = 'section-hint';
+      count.style.marginTop = '0';
+      count.textContent = `Устройств: ${devices.length} из ${cap}.`;
+      devicesList.appendChild(count);
+      devices.forEach((dev) => devicesList.appendChild(renderDeviceRow(dev)));
+    }
+    if (devices.length < cap) {
+      const add = _devBtn('➕ Добавить устройство', true, showAddDeviceChooser);
+      add.style.marginTop = '12px';
+      devicesList.appendChild(add);
+    } else {
+      const lim = document.createElement('p');
+      lim.className = 'section-hint';
+      lim.textContent = `Достигнут лимит ${cap} устройств. Удали лишнее, чтобы добавить новое.`;
+      devicesList.appendChild(lim);
+    }
+  }
+
+  function renderDeviceRow(dev) {
+    const row = document.createElement('div');
+    row.style.cssText = 'border-top:1px solid rgba(255,255,255,0.1); padding:10px 0;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600; margin-bottom:6px;';
+    title.textContent = `${_osLabel[dev.os] || dev.os} · ${dev.name}`;
+    row.appendChild(title);
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+    [
+      _devBtn('✏️ Имя', false, () => renameDevice(dev)),
+      _devBtn('🔄 Обновить', false, () => regenDevice(dev)),
+      _devBtn('🗑 Удалить', false, () => deleteDevice(dev)),
+    ].forEach((b) => {
+      b.style.cssText += 'flex:1 1 auto; min-width:96px; margin-top:0; padding:9px 6px; font-size:0.85em;';
+      actions.appendChild(b);
+    });
+    row.appendChild(actions);
+    return row;
+  }
+
+  function showAddDeviceChooser() {
+    devicesList.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'section-hint';
+    p.style.marginTop = '0';
+    p.textContent = 'Тип нового устройства (определяет формат конфига):';
+    devicesList.appendChild(p);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap;';
+    [['pc', '💻 ПК'], ['ios', '🍎 iOS'], ['android', '🤖 Android']].forEach(([os, label]) => {
+      const b = _devBtn(label, true, () => addDevice(os));
+      b.style.cssText += 'flex:1 1 auto; min-width:96px;';
+      wrap.appendChild(b);
+    });
+    devicesList.appendChild(wrap);
+    const cancel = _devBtn('« Отмена', false, loadDevices);
+    cancel.style.marginTop = '10px';
+    devicesList.appendChild(cancel);
+  }
+
+  function _showDeviceResult(title, statusText) {
+    if (deviceResultTitle) deviceResultTitle.textContent = title;
+    showStep(stepDeviceResult);
+    deviceResult.innerHTML = '';
+    if (statusText) {
+      const s = document.createElement('p');
+      s.style.color = 'var(--green)';
+      s.textContent = statusText;
+      deviceResult.appendChild(s);
+    }
+  }
+
+  function _deviceResultError(msg) {
+    deviceResult.innerHTML = '';
+    const e = document.createElement('p');
+    e.style.color = 'var(--red)';
+    e.textContent = 'Ошибка: ' + msg;
+    deviceResult.appendChild(e);
+  }
+
+  async function addDevice(os) {
+    _showDeviceResult('📲 Новое устройство', 'Создаём конфиг…');
+    try {
+      const r = await fetch('/api/recovery/device-add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken, os }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { _deviceResultError(d.error || r.statusText); haptic('error'); return; }
+      haptic('success');
+      deviceResult.innerHTML = '';
+      const ok = document.createElement('p');
+      ok.style.color = 'var(--green)';
+      ok.textContent = `✅ Добавлено устройство «${d.name || ''}». Импортируй конфиг в AmneziaWG / AmneziaVPN.`;
+      deviceResult.appendChild(ok);
+      renderAwgPayload(deviceResult, d);
+      loadDevices();  // обновить скрытый список к моменту «« Назад»
+    } catch (e) {
+      _deviceResultError((e && e.message) || e);
+    }
+  }
+
+  async function regenDevice(dev) {
+    _showDeviceResult(`🔄 ${dev.name}`, 'Пересоздаём конфиг…');
+    try {
+      const r = await fetch('/api/recovery/device-regen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: sessionToken, device_id: dev.device_id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { _deviceResultError(d.error || r.statusText); haptic('error'); return; }
+      haptic('success');
+      deviceResult.innerHTML = '';
+      const ok = document.createElement('p');
+      ok.style.color = 'var(--green)';
+      ok.textContent = `🔄 Конфиг «${dev.name}» пересоздан. Старый перестал работать — импортируй новый.`;
+      deviceResult.appendChild(ok);
+      renderAwgPayload(deviceResult, d);
+      loadDevices();
+    } catch (e) {
+      _deviceResultError((e && e.message) || e);
+    }
+  }
+
+  function deleteDevice(dev) {
+    confirmAction(`Удалить устройство «${dev.name}»? Его конфиг перестанет работать.`, async () => {
+      try {
+        const r = await fetch('/api/recovery/device-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, device_id: dev.device_id }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { notify('Не удалось удалить: ' + (d.error || r.statusText)); return; }
+        haptic('success');
+        loadDevices();
+      } catch (e) {
+        notify('Сетевая ошибка при удалении.');
+      }
+    });
+  }
+
+  function renameDevice(dev) {
+    // Inline-форма (window.prompt недоступен в TG Mini App).
+    devicesList.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'section-hint';
+    p.style.marginTop = '0';
+    p.textContent = `Новое имя для «${dev.name}»:`;
+    devicesList.appendChild(p);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 40;
+    input.value = dev.name;
+    input.style.cssText = 'width:100%; box-sizing:border-box; padding:10px; margin-bottom:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:inherit; font-size:1em;';
+    devicesList.appendChild(input);
+    const save = _devBtn('💾 Сохранить', true, async () => {
+      const name = (input.value || '').trim().slice(0, 40);
+      if (!name) { notify('Имя не может быть пустым.'); return; }
+      save.disabled = true;
+      try {
+        const r = await fetch('/api/recovery/device-rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: sessionToken, device_id: dev.device_id, name }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { notify('Не удалось переименовать: ' + (d.error || r.statusText)); save.disabled = false; return; }
+        haptic('success');
+        loadDevices();
+      } catch (e) {
+        notify('Сетевая ошибка при переименовании.');
+        save.disabled = false;
+      }
+    });
+    devicesList.appendChild(save);
+    const cancel = _devBtn('« Отмена', false, loadDevices);
+    cancel.style.marginTop = '8px';
+    devicesList.appendChild(cancel);
+    try { input.focus(); } catch (e) {}
   }
 
   // ── Резервные конфиги: выбор канала (в stepConnect) — только VPN-каналы.
