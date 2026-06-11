@@ -147,6 +147,34 @@ def _run_remote(host: str, remote_cmd: str, timeout: int = 15) -> subprocess.Com
     return subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout)
 
 
+def _run_remote_resilient(
+    host: str, remote_cmd: str, timeout: int = 15,
+    attempts: int = 3, backoff: float = 2.0,
+) -> subprocess.CompletedProcess:
+    """`_run_remote` с ретраем транзиентных SSH-сбоев (rc=255 / timeout).
+
+    Ночью yc/yc2 ловят SSH brute-force флуд (fail2ban не стоит); sshd упирается
+    в MaxStartups и отдельный коннект отбивается с rc=255 → false-FAIL чека
+    `vless_config_consistency` (Xray при этом обслуживает, юзеры не отваливаются —
+    инцидент 2026-06-11 02:00 UTC). Ретрай на 255/timeout это гасит; реальные
+    ошибки команды (rc!=0 и !=255) не маскируются — возвращаются как есть.
+    Всегда возвращает CompletedProcess (на исчерпанном timeout — синтетический rc=255).
+    """
+    last: Optional[subprocess.CompletedProcess] = None
+    for i in range(attempts):
+        try:
+            r = _run_remote(host, remote_cmd, timeout=timeout)
+            if r.returncode != 255:
+                return r
+            last = r
+        except subprocess.TimeoutExpired:
+            last = subprocess.CompletedProcess(
+                args=REMOTE_HOSTS[host], returncode=255, stdout="", stderr="ssh timeout")
+        if i < attempts - 1:
+            time.sleep(backoff)
+    return last  # type: ignore[return-value]
+
+
 # === Проверки (local + remote, параметризованные по host) ===
 
 def _qualify(name: str, host: Optional[str]) -> str:
@@ -390,16 +418,16 @@ def check_vless_config_consistency() -> CheckResult:
 
         # SSH к main, yc, yc2 — забираем count(clients) из config.json.
         # yc2 — клон yc (vless-xhttp), сверяется с db_yc.
-        ssh_main = REMOTE_HOSTS["main"]
-        ssh_yc = REMOTE_HOSTS["yc"]
-        ssh_yc2 = REMOTE_HOSTS["yc2"]
+        # _run_remote_resilient: ретрай транзиентных SSH-дропов (ночной brute-force
+        # флуд на yc/yc2 упирает sshd в MaxStartups → rc=255 → раньше был
+        # false-FAIL, инцидент 2026-06-11 02:00 UTC).
         cmd_main = "jq '[.inbounds[] | select(.tag==\"vless-tcp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
         cmd_yc = "sudo jq '[.inbounds[] | select(.tag==\"vless-xhttp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
         cmd_yc2 = cmd_yc  # yc2 — тот же inbound-tag vless-xhttp
 
-        r_m = subprocess.run(ssh_main + [cmd_main], capture_output=True, text=True, timeout=15)
-        r_y = subprocess.run(ssh_yc + [cmd_yc], capture_output=True, text=True, timeout=15)
-        r_y2 = subprocess.run(ssh_yc2 + [cmd_yc2], capture_output=True, text=True, timeout=15)
+        r_m = _run_remote_resilient("main", cmd_main)
+        r_y = _run_remote_resilient("yc", cmd_yc)
+        r_y2 = _run_remote_resilient("yc2", cmd_yc2)
 
         try:
             cfg_main = int(r_m.stdout.strip()) if r_m.returncode == 0 else -1
