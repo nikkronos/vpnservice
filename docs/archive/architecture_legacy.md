@@ -83,5 +83,5 @@
 
 - Подробный план задач см. в `ROADMAP_VPN.md`.
 - История принятия решений и контекст — в `SESSION_SUMMARY_YYYY-MM-DD.md` и `DONE_LIST_VPN.md`.
-- Дополнительные правила и общие паттерны — в `RULES_CURSOR.md`, `docs/AGENT_PROMPTS.md`, `docs/patterns.md`, `docs/security.md` (из корня).
+- Дополнительные правила и общие паттерны — в `RULES.md`, `docs/AGENT_PROMPTS.md`, `docs/patterns.md`, `docs/security.md` (из корня).
 

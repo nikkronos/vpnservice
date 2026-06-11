@@ -2,7 +2,7 @@
 
 ## Контекст работы
 
-- Агент ознакомился с Main_docs (QUICK_START_AGENT.md, AGENT_PROMPTS.md, RULES_CURSOR.md) и с проектом VPN.
+- Агент ознакомился с Main_docs (QUICK_START_AGENT.md, AGENT_PROMPTS.md, RULES.md) и с проектом VPN.
 - Задача: для Европы (eu1) заменить выдачу WireGuard на AmneziaWG; важно, чтобы у всех друзей и знакомых конфиги заменились. То же поведение, что с WireGuard, но Amnezia (технически — через скрипт на eu1 или инструкцию вручную).
 
 ## Выполненные задачи в этой сессии
