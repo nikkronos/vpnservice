@@ -77,6 +77,10 @@
           🔌 Резервные конфиги
           <span class="btn-menu-sub">Отдельные конфиги для VPN-каналов</span>
         </button>
+        <button type="button" class="btn-recovery btn-menu" data-substep="devices">
+          🖥 Мои устройства
+          <span class="btn-menu-sub">AmneziaWG: ПК / Wi-Fi, у каждого свой конфиг</span>
+        </button>
         <button type="button" class="btn-recovery btn-menu" data-substep="referral">
           👥 Пригласить друзей
           <span class="btn-menu-sub">+14 дней обоим, когда друг оплатит</span>
@@ -123,6 +127,21 @@
           <span class="btn-menu-sub">Если основной не идёт — пробивает строгие блокировки</span>
         </button>
       </div>
+    </section>
+
+    <!-- ── Substep: Мои устройства (per-device AmneziaWG) ─────────── -->
+    <section class="recovery" id="stepDevices" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2>🖥 Мои устройства</h2>
+      <p class="section-hint">AmneziaWG — для ПК / Wi-Fi, не для мобильного. У каждого устройства свой конфиг; «Обновить» одно не ломает другие. Лимит 5 устройств.</p>
+      <div id="devicesList" class="account-card">Загружаем…</div>
+    </section>
+
+    <!-- ── Substep: Результат — новый/обновлённый конфиг устройства ─ -->
+    <section class="recovery" id="stepDeviceResult" hidden>
+      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
+      <h2 id="deviceResultTitle">📲 Конфиг устройства</h2>
+      <div id="deviceResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
     <!-- ── Substep: Реферал ────────────────────────────────────── -->
@@ -202,6 +221,6 @@
        Через telegram.org из РФ доступ нестабилен (DPI/тротлинг), что ломает auto-login —
        скачиваем SDK один раз на сервер и отдаём со своего домена. -->
   <script src="{{ url_for('static', filename='telegram-web-app.js') }}"></script>
-  <script src="{{ url_for('static', filename='recovery.js') }}?v=20260609b"></script>
+  <script src="{{ url_for('static', filename='recovery.js') }}?v=20260611a"></script>
 </body>
 </html>

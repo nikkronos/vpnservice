@@ -37,6 +37,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
 from bot.database import (
+    db_list_devices,
+    db_get_device,
+    db_add_device,
+    db_delete_device,
+    db_rename_device,
+    db_count_devices,
     db_create_otp,
     db_verify_otp,
     db_create_session,
@@ -80,6 +86,7 @@ from bot.email_otp import generate_otp, send_otp_email
 from bot.wireguard_peers import (
     WireGuardError,
     create_amneziawg_peer_and_config_for_user,
+    delete_amneziawg_device,
     execute_server_command,
     generate_vpn_url,
     regenerate_amneziawg_peer_and_config_for_user,
@@ -1191,6 +1198,151 @@ def api_recovery_awg_config_by_email():
         return jsonify(response)
     except Exception as e:
         logger.exception("Ошибка api/recovery/awg-config-by-email: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Фаза 2 B4: именованные устройства в ЛК (зеркало бот-флоу «Мои устройства») ──
+_DEVICE_CAP = 5
+
+
+def _device_autoname_web(telegram_id: int, os_: str) -> str:
+    same = [d for d in db_list_devices(telegram_id) if d["os"] == os_]
+    base = {"pc": "ПК", "ios": "iPhone/iPad", "android": "Android"}.get(os_, os_)
+    return f"{base} {len(same) + 1}"
+
+
+def _awg_config_payload(peer, cfg: str, os_: str, name: str = "", device_id: str = "") -> dict:
+    resp = {"ok": True, "filename": f"awg_{peer.server_id}.conf", "config": cfg, "os": os_}
+    if name:
+        resp["name"] = name
+    if device_id:
+        resp["device_id"] = device_id
+    if os_ == "android":
+        try:
+            resp["vpn_url"] = generate_vpn_url(cfg)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("vpn:// deep link не сгенерирован: %s", e)
+    if os_ in ("ios", "android"):
+        resp["qr"] = _qr_datauri(cfg)
+    return resp
+
+
+@app.route("/api/recovery/devices", methods=["POST"])
+def api_recovery_devices():
+    """Список устройств юзера. Auth: email-token. Тело: {token}."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        devices = [{"device_id": d["device_id"], "name": d["name"], "os": d["os"]}
+                   for d in db_list_devices(telegram_id)]
+        return jsonify({"ok": True, "devices": devices, "cap": _DEVICE_CAP})
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/devices: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/device-add", methods=["POST"])
+def api_recovery_device_add():
+    """Добавить устройство + выдать конфиг. Тело: {token, os}."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        if getattr(config, "enforcement_enabled", False) and not db_is_access_active(telegram_id):
+            return jsonify({"error": "Подписка неактивна.", "subscription_inactive": True}), 402
+        os_ = str(body.get("os") or "pc").strip().lower()
+        if os_ not in ("pc", "ios", "android"):
+            return jsonify({"error": "os must be pc/ios/android"}), 400
+        if not is_amneziawg_eu1_configured():
+            return jsonify({"error": "AmneziaWG не настроен на сервере."}), 503
+        if db_count_devices(telegram_id) >= _DEVICE_CAP:
+            return jsonify({"error": f"Достигнут лимит {_DEVICE_CAP} устройств."}), 409
+        name = _device_autoname_web(telegram_id, os_)
+        device_id = db_add_device(telegram_id, name, os_)
+        try:
+            peer, cfg = create_amneziawg_peer_and_config_for_user(
+                telegram_id, android_safe=(os_ == "android"), server_id="eu1", platform=os_, device_id=device_id)
+        except WireGuardError as exc:
+            db_delete_device(device_id)  # откат записи устройства
+            logger.exception("device-add %s os=%s: %s", telegram_id, os_, exc)
+            return jsonify({"error": "Не удалось создать конфиг устройства."}), 500
+        return jsonify(_awg_config_payload(peer, cfg, os_, name, device_id))
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/device-add: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/device-regen", methods=["POST"])
+def api_recovery_device_regen():
+    """Обновить конфиг устройства. Тело: {token, device_id}."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        if getattr(config, "enforcement_enabled", False) and not db_is_access_active(telegram_id):
+            return jsonify({"error": "Подписка неактивна.", "subscription_inactive": True}), 402
+        device_id = str(body.get("device_id") or "").strip()
+        dev = db_get_device(device_id)
+        if not dev or int(dev["telegram_id"]) != telegram_id:
+            return jsonify({"error": "Устройство не найдено."}), 404
+        os_ = dev["os"]
+        peer, cfg = regenerate_amneziawg_peer_and_config_for_user(
+            telegram_id, android_safe=(os_ == "android"), server_id="eu1", device_id=device_id)
+        return jsonify(_awg_config_payload(peer, cfg, os_, dev["name"], device_id))
+    except WireGuardError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/device-regen: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/device-delete", methods=["POST"])
+def api_recovery_device_delete():
+    """Удалить устройство. Тело: {token, device_id}."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        device_id = str(body.get("device_id") or "").strip()
+        dev = db_get_device(device_id)
+        if not dev or int(dev["telegram_id"]) != telegram_id:
+            return jsonify({"error": "Устройство не найдено."}), 404
+        delete_amneziawg_device(telegram_id, device_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/device-delete: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recovery/device-rename", methods=["POST"])
+def api_recovery_device_rename():
+    """Переименовать устройство. Тело: {token, device_id, name}. Конфиг не трогается."""
+    try:
+        body = request.get_json() or {}
+        auth, err = _verify_email_session(body)
+        if err:
+            return err
+        _u, telegram_id = auth
+        device_id = str(body.get("device_id") or "").strip()
+        name = str(body.get("name") or "").strip()[:40]
+        if not name:
+            return jsonify({"error": "Пустое имя."}), 400
+        dev = db_get_device(device_id)
+        if not dev or int(dev["telegram_id"]) != telegram_id:
+            return jsonify({"error": "Устройство не найдено."}), 404
+        db_rename_device(device_id, name)
+        return jsonify({"ok": True, "name": name})
+    except Exception as e:
+        logger.exception("Ошибка api/recovery/device-rename: %s", e)
         return jsonify({"error": str(e)}), 500
 
 
