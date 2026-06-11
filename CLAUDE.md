@@ -132,7 +132,7 @@ scripts/
 ### Ключевые концепции
 
 - **server_id:** `eu1` (AmneziaWG, Docker), логически был `eu2` — нормализован в `eu1` через `storage.py`
-- **peer key формат (с 2026-06-10, Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` — composite-PK таблицы `peers`. Раньше был `platform` (per-OS), сменён на **именованные устройства** (`devices` table: device_id/telegram_id/name/os) — фикс коллизии iPad/iPhone (фидбэк Ани) + база под «семейный» тариф. **`os`** (`pc`/`ios`/`android`) — свойство устройства, формат доставки. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут). **Backward-compat shim в `storage.py`:** функции принимают `platform=` (legacy) и мапят на device с нужным os; `Peer.platform` — алиас `Peer.os`. Поэтому бот/ЛК/wireguard_peers работают без правок (B3-UX «список устройств» — отдельно, ещё не сделан).
+- **peer key формат (с 2026-06-10, Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` — composite-PK таблицы `peers`. Раньше был `platform` (per-OS), сменён на **именованные устройства** (`devices` table: device_id/telegram_id/name/os) — фикс коллизии iPad/iPhone (фидбэк Ани) + база под «семейный» тариф. **`os`** (`pc`/`ios`/`android`) — свойство устройства, формат доставки. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут). **Backward-compat shim в `storage.py`:** функции принимают `platform=` (legacy) и мапят на device с нужным os; `Peer.platform` — алиас `Peer.os`. Поэтому бот/ЛК/wireguard_peers работают без правок. **UX «Мои устройства» НА ПРОДЕ в боте (B3, 06-10) И в ЛК (B4, 06-11): список/добавить/обновить/удалить/переименовать, cap 5.** ЛК-эндпоинты: `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Фаза 2 B завершена.
 - **Платформы/os:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
 - **device-хелперы** (`bot/database.py`): `db_list_devices`/`db_get_device`/`db_add_device`/`db_rename_device`/`db_delete_device`/`db_count_devices`.
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
@@ -318,7 +318,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 |-------|-------|
 | Открытые задачи | `ROADMAP_VPN.md` |
 | История изменений | `DONE_LIST_VPN.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-05-27.md` |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-11.md` |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |

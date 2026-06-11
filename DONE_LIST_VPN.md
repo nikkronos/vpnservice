@@ -1,5 +1,39 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
+## 2026-06-11 — Фаза 2 B4: устройства в ЛК (фронт) НА ПРОДЕ + rename → Фаза 2 B ЗАВЕРШЕНА
+
+Закрыт последний кусок per-device — те же «Мои устройства» в веб-ЛК (зеркало бот-флоу). Бэкенд B4 (4 эндпоинта) лежал на ветке `feature/per-device-lk` с 06-10; добавлен 5-й (rename) + весь фронт.
+
+- **`web/app.py`:** `/api/recovery/device-rename` (`{token,device_id,name}` → `db_rename_device`, конфиг не трогается) + импорт `db_rename_device`. 4 эндпоинта devices/add/regen/delete уже были на ветке.
+- **`recovery.html`:** кнопка входа «🖥 Мои устройства» в главном меню + секции `stepDevices` (список) и `stepDeviceResult` (выдача конфига). cache-bust `?v=20260611a`.
+- **`recovery.js`:** `loadDevices`/`renderDevicesList`/`renderDeviceRow` (имя+ОС, [✏️ Имя][🔄 Обновить][🗑 Удалить]) / add (выбор ОС → конфиг) / regen / delete (confirm: `tg.showConfirm` в Mini App, `window.confirm` в браузере) / rename (inline-инпут — `window.prompt` в TG Mini App недоступен). `renderAwgPayload` — общая выдача config/QR/`vpn://` (зеркало `[data-platform]`-флоу: android→vpn url, в TG→QR+копия, браузер→файл). cap 5, авто-имена.
+- **Деплой:** бэкап (`web/*.bak.20260611-104931`) → scp 3 файла → AST app.py OK → restart vpn-web (active, журнал чист) → curl: 5 device-роутов → 401 (auth-гейт, не 404). **Смоук владельца: список (браузер + Mini App), add/regen/delete/rename, кросс-консистентность с ботом — OK.**
+- **Merge** `feature/per-device-lk` → main (`caecf9d` + merge `44940b6`).
+
+**Фаза 2 B завершена** (B1+B2+B3+B4). Per-device ценность полная в боте И в ЛК. Разблокированы тарифы по числу устройств (соло 3 / семейный 5 — привязать `plan` к cap).
+
+---
+
+## 2026-06-11 — yc2 ночной false-FAIL мониторинга устранён (ретрай SSH)
+
+**Симптом (повторялся):** ночью (~02:00 UTC) прилетал алерт `vless_config_consistency` `yc2_rc=255`, «DOWN ~14 мин» → затем RESOLVED. Владелец заметил паттерн «именно ночью, ~15 мин».
+
+**Диагноз (по логам, не на глаз):** НЕ простой сервиса. Xray на yc2 `NRestarts=0` (последний рестарт — плановый sync 06:07, вне окна); журнал в окне 01:50–02:25 непрерывен (1605 строк, без gap); 0 OOM/hung за 6 ч. Причина — массированный ночной SSH brute-force (76 sshd-событий/5 мин; fail2ban не стоит) упирает sshd в MaxStartups; в :00 совпадают Fornex-кроны (health-check `*/15` + ip_usage_watcher `*/10`) → отдельный SSH-коннект чека `vless_config_consistency` отбивается rc=255 → **false-FAIL**. Юзеры не отваливались (Xray обслуживал весь интервал).
+
+**Фикс (`scripts/health_check.py`, `645cb63`):** `_run_remote_resilient` — ретрай на rc=255/timeout (3 попытки, backoff 2с) для 3 SSH-вызовов чека. Реальные ошибки команды (rc≠0 и ≠255) не маскируются. Задеплоено + dry-run на проде (`53/53/53 OK`, без трейсбеков).
+
+**Заодно:** на yc2 применён persist `swappiness=10` (был 60 — файл `/etc/sysctl.d/99-swap.conf` существовал, но не применился после boot; выровнено с yc, CLAUDE.md #12). НЕ причина алерта (давления на память не было), гигиена/страховка от будущего memory-freeze.
+
+**Follow-up (зафлагован отдельной задачей):** fail2ban на yc/yc2/main — давит сам флуд (меньше шума/дропов/нагрузки). **Критично:** whitelist Fornex-IP `185.21.8.91` (хост мониторинга/кронов), иначе fail2ban забанит мониторинг.
+
+---
+
+## 2026-06-11 — Гигиена: ссылки RULES_CURSOR.md → RULES.md
+
+5 доков (`security.md` + архив/old-сессии) ссылались на переименованный на уровне workspace `RULES_CURSOR.md`. Поправлено на `RULES.md` (`913c1dc`). Были незакоммичены от прошлой сессии — почищено рабочее дерево.
+
+---
+
 ## 2026-06-10 — Фаза 2 B3: «Мои устройства» в боте НА ПРОДЕ (фикс Ани ✅)
 
 Поверх B1+B2 (device-слой) — UX именованных устройств в боте. **Баг Ани закрыт на проде:** 2 устройства одной ОС (iPhone+iPad) теперь сосуществуют (раньше коллизили на per-OS ключе).
