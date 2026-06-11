@@ -43,6 +43,7 @@ from bot.database import (
     db_delete_device,
     db_rename_device,
     db_count_devices,
+    db_get_device_limit,
     db_create_otp,
     db_verify_otp,
     db_create_session,
@@ -1202,7 +1203,7 @@ def api_recovery_awg_config_by_email():
 
 
 # ── Фаза 2 B4: именованные устройства в ЛК (зеркало бот-флоу «Мои устройства») ──
-_DEVICE_CAP = 5
+# Лимит устройств — per-user по тарифу (db_get_device_limit; грандфазер/триал = 5).
 
 
 def _device_autoname_web(telegram_id: int, os_: str) -> str:
@@ -1238,7 +1239,7 @@ def api_recovery_devices():
         _u, telegram_id = auth
         devices = [{"device_id": d["device_id"], "name": d["name"], "os": d["os"]}
                    for d in db_list_devices(telegram_id)]
-        return jsonify({"ok": True, "devices": devices, "cap": _DEVICE_CAP})
+        return jsonify({"ok": True, "devices": devices, "cap": db_get_device_limit(telegram_id)})
     except Exception as e:
         logger.exception("Ошибка api/recovery/devices: %s", e)
         return jsonify({"error": str(e)}), 500
@@ -1260,8 +1261,9 @@ def api_recovery_device_add():
             return jsonify({"error": "os must be pc/ios/android"}), 400
         if not is_amneziawg_eu1_configured():
             return jsonify({"error": "AmneziaWG не настроен на сервере."}), 503
-        if db_count_devices(telegram_id) >= _DEVICE_CAP:
-            return jsonify({"error": f"Достигнут лимит {_DEVICE_CAP} устройств."}), 409
+        cap = db_get_device_limit(telegram_id)
+        if db_count_devices(telegram_id) >= cap:
+            return jsonify({"error": f"Достигнут лимит {cap} устройств по тарифу."}), 409
         name = _device_autoname_web(telegram_id, os_)
         device_id = db_add_device(telegram_id, name, os_)
         try:

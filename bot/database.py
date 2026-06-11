@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS payment_claims (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_id  INTEGER NOT NULL,
     days         INTEGER NOT NULL DEFAULT 30,
+    device_limit INTEGER NOT NULL DEFAULT 5,         -- тариф: 3 или 5 устройств (несём в approve)
     status       TEXT NOT NULL DEFAULT 'pending',   -- 'pending'|'approved'|'declined'
     source       TEXT,                              -- 'webapp'|'bot' — откуда пришла
     note         TEXT,                              -- свободный текст (например, метод оплаты)
@@ -228,6 +229,7 @@ def init_db(whitelist_seed: Optional[List[int]] = None) -> None:
     _migrate_add_referral_bonus_paid_column()
     _migrate_add_expiry_notif_columns()
     _migrate_add_migrated_at_column()
+    _migrate_add_claim_device_limit()
     # B (Фаза 2): peers platform→device_id + devices. ПОСЛЕДНЕЙ — после того как
     # все peer-данные (json→sqlite и пр.) уже в старом формате, конвертируем 1:1.
     _migrate_peers_platform_to_device()
@@ -522,6 +524,10 @@ def _migrate_add_subscription_columns() -> None:
             ("plan", "TEXT"),
             ("referral_code", "TEXT"),
             ("referred_by", "TEXT"),
+            # device_limit: лимит именованных устройств по тарифу. DEFAULT 5 =
+            # грандфазер существующих юзеров + триал (= tariffs.DEFAULT_DEVICE_LIMIT).
+            # Новый тариф (199/249/449/599) проставляет 3 или 5 при оплате.
+            ("device_limit", "INTEGER NOT NULL DEFAULT 5"),
         ]
         for name, decl in cols:
             if name not in existing:
@@ -531,6 +537,24 @@ def _migrate_add_subscription_columns() -> None:
                 except sqlite3.OperationalError as e:
                     # гонка двух сервисов (vpn-web + vpn-bot) или повторный запуск
                     logger.info("Migration: skip %s (%s)", name, e)
+
+
+def _migrate_add_claim_device_limit() -> None:
+    """Добавляет device_limit в payment_claims (идемпотентно).
+
+    Тариф (3/5 устройств) несётся через claim до approve. Существующие claim'ы
+    получают DEFAULT 5.
+    """
+    with _conn() as con:
+        existing = {row[1] for row in con.execute("PRAGMA table_info(payment_claims)").fetchall()}
+        if "device_limit" not in existing:
+            try:
+                con.execute(
+                    "ALTER TABLE payment_claims ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 5"
+                )
+                logger.info("Migration: added device_limit column to payment_claims")
+            except sqlite3.OperationalError as e:
+                logger.info("Migration: skip payment_claims.device_limit (%s)", e)
 
 
 def _migrate_add_password_column() -> None:
@@ -1763,10 +1787,13 @@ def db_extend_subscription(
     days: int,
     plan: Optional[str] = None,
     status: str = "active",
+    device_limit: Optional[int] = None,
 ) -> Optional[str]:
     """
     Продлевает доступ на N дней от max(now, текущий expires_at).
     Возвращает новый expires_at (ISO). Используется и для оплаты, и для бонусов (реферал).
+    `device_limit` (если задан) проставляет лимит устройств по тарифу; None —
+    не трогаем (бонусы/реферал не меняют тариф).
     """
     _ensure_init()
     now = datetime.utcnow()
@@ -1789,11 +1816,27 @@ def db_extend_subscription(
         # должен получить свои T-7 / T-3 / T-0 события заново.
         con.execute(
             "UPDATE users SET expires_at = ?, subscription_status = ?, "
-            "plan = COALESCE(?, plan), notif_7d_sent = 0, notif_3d_sent = 0, "
+            "plan = COALESCE(?, plan), device_limit = COALESCE(?, device_limit), "
+            "notif_7d_sent = 0, notif_3d_sent = 0, "
             "notif_0d_sent = 0 WHERE telegram_id = ?",
-            (new_exp, status, plan, telegram_id),
+            (new_exp, status, plan, device_limit, telegram_id),
         )
     return new_exp
+
+
+def db_get_device_limit(telegram_id: int) -> int:
+    """Лимит устройств юзера по тарифу. Дефолт 5 (грандфазер/триал) если не задан/NULL."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT device_limit FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    if not row or row["device_limit"] is None:
+        return 5
+    try:
+        return int(row["device_limit"])
+    except (ValueError, TypeError):
+        return 5
 
 
 def db_start_trial(telegram_id: int, days: int) -> Optional[str]:
@@ -2076,10 +2119,12 @@ def db_create_payment_claim(
     days: int = 30,
     source: str = "webapp",
     note: Optional[str] = None,
+    device_limit: int = 5,
 ) -> Optional[int]:
     """
     Создаёт новую pending-заявку. Если уже есть pending — возвращает её id
-    (не плодим дубликаты при повторных нажатиях).
+    (не плодим дубликаты при повторных нажатиях). `device_limit` несёт тариф
+    (3/5 устройств) до approve.
     """
     _ensure_init()
     existing = db_get_pending_claim(telegram_id)
@@ -2088,10 +2133,10 @@ def db_create_payment_claim(
     with _conn() as con:
         cur = con.execute(
             """
-            INSERT INTO payment_claims (telegram_id, days, status, source, note)
-            VALUES (?, ?, 'pending', ?, ?)
+            INSERT INTO payment_claims (telegram_id, days, device_limit, status, source, note)
+            VALUES (?, ?, ?, 'pending', ?, ?)
             """,
-            (telegram_id, days, source, note),
+            (telegram_id, days, device_limit, source, note),
         )
         return cur.lastrowid
 

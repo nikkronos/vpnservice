@@ -20,6 +20,7 @@ from .database import (
     db_add_device,
     db_delete_device,
     db_count_devices,
+    db_get_device_limit,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -1390,10 +1391,10 @@ def main() -> None:
     # Callbacks: «Мои устройства» (Фаза 2 B — именованные AmneziaWG-слоты)
     # ──────────────────────────────────────────────────────────────
     _OS_LABEL = {"pc": "💻 ПК", "ios": "🍎 iOS", "android": "🤖 Android"}
-    _DEVICE_CAP = 5
 
     def _render_device_list(chat_id: int, uid: int) -> None:
         devices = db_list_devices(uid)
+        cap = db_get_device_limit(uid)  # лимит по тарифу (3/5; грандфазер/триал = 5)
         kb = types.InlineKeyboardMarkup(row_width=2)
         for d in devices:
             did = d["device_id"]
@@ -1403,13 +1404,13 @@ def main() -> None:
                 types.InlineKeyboardButton("🔄 Обновить", callback_data=f"devregen_{did}"),
                 types.InlineKeyboardButton("🗑 Удалить", callback_data=f"devdel_{did}"),
             )
-        if len(devices) < _DEVICE_CAP:
+        if len(devices) < cap:
             kb.add(types.InlineKeyboardButton("➕ Добавить устройство", callback_data="dev_add"))
         else:
-            kb.add(types.InlineKeyboardButton(f"Лимит {_DEVICE_CAP} устройств", callback_data="dev_noop"))
+            kb.add(types.InlineKeyboardButton(f"Лимит {cap} устройств", callback_data="dev_noop"))
         kb.add(types.InlineKeyboardButton("« Назад", callback_data="menu_other_connect"))
         text = ("🖥 <b>Мои устройства (AmneziaWG)</b>\n\n" + (
-            f"Устройств: {len(devices)} из {_DEVICE_CAP}. Каждое — отдельный конфиг; "
+            f"Устройств: {len(devices)} из {cap}. Каждое — отдельный конфиг; "
             "«Обновить» одно не ломает другие.\n⚠️ AmneziaWG — для ПК/Wi-Fi, не для мобильного."
             if devices else
             "Пока нет устройств. Добавь первое — каждому девайсу свой независимый конфиг."))
@@ -1423,8 +1424,12 @@ def main() -> None:
     def _add_device_and_deliver(message: types.Message, uid: int, os_: str) -> None:
         if os_ not in ("pc", "ios", "android"):
             return
-        if db_count_devices(uid) >= _DEVICE_CAP:
-            bot.send_message(message.chat.id, f"Достигнут лимит {_DEVICE_CAP} устройств. Удали лишнее.")
+        cap = db_get_device_limit(uid)
+        if db_count_devices(uid) >= cap:
+            bot.send_message(
+                message.chat.id,
+                f"Достигнут лимит {cap} устройств по твоему тарифу. Удали лишнее"
+                + (" или оформи тариф на 5 устройств." if cap < 5 else "."))
             return
         name = _device_autoname(uid, os_)
         device_id = db_add_device(uid, name, os_)
