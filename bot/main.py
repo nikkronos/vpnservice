@@ -370,12 +370,12 @@ def main() -> None:
                 ),
             )
             markup.add(
-                types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="menu_get_vpn"),
-                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
+                types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="menu_get_vpn", style="primary"),
+                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show", style="success"),
                 types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
-                types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"),
+                types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support", style="danger"),
             )
             # Кнопка активации триала если он ещё не использован И нет активной подписки.
             # Видна и после онбординга с «Пропустить», и при истёкшей подписке (если триал не был активирован).
