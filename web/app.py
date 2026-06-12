@@ -122,7 +122,7 @@ app.secret_key = (getattr(config, "admin_secret", None) or os.urandom(32).hex())
 _recovery_lock = threading.Lock()
 
 # ── Биллинг (Фаза 2/4): значения, легко менять ──
-TRIAL_DAYS = 14            # длина пробного периода
+TRIAL_DAYS = tariffs.TRIAL_DAYS   # длина пробного периода (источник: bot/tariffs.py, сейчас 7)
 REFERRAL_REWARD_DAYS = 14  # +дней обоим при первой оплате приглашённого
 SUBSCRIPTION_DAYS_PER_PAYMENT = 30  # сколько дней даёт одна оплата (любым провайдером)
 STARS_MONTHLY_PRICE = 150  # цена в Telegram Stars за SUBSCRIPTION_DAYS_PER_PAYMENT дней (~200 ₽)
@@ -1672,7 +1672,7 @@ def api_billing_claim_payment():
         else:
             status_line = "Подписка неактивна"
         text = (
-            f"💳 <b>Новая оплата — {cl_dev} устр., {cl_days // 30} мес ({cl_price} ₽)</b>\n\n"
+            f"💳 <b>Новая оплата — {cl_dev} устр., {tariffs.period_label(tariffs.months_from_days(cl_days))} ({cl_price} ₽)</b>\n\n"
             f"👤 @{username} (id: <code>{telegram_id}</code>)\n"
             f"📧 {email}\n"
             f"📅 Сейчас: {status_line}\n"

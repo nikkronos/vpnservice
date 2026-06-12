@@ -528,6 +528,8 @@ def _migrate_add_subscription_columns() -> None:
             # грандфазер существующих юзеров + триал (= tariffs.DEFAULT_DEVICE_LIMIT).
             # Новый тариф (199/249/449/599) проставляет 3 или 5 при оплате.
             ("device_limit", "INTEGER NOT NULL DEFAULT 5"),
+            # use_case: открытый ответ юзера «для чего VPN» (сегментация, онбординг).
+            ("use_case", "TEXT"),
         ]
         for name, decl in cols:
             if name not in existing:
@@ -1837,6 +1839,26 @@ def db_get_device_limit(telegram_id: int) -> int:
         return int(row["device_limit"])
     except (ValueError, TypeError):
         return 5
+
+
+def db_set_use_case(telegram_id: int, text: str) -> None:
+    """Сохраняет открытый ответ «для чего VPN» (сегментация). Обрезаем до 200 симв."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET use_case = ? WHERE telegram_id = ?",
+            ((text or "").strip()[:200], telegram_id),
+        )
+
+
+def db_get_use_case(telegram_id: int) -> Optional[str]:
+    """Возвращает сохранённый use_case или None (если ещё не отвечал)."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT use_case FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    return (row["use_case"] if row else None) or None
 
 
 def db_start_trial(telegram_id: int, days: int) -> Optional[str]:
