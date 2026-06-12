@@ -315,9 +315,6 @@ def main() -> None:
     _onboarding_state: dict[int, dict] = {}
     # Открытый онбординг-вопрос «для чего VPN»: uid → ждём свободный ответ.
     _use_case_state: dict[int, dict] = {}
-    # ВРЕМЕННО (тест): эти tid проходят онбординг без email/OTP (тест-аккаунты, не
-    # получающие письма). Любой ввод на шаге email → финализация. Убрать после тестов.
-    _ONBOARDING_NO_EMAIL_IDS = {6133596373}
 
     def _is_authorized(telegram_id: int) -> bool:
         """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
@@ -742,18 +739,6 @@ def main() -> None:
         text = (message.text or "").strip()
 
         if step == "email":
-            # ── Тест-байпас: tid из _ONBOARDING_NO_EMAIL_IDS проходят без email/OTP.
-            if tid in _ONBOARDING_NO_EMAIL_IDS:
-                from .database import db_upsert_user
-                db_upsert_user({
-                    "telegram_id": tid,
-                    "email": f"test_{tid}@kronos.local",
-                    "email_verified": True,
-                    "active": True,
-                })
-                bot.send_message(message.chat.id, "✅ Тест-аккаунт: онбординг пройден без email.")
-                _finalize_onboarding(message.chat.id, tid)
-                return
             email = text.lower()
             if "@" not in email or "." not in email.split("@")[-1]:
                 bot.send_message(message.chat.id, "Это не похоже на email. Попробуй ещё раз.")
