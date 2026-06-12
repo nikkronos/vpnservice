@@ -648,16 +648,25 @@ def main() -> None:
         except Exception:
             return False
         _use_case_state[uid] = {"step": "await"}
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("⏭ Пропустить", callback_data="usecase_skip"))
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("✍️ Ответить", callback_data="usecase_answer"),
+            types.InlineKeyboardButton("⏭ Пропустить", callback_data="usecase_skip"),
+        )
         bot.send_message(
             chat_id,
-            "🙋 Один короткий вопрос (по желанию): <b>для чего тебе VPN в первую очередь?</b>\n\n"
-            "Напиши одним сообщением — YouTube, Instagram, работа, нейросети, музыка, сайты, "
-            "что угодно. Поможет сделать сервис под тебя.",
+            "🙋 Один короткий вопрос: <b>для чего тебе VPN в первую очередь?</b>\n\n"
+            "Напиши одним сообщением — YouTube, работа, нейросети, музыка, сайты, "
+            "что угодно. Это поможет сделать сервис лучше под тебя.",
             parse_mode="HTML", reply_markup=markup,
         )
         return True
+
+    @bot.callback_query_handler(func=lambda call: call.data == "usecase_answer")
+    def callback_usecase_answer(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        # Кнопка-подсказка: состояние уже ждёт ввод, просто подталкиваем написать
+        # (вторая кнопка нужна, чтобы не нажали автоматом единственный «Пропустить»).
+        bot.answer_callback_query(call.id, "Напиши ответ одним сообщением 👇")
 
     @bot.callback_query_handler(func=lambda call: call.data == "usecase_skip")
     def callback_usecase_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
