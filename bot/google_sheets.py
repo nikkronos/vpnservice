@@ -31,7 +31,7 @@ _HEADER = [
     "id", "telegram_id", "username", "email", "role",
     "active", "preferred_server_id", "email_verified",
     "subscription_status", "expires_at", "days_left", "trial_used", "migrated",
-    "use_case",
+    "use_case", "drop_reason",
     "has_vless", "peers_count", "created_at", "synced_at",
 ]
 
@@ -87,6 +87,7 @@ def _build_rows(users: List[Dict], peer_count: Dict[int, int], now_iso: str) -> 
             trial_used,
             migrated,
             u.get("use_case") or "",
+            u.get("drop_reason") or "",
             "1" if u.get("vless_uuid") else "0",
             peer_count.get(tid, 0) if tid else 0,
             u.get("created_at") or "",
@@ -184,8 +185,8 @@ def sync_users_to_sheets(
             values=all_data,
             value_input_option="RAW",
         )
-        # Жирный заголовок (18 колонок A..R)
-        ws.format("A1:R1", {"textFormat": {"bold": True}})
+        # Жирный заголовок (19 колонок A..S)
+        ws.format("A1:S1", {"textFormat": {"bold": True}})
     except Exception as exc:
         logger.exception("Google Sheets: ошибка записи данных: %s", exc)
         return {"ok": False, "error": f"Ошибка записи в таблицу: {exc}"}
