@@ -687,6 +687,14 @@ footer a:hover {
     font-size: 0.95em;
 }
 
+/* Цветовые акценты меню-кнопок: зелёная (продлить), красная (поддержка), серая (настройки). */
+.btn-menu.btn-green { background: var(--green); color: #04140a; }
+.btn-menu.btn-green:hover:not(:disabled) { box-shadow: 0 0 12px rgba(0, 230, 118, 0.45); }
+.btn-menu.btn-red   { background: var(--red); color: #fff; }
+.btn-menu.btn-red:hover:not(:disabled)   { box-shadow: 0 0 12px rgba(255, 23, 68, 0.45); }
+.btn-menu.btn-grey  { background: #2a3050; color: #fff; }
+.btn-menu.btn-grey:hover:not(:disabled)  { box-shadow: none; }
+
 .btn-back {
     align-self: flex-start;
     margin-bottom: 8px;

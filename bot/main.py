@@ -340,7 +340,7 @@ def main() -> None:
         authorized = _is_authorized(uid)
 
         greeting = (
-            "Привет! Это VPN-бот Kronos. 🔐\n\n"
+            "Привет! Это VPN Kronos - бот. 🔐\n\n"
             f"🌐 Личный кабинет: {recovery_url}\n"
             "⌛️ Канал с обновлениями: https://t.me/vpnkronos"
         )
@@ -985,6 +985,16 @@ def main() -> None:
             "из Google Play." + mobile_warn
         )
 
+    def _not_working_kb() -> types.InlineKeyboardMarkup:
+        """Клавиатура под выданным конфигом: быстрый переход в «Не работает» + меню.
+        Чтобы юзер получил конфиг и сразу мог нажать исправление, если не заработало."""
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(
+            types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
+        return kb
+
     def _deliver_config(
         message: types.Message,
         config_text: str,
@@ -1003,16 +1013,18 @@ def main() -> None:
         if platform == "android":
             vpn_link = generate_vpn_url(config_text)
             bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
-            bot.send_message(chat_id, vpn_link, parse_mode=None)
+            bot.send_message(chat_id, vpn_link, parse_mode=None, reply_markup=_not_working_kb())
         else:  # pc / ios
             _send_config_file(chat_id, config_text, filename)
-            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True,
+                             reply_markup=_not_working_kb())
 
     def _deliver_vless_link(message: types.Message, vless_link: str, success_text: str) -> None:
         """Отправляет vless:// ссылку пользователю: сначала сообщение, потом ссылка в code-блоке."""
         chat_id = message.chat.id
         bot.send_message(chat_id, success_text, parse_mode="HTML")
-        bot.send_message(chat_id, f"<code>{vless_link}</code>", parse_mode="HTML")
+        bot.send_message(chat_id, f"<code>{vless_link}</code>", parse_mode="HTML",
+                         reply_markup=_not_working_kb())
 
     def _show_platform_keyboard(chat_id: int, action: str) -> None:
         """Отправляет клавиатуру выбора платформы перед выдачей конфига."""
@@ -3399,6 +3411,7 @@ def main() -> None:
         )
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
+            types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
             types.InlineKeyboardButton("🔌 Другие способы подключения", callback_data="menu_other_connect"),
             types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
         )

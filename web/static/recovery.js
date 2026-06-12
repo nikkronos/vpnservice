@@ -60,6 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let payDevices = 3;
   let payMonths = 1;
   let acctTariffs = [];
+  // «Не работает» под выданным конфигом: замыкание, повторяющее последнюю генерацию.
+  let lastConfigRetry = null;
 
   // ── Telegram WebApp context ───────────────────────────────────────────────
   // SDK telegram-web-app.js хостится у нас локально (telegram.org из РФ нестабилен).
@@ -1014,6 +1016,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Рендер выданного конфига (config/qr/vpn_url) — та же логика, что в
   // [data-platform]-флоу (android → vpn://+QR; в TG → QR+копия; браузер → файл).
+  // Кнопка «Не работает» под выданным конфигом (ЛК-аналог бот-флоу «Не работает»):
+  // повторяет последнюю генерацию (пересоздаёт устройство / переотдаёт конфиг).
+  function appendRetryButton(container) {
+    if (!lastConfigRetry) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn-recovery btn-recovery-secondary';
+    b.style.marginTop = '14px';
+    b.textContent = '🔄 Не работает — обновить конфиг';
+    b.addEventListener('click', () => { haptic('light'); if (lastConfigRetry) lastConfigRetry(); });
+    container.appendChild(b);
+  }
+
   function renderAwgPayload(container, data) {
     const cfg = data.config || '';
     const filename = data.filename || 'awg_eu1.conf';
@@ -1212,6 +1227,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ok.textContent = `✅ Добавлено устройство «${d.name || ''}». Импортируй конфиг в AmneziaWG / AmneziaVPN.`;
       deviceResult.appendChild(ok);
       renderAwgPayload(deviceResult, d);
+      lastConfigRetry = () => regenDevice({ device_id: d.device_id, os: d.os, name: d.name });
+      appendRetryButton(deviceResult);
       loadDevices();  // обновить скрытый список к моменту «« Назад»
     } catch (e) {
       _deviceResultError((e && e.message) || e);
@@ -1235,6 +1252,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ok.textContent = `🔄 Конфиг «${dev.name}» пересоздан. Старый перестал работать — импортируй новый.`;
       deviceResult.appendChild(ok);
       renderAwgPayload(deviceResult, d);
+      lastConfigRetry = () => regenDevice(dev);
+      appendRetryButton(deviceResult);
       loadDevices();
     } catch (e) {
       _deviceResultError((e && e.message) || e);
@@ -1417,6 +1436,8 @@ document.addEventListener('DOMContentLoaded', () => {
           awgResult.appendChild(hint);
           renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaWG');
         }
+        lastConfigRetry = () => btn.click();
+        appendRetryButton(awgResult);
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {
@@ -1487,6 +1508,8 @@ document.addEventListener('DOMContentLoaded', () => {
         mobileResult.appendChild(inst);
 
         renderLinkBlock(mobileResult, link, '', 'Копировать ссылку');
+        lastConfigRetry = () => btn.click();
+        appendRetryButton(mobileResult);
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VPN Kronos — личный кабинет</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260612a">
 </head>
 <body>
   <div class="container">
@@ -65,7 +65,7 @@
       <div id="subBlock" class="account-card" hidden></div>
       <div id="trialBlock"></div>
       <div class="recovery-menu">
-        <button type="button" class="btn-recovery btn-menu" data-substep="billing">
+        <button type="button" class="btn-recovery btn-menu btn-green" data-substep="billing">
           💳 Продлить подписку
           <span class="btn-menu-sub">Telegram Stars или СБП / карта Т-Банк</span>
         </button>
@@ -85,12 +85,12 @@
           👥 Пригласить друзей
           <span class="btn-menu-sub">+14 дней обоим, когда друг оплатит</span>
         </button>
-        <button type="button" class="btn-recovery btn-menu" data-substep="settings">
+        <button type="button" class="btn-recovery btn-menu btn-grey" data-substep="settings">
           ⚙️ Пароль и настройки
           <span class="btn-menu-sub">Добавить или сменить пароль</span>
         </button>
         <a href="https://t.me/vpnkronos_bot?start=support" target="_blank" rel="noopener"
-           class="btn-recovery btn-menu" id="btnSupportLink"
+           class="btn-recovery btn-menu btn-red" id="btnSupportLink"
            style="text-decoration:none;">
           🆘 Поддержка
           <span class="btn-menu-sub">Открыть чат с поддержкой в боте</span>
@@ -221,6 +221,6 @@
        Через telegram.org из РФ доступ нестабилен (DPI/тротлинг), что ломает auto-login —
        скачиваем SDK один раз на сервер и отдаём со своего домена. -->
   <script src="{{ url_for('static', filename='telegram-web-app.js') }}"></script>
-  <script src="{{ url_for('static', filename='recovery.js') }}?v=20260611d"></script>
+  <script src="{{ url_for('static', filename='recovery.js') }}?v=20260612a"></script>
 </body>
 </html>
