@@ -341,7 +341,7 @@ def main() -> None:
 
         greeting = (
             "Привет! Это VPN Kronos - бот. 🔐\n\n"
-            f'🌐 <a href="{recovery_url}">Личный кабинет (сайт)</a>\n'
+            f'🌐 <a href="{recovery_url}">Личный кабинет - сайт (если телеграм не работает)</a>\n'
             '⌛️ <a href="https://t.me/vpnkronos">Канал с обновлениями</a>'
         )
 
@@ -370,7 +370,7 @@ def main() -> None:
                 ),
             )
             markup.add(
-                types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
+                types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="menu_get_vpn"),
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
@@ -452,7 +452,7 @@ def main() -> None:
     def _start_onboarding(chat_id: int, telegram_id: int) -> None:
         """Показывает дисклеймер. Дальше — по нажатию кнопки `onb_ack`."""
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Я ознакомился(-ась)", callback_data="onb_ack"))
+        markup.add(types.InlineKeyboardButton("Начать настройку", callback_data="onb_ack"))
         try:
             bot.send_message(
                 chat_id,
