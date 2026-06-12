@@ -371,7 +371,6 @@ def main() -> None:
             )
             markup.add(
                 types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
-                types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
                 types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
                 types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
