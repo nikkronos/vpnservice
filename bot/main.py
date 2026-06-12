@@ -607,7 +607,9 @@ def main() -> None:
             call.message.chat.id,
             f"⏭ Триал не активирован. Можешь активировать его в любой момент через меню → «🎁 Активировать {tariffs.TRIAL_DAYS} дней».",
         )
-        _send_main_menu_for_tid(call.message.chat.id, tid)
+        # Вопрос-сегментацию задаём и при пропуске триала (не только при активации).
+        if not _maybe_ask_use_case(call.message.chat.id, tid):
+            _send_main_menu_for_tid(call.message.chat.id, tid)
 
     # Кнопка активации триала из главного меню бота (если триал доступен).
     @bot.callback_query_handler(func=lambda call: call.data == "menu_trial_activate")
