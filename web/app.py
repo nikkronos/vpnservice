@@ -45,6 +45,7 @@ from bot.database import (
     db_rename_device,
     db_count_devices,
     db_get_device_limit,
+    db_is_test_used,
     db_create_otp,
     db_verify_otp,
     db_create_session,
@@ -122,7 +123,7 @@ app.secret_key = (getattr(config, "admin_secret", None) or os.urandom(32).hex())
 _recovery_lock = threading.Lock()
 
 # ── Биллинг (Фаза 2/4): значения, легко менять ──
-TRIAL_DAYS = 14            # длина пробного периода
+TRIAL_DAYS = tariffs.TRIAL_DAYS   # длина пробного периода (источник: bot/tariffs.py, сейчас 7)
 REFERRAL_REWARD_DAYS = 14  # +дней обоим при первой оплате приглашённого
 SUBSCRIPTION_DAYS_PER_PAYMENT = 30  # сколько дней даёт одна оплата (любым провайдером)
 STARS_MONTHLY_PRICE = 150  # цена в Telegram Stars за SUBSCRIPTION_DAYS_PER_PAYMENT дней (~200 ₽)
@@ -1493,6 +1494,7 @@ def api_account_info():
             "stars_monthly_price": STARS_MONTHLY_PRICE,
             "subscription_days": SUBSCRIPTION_DAYS_PER_PAYMENT,
             "device_limit": db_get_device_limit(telegram_id),
+            "test_used": db_is_test_used(telegram_id),  # разовый тест 49₽/7д уже использован?
             # Тарифная сетка (единый источник bot/tariffs) — ЛК рендерит из неё,
             # цены на клиенте не хардкодим.
             "tariffs": [
@@ -1563,6 +1565,8 @@ def api_billing_create_stars_invoice():
             inv_days, inv_stars, inv_dev = _t["days"], _t["price_stars"], _t["device_limit"]
         else:
             inv_days, inv_stars, inv_dev = SUBSCRIPTION_DAYS_PER_PAYMENT, STARS_MONTHLY_PRICE, 5
+        if tariffs.months_from_days(inv_days) == 0 and db_is_test_used(telegram_id):
+            return jsonify({"error": "Тест уже использован."}), 409
 
         bot_token = getattr(config, "bot_token", None) if config else None
         if not bot_token:
@@ -1639,6 +1643,8 @@ def api_billing_claim_payment():
             cl_days, cl_dev, cl_price = _t["days"], _t["device_limit"], _t["price_rub"]
         else:
             cl_days, cl_dev, cl_price = SUBSCRIPTION_DAYS_PER_PAYMENT, 5, SUBSCRIPTION_RUB_PRICE
+        if tariffs.months_from_days(cl_days) == 0 and db_is_test_used(telegram_id):
+            return jsonify({"error": "Тест уже использован.", "test_used": True}), 409
 
         if not ADMIN_ID:
             return jsonify({"error": "ADMIN_TELEGRAM_ID не настроен"}), 503
@@ -1672,7 +1678,7 @@ def api_billing_claim_payment():
         else:
             status_line = "Подписка неактивна"
         text = (
-            f"💳 <b>Новая оплата — {cl_dev} устр., {cl_days // 30} мес ({cl_price} ₽)</b>\n\n"
+            f"💳 <b>Новая оплата — {cl_dev} устр., {tariffs.period_label(tariffs.months_from_days(cl_days))} ({cl_price} ₽)</b>\n\n"
             f"👤 @{username} (id: <code>{telegram_id}</code>)\n"
             f"📧 {email}\n"
             f"📅 Сейчас: {status_line}\n"

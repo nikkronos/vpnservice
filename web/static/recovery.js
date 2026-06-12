@@ -60,6 +60,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let payDevices = 3;
   let payMonths = 1;
   let acctTariffs = [];
+  // «Не работает» под выданным конфигом: замыкание, повторяющее последнюю генерацию.
+  let lastConfigRetry = null;
 
   // ── Telegram WebApp context ───────────────────────────────────────────────
   // SDK telegram-web-app.js хостится у нас локально (telegram.org из РФ нестабилен).
@@ -663,16 +665,32 @@ document.addEventListener('DOMContentLoaded', () => {
     manualBtn.textContent = `💳 Оплатить ${t.price_rub} ₽ СБП / картой`;
     manualBtn.addEventListener('click', () => { haptic('light'); renderManualPay(d); showStep(stepManualPay); });
     payBlock.appendChild(manualBtn);
+
+    // Платный тест «в реальной жизни» — отдельной кнопкой (3 устр., 7 дней, 49 ₽).
+    // Разовый: скрываем, если уже использован.
+    if (findTariff(3, 0) && !d.test_used) {
+      const testBtn = document.createElement('button');
+      testBtn.type = 'button';
+      testBtn.className = 'btn-recovery btn-recovery-secondary';
+      testBtn.style.marginTop = '8px';
+      testBtn.style.opacity = '0.85';
+      testBtn.textContent = '🧪 Сначала тест — 7 дней за 49 ₽';
+      testBtn.addEventListener('click', () => { haptic('light'); renderManualPay(d, 3, 0); showStep(stepManualPay); });
+      payBlock.appendChild(testBtn);
+    }
   }
 
   // Отдельный substep stepManualPay: реквизиты + кнопка «✅ Я перевёл деньги».
   // Заполняется в renderAccount (когда d уже есть) — навигация просто показывает заполненный контент.
-  function renderManualPay(d) {
+  function renderManualPay(d, oDev, oMonths) {
     if (!manualPayContent) return;
     manualPayContent.innerHTML = '';
     const mp = d.manual_pay || {};
-    const t = findTariff(payDevices, payMonths);
+    const dev = oDev || payDevices;
+    const months = (oMonths === 0 || oMonths) ? oMonths : payMonths;
+    const t = findTariff(dev, months);
     const rub = t ? t.price_rub : (d.subscription_rub_price || mp.rub || 200);
+    const periodTxt = months === 0 ? 'тест 7 дней' : `${months} мес`;
 
     // Если есть pending-заявка — показываем «ждём подтверждения» вместо реквизитов,
     // чтобы юзер случайно не нажал «Я перевёл» второй раз и не плодил уведомлений.
@@ -692,7 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     intro.className = 'section-hint';
     intro.style.marginTop = '0';
     intro.innerHTML = (
-      `Тариф: <b>${payDevices} устр., ${payMonths} мес — ${rub} ₽</b>.<br>` +
+      `Тариф: <b>${dev} устр., ${periodTxt} — ${rub} ₽</b>.<br>` +
       `1. Переведи <b>ровно ${rub} ₽</b> на номер или карту ниже.<br>` +
       `2. Нажми <b>«✅ Я перевёл деньги»</b> — владельцу придёт уведомление.<br>` +
       `3. Он проверит поступление и зачислит подписку (обычно в течение часа).`
@@ -731,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const r = await fetch('/api/billing/claim-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: sessionToken, source: 'webapp', devices: payDevices, months: payMonths }),
+          body: JSON.stringify({ token: sessionToken, source: 'webapp', devices: dev, months: months }),
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) {
@@ -998,6 +1016,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Рендер выданного конфига (config/qr/vpn_url) — та же логика, что в
   // [data-platform]-флоу (android → vpn://+QR; в TG → QR+копия; браузер → файл).
+  // Кнопка «Не работает» под выданным конфигом (ЛК-аналог бот-флоу «Не работает»):
+  // повторяет последнюю генерацию (пересоздаёт устройство / переотдаёт конфиг).
+  function appendRetryButton(container) {
+    if (!lastConfigRetry) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn-recovery btn-recovery-secondary';
+    b.style.marginTop = '14px';
+    b.textContent = '🔄 Не работает — обновить конфиг';
+    b.addEventListener('click', () => { haptic('light'); if (lastConfigRetry) lastConfigRetry(); });
+    container.appendChild(b);
+  }
+
   function renderAwgPayload(container, data) {
     const cfg = data.config || '';
     const filename = data.filename || 'awg_eu1.conf';
@@ -1196,6 +1227,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ok.textContent = `✅ Добавлено устройство «${d.name || ''}». Импортируй конфиг в AmneziaWG / AmneziaVPN.`;
       deviceResult.appendChild(ok);
       renderAwgPayload(deviceResult, d);
+      lastConfigRetry = () => regenDevice({ device_id: d.device_id, os: d.os, name: d.name });
+      appendRetryButton(deviceResult);
       loadDevices();  // обновить скрытый список к моменту «« Назад»
     } catch (e) {
       _deviceResultError((e && e.message) || e);
@@ -1219,6 +1252,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ok.textContent = `🔄 Конфиг «${dev.name}» пересоздан. Старый перестал работать — импортируй новый.`;
       deviceResult.appendChild(ok);
       renderAwgPayload(deviceResult, d);
+      lastConfigRetry = () => regenDevice(dev);
+      appendRetryButton(deviceResult);
       loadDevices();
     } catch (e) {
       _deviceResultError((e && e.message) || e);
@@ -1401,6 +1436,8 @@ document.addEventListener('DOMContentLoaded', () => {
           awgResult.appendChild(hint);
           renderQr(awgResult, data.qr, 'Или сканируй QR в AmneziaWG');
         }
+        lastConfigRetry = () => btn.click();
+        appendRetryButton(awgResult);
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {
@@ -1471,6 +1508,8 @@ document.addEventListener('DOMContentLoaded', () => {
         mobileResult.appendChild(inst);
 
         renderLinkBlock(mobileResult, link, '', 'Копировать ссылку');
+        lastConfigRetry = () => btn.click();
+        appendRetryButton(mobileResult);
       } catch (err) {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {

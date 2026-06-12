@@ -22,6 +22,10 @@ from .database import (
     db_delete_device,
     db_count_devices,
     db_get_device_limit,
+    db_set_use_case,
+    db_get_use_case,
+    db_is_test_used,
+    db_mark_test_used,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -260,11 +264,11 @@ def main() -> None:
         markup = types.InlineKeyboardMarkup(row_width=1)
         if trial_available:
             markup.add(
-                types.InlineKeyboardButton("🎁 Активировать 14 дней бесплатно", callback_data="menu_trial_activate"),
+                types.InlineKeyboardButton(f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно", callback_data="menu_trial_activate"),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
             text = (
-                "🎁 <b>Сначала активируй бесплатный период — 14 дней.</b>\n\n"
+                f"🎁 <b>Сначала активируй бесплатный период — {tariffs.TRIAL_DAYS} дней.</b>\n\n"
                 "Нажми кнопку ниже — и VPN сразу заработает. Без оплаты."
             )
         else:
@@ -309,6 +313,8 @@ def main() -> None:
     # "disclaimer" фаза не нужна в state — она показывается один раз через cmd_start без ожидания текстового ввода,
     # дальнейшие шаги — через callback'и + сообщения.
     _onboarding_state: dict[int, dict] = {}
+    # Открытый онбординг-вопрос «для чего VPN»: uid → ждём свободный ответ.
+    _use_case_state: dict[int, dict] = {}
 
     def _is_authorized(telegram_id: int) -> bool:
         """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
@@ -331,9 +337,9 @@ def main() -> None:
         authorized = _is_authorized(uid)
 
         greeting = (
-            "Привет! Это VPN-бот Kronos. 🔐\n\n"
-            f"🌐 Личный кабинет: {recovery_url}\n"
-            "⌛️ Канал с обновлениями: https://t.me/vpnkronos"
+            "Привет! Это VPN Kronos - бот. 🔐\n\n"
+            f'🌐 <a href="{recovery_url}">Личный кабинет - сайт (если телеграм не работает)</a>\n'
+            '⌛️ <a href="https://t.me/vpnkronos">Канал с обновлениями</a>'
         )
 
         if not authorized:
@@ -361,15 +367,14 @@ def main() -> None:
                 ),
             )
             markup.add(
-                types.InlineKeyboardButton("📲 Получить VPN", callback_data="menu_get_vpn"),
-                types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
-                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show"),
+                types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="menu_get_vpn", style="primary"),
+                types.InlineKeyboardButton("💳 Продлить подписку", callback_data="pay_show", style="success"),
                 types.InlineKeyboardButton("📊 Статус подписки", callback_data="menu_status"),
                 types.InlineKeyboardButton("📖 Инструкции", callback_data="menu_instruction"),
                 types.InlineKeyboardButton("📨 Proxy для Telegram", callback_data="menu_proxy"),
-                types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"),
+                types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support", style="danger"),
             )
-            # Кнопка «Активировать 14 дней» если триал ещё не использован И нет активной подписки.
+            # Кнопка активации триала если он ещё не использован И нет активной подписки.
             # Видна и после онбординга с «Пропустить», и при истёкшей подписке (если триал не был активирован).
             try:
                 sub = db_get_subscription(uid) or {}
@@ -387,7 +392,7 @@ def main() -> None:
                     if not expires_at or days_left == 0:
                         markup.add(
                             types.InlineKeyboardButton(
-                                "🎁 Активировать 14 дней бесплатно",
+                                f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно",
                                 callback_data="menu_trial_activate",
                             ),
                         )
@@ -400,22 +405,23 @@ def main() -> None:
                 markup.add(types.InlineKeyboardButton("🔗 Привязать email", callback_data="email_link"))
 
         if new_message:
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup,
+                             disable_web_page_preview=True)
         else:
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup,
+                             disable_web_page_preview=True)
 
     # ── Онбординг при /start в новом боте (под ENV-флагом ONBOARDING_ENABLED) ─
 
     _DISCLAIMER_TEXT = (
-        "<b>Онбординг.</b>\n\n"
-        "1. Сервис обеспечивает защищённое сетевое соединение для безопасной передачи данных. "
-        "Используется для законных личных и рабочих задач.\n"
-        "2. Трафик не лимитирован объёмом, но не используйте торренты — это создаёт избыточную "
-        "нагрузку на каналы.\n"
-        "3. Обратная связь приветствуется. По всем вопросам @nikkronos.\n"
-        "4. Приглашай друзей: при первой оплате друга — +14 дней тебе и ему. "
-        "Ссылка для приглашений в личном кабинете.\n"
-        "5. Вся важная информация будет публиковаться в тг канале: https://t.me/vpnkronos."
+        "Привет! Это <b>VPN Kronos</b>.\n\n"
+        "Сервис даёт защищённое сетевое соединение для повседневного доступа "
+        "с телефона и компьютера.\n\n"
+        "Сейчас:\n\n"
+        "1. подтвердим email;\n"
+        f"2. активируем {tariffs.TRIAL_DAYS} дней бесплатного доступа;\n"
+        "3. выдадим конфигурацию и инструкцию под твоё устройство.\n\n"
+        "Важно: торренты не поддерживаются, чтобы не создавать лишнюю нагрузку на каналы."
     )
 
     def _onboarding_needed(telegram_id: int) -> bool:
@@ -443,7 +449,7 @@ def main() -> None:
     def _start_onboarding(chat_id: int, telegram_id: int) -> None:
         """Показывает дисклеймер. Дальше — по нажатию кнопки `onb_ack`."""
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Я ознакомился(-ась)", callback_data="onb_ack"))
+        markup.add(types.InlineKeyboardButton("Начать настройку", callback_data="onb_ack"))
         try:
             bot.send_message(
                 chat_id,
@@ -532,13 +538,13 @@ def main() -> None:
         if not sub.get("trial_used") and not sub.get("expires_at"):
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
-                types.InlineKeyboardButton("🎁 Активировать 14 дней бесплатно", callback_data="onb_trial_yes"),
+                types.InlineKeyboardButton(f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно", callback_data="onb_trial_yes"),
                 types.InlineKeyboardButton("⏭ Пропустить", callback_data="onb_trial_skip"),
             )
             bot.send_message(
                 chat_id,
                 "✅ Email подтверждён.\n\n"
-                "🎁 Тебе доступна <b>бесплатная подписка на 14 дней</b> — активировать сейчас? "
+                f"🎁 Тебе доступна <b>бесплатная подписка на {tariffs.TRIAL_DAYS} дней</b> — активировать сейчас? "
                 "Можно пропустить и активировать позже из меню.",
                 parse_mode="HTML",
                 reply_markup=markup,
@@ -565,7 +571,7 @@ def main() -> None:
         if not call.from_user:
             return
         tid = call.from_user.id
-        new_exp = db_ensure_signup_trial(tid, days=14)
+        new_exp = db_ensure_signup_trial(tid, days=tariffs.TRIAL_DAYS)
         if new_exp:
             exp_str = new_exp[:10]
             bot.send_message(
@@ -573,7 +579,8 @@ def main() -> None:
                 f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
                 parse_mode="HTML",
             )
-        _send_main_menu_for_tid(call.message.chat.id, tid)
+        if not _maybe_ask_use_case(call.message.chat.id, tid):
+            _send_main_menu_for_tid(call.message.chat.id, tid)
 
     @bot.callback_query_handler(func=lambda call: call.data == "onb_trial_skip")
     def callback_onb_trial_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -595,11 +602,13 @@ def main() -> None:
             logger.warning("onb_trial_skip set-expired failed: %s", e)
         bot.send_message(
             call.message.chat.id,
-            "⏭ Триал не активирован. Можешь активировать его в любой момент через меню → «🎁 Активировать 14 дней».",
+            f"⏭ Триал не активирован. Можешь активировать его в любой момент через меню → «🎁 Активировать {tariffs.TRIAL_DAYS} дней».",
         )
-        _send_main_menu_for_tid(call.message.chat.id, tid)
+        # Вопрос-сегментацию задаём и при пропуске триала (не только при активации).
+        if not _maybe_ask_use_case(call.message.chat.id, tid):
+            _send_main_menu_for_tid(call.message.chat.id, tid)
 
-    # Кнопка «🎁 Активировать 14 дней» из главного меню бота (если триал доступен).
+    # Кнопка активации триала из главного меню бота (если триал доступен).
     @bot.callback_query_handler(func=lambda call: call.data == "menu_trial_activate")
     def callback_menu_trial_activate(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
@@ -609,7 +618,7 @@ def main() -> None:
         # db_start_trial: проверяет только trial_used (не требует expires_at IS NULL).
         # Это позволяет активировать триал и после "Пропустить" в онбординге (где expires_at=NOW).
         from .database import db_start_trial
-        new_exp = db_start_trial(tid, days=14)
+        new_exp = db_start_trial(tid, days=tariffs.TRIAL_DAYS)
         if new_exp:
             exp_str = new_exp[:10]
             bot.send_message(
@@ -617,12 +626,72 @@ def main() -> None:
                 f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
                 parse_mode="HTML",
             )
+            if _maybe_ask_use_case(call.message.chat.id, tid):
+                return
         else:
             bot.send_message(
                 call.message.chat.id,
                 "Триал уже был использован раньше или у тебя уже активна подписка.",
             )
         _send_main_menu_for_tid(call.message.chat.id, tid)
+
+    # ── Онбординг-сегментация: открытый вопрос «для чего VPN» (по желанию) ──────
+    def _maybe_ask_use_case(chat_id: int, uid: int) -> bool:
+        """Если ответ ещё не сохранён — задаёт открытый вопрос. True = задали
+        (меню отправим после ответа/пропуска), False = уже отвечал → дальше сразу."""
+        try:
+            if db_get_use_case(uid):
+                return False
+        except Exception:
+            return False
+        _use_case_state[uid] = {"step": "await"}
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("✍️ Ответить", callback_data="usecase_answer"),
+            types.InlineKeyboardButton("⏭ Пропустить", callback_data="usecase_skip"),
+        )
+        bot.send_message(
+            chat_id,
+            "🙋 Один короткий вопрос: <b>для чего тебе VPN в первую очередь?</b>\n\n"
+            "Это поможет сделать сервис лучше под тебя.",
+            parse_mode="HTML", reply_markup=markup,
+        )
+        return True
+
+    @bot.callback_query_handler(func=lambda call: call.data == "usecase_answer")
+    def callback_usecase_answer(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        # «Ответить» → показываем примеры и ждём свободный текст (state уже стоит,
+        # но переустановим на случай если был сброшен). Юзер пишет и отправляет.
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            _use_case_state[call.from_user.id] = {"step": "await"}
+        bot.send_message(
+            call.message.chat.id,
+            "Напиши одним сообщением — YouTube, работа, нейросети, музыка, сайты, что угодно.",
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data == "usecase_skip")
+    def callback_usecase_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            _use_case_state.pop(call.from_user.id, None)
+            _send_main_menu_for_tid(call.message.chat.id, call.from_user.id)
+
+    @bot.message_handler(
+        func=lambda msg: (msg.from_user is not None and msg.from_user.id in _use_case_state
+                          and bool(getattr(msg, "text", None)) and not msg.text.startswith("/"))
+    )
+    def handle_use_case_answer(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        uid = message.from_user.id
+        _use_case_state.pop(uid, None)
+        try:
+            db_set_use_case(uid, message.text or "")
+        except Exception as e:
+            logger.warning("db_set_use_case failed for %s: %s", uid, e)
+        bot.send_message(message.chat.id, "Спасибо! 🙌 Учтём.")
+        _send_main_menu_for_tid(message.chat.id, uid)
 
     @bot.callback_query_handler(func=lambda call: call.data == "onb_ack")
     def callback_onb_ack(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -901,6 +970,16 @@ def main() -> None:
             "из Google Play." + mobile_warn
         )
 
+    def _not_working_kb() -> types.InlineKeyboardMarkup:
+        """Клавиатура под выданным конфигом: быстрый переход в «Не работает» + меню.
+        Чтобы юзер получил конфиг и сразу мог нажать исправление, если не заработало."""
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(
+            types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
+        return kb
+
     def _deliver_config(
         message: types.Message,
         config_text: str,
@@ -919,16 +998,18 @@ def main() -> None:
         if platform == "android":
             vpn_link = generate_vpn_url(config_text)
             bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
-            bot.send_message(chat_id, vpn_link, parse_mode=None)
+            bot.send_message(chat_id, vpn_link, parse_mode=None, reply_markup=_not_working_kb())
         else:  # pc / ios
             _send_config_file(chat_id, config_text, filename)
-            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
+            bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True,
+                             reply_markup=_not_working_kb())
 
     def _deliver_vless_link(message: types.Message, vless_link: str, success_text: str) -> None:
         """Отправляет vless:// ссылку пользователю: сначала сообщение, потом ссылка в code-блоке."""
         chat_id = message.chat.id
         bot.send_message(chat_id, success_text, parse_mode="HTML")
-        bot.send_message(chat_id, f"<code>{vless_link}</code>", parse_mode="HTML")
+        bot.send_message(chat_id, f"<code>{vless_link}</code>", parse_mode="HTML",
+                         reply_markup=_not_working_kb())
 
     def _show_platform_keyboard(chat_id: int, action: str) -> None:
         """Отправляет клавиатуру выбора платформы перед выдачей конфига."""
@@ -2985,6 +3066,11 @@ def main() -> None:
                 tid, days=days, plan=f"stars_{device_limit}dev",
                 status="active", device_limit=device_limit,
             )
+            if tariffs.months_from_days(days) == 0:  # Stars-оплата тест-тарифа 49₽/7д — разовый
+                try:
+                    db_mark_test_used(tid)
+                except Exception as e:
+                    logger.warning("db_mark_test_used (stars) failed for %s: %s", tid, e)
             logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
@@ -3069,7 +3155,7 @@ def main() -> None:
         tid = int(claim["telegram_id"])
         days = int(claim.get("days") or 30)
         dev_limit = int(claim.get("device_limit") or 5)
-        _months = 3 if days >= 90 else 1
+        _months = tariffs.months_from_days(days)  # 7→0 (тест), 30→1, 90→3
         _tariff = tariffs.get_tariff(dev_limit, _months)
         _price = float(_tariff["price_rub"]) if _tariff else 200.0
         _plan = f"{dev_limit}dev_{_months}m"
@@ -3099,6 +3185,11 @@ def main() -> None:
             new_exp = db_extend_subscription(
                 tid, days=days, plan=_plan, status="active", device_limit=dev_limit,
             )
+            if _months == 0:  # тест-тариф 49₽/7д — разовый, помечаем использованным
+                try:
+                    db_mark_test_used(tid)
+                except Exception as e:
+                    logger.warning("db_mark_test_used (claim) failed for %s: %s", tid, e)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
             inviter_tid = None
@@ -3209,6 +3300,9 @@ def main() -> None:
                 _d, _m = 5, 1
         _t = tariffs.get_tariff(_d, _m) or tariffs.get_tariff(5, 1)
         _days, _dev_limit, _price = _t["days"], _t["device_limit"], _t["price_rub"]
+        if _m == 0 and db_is_test_used(tid):
+            bot.send_message(call.message.chat.id, "🧪 Тест уже использован. Выбери обычный тариф через «Продлить подписку».")
+            return
         # Проверим, что юзер вообще зарегистрирован
         user_row = db_find_user_by_telegram_id(tid)
         if not user_row:
@@ -3233,7 +3327,7 @@ def main() -> None:
         uname = user_row.get("username") or "—"
         email = user_row.get("email") or "—"
         text = (
-            f"💳 <b>Новая оплата — {_dev_limit} устр., {_m} мес ({_price} ₽)</b>\n\n"
+            f"💳 <b>Новая оплата — {_dev_limit} устр., {tariffs.period_label(_m)} ({_price} ₽)</b>\n\n"
             f"👤 @{uname} (id: <code>{tid}</code>)\n"
             f"📧 {email}\n"
             f"📅 Сейчас: {status_line}\n"
@@ -3302,6 +3396,7 @@ def main() -> None:
         )
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
+            types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
             types.InlineKeyboardButton("🔌 Другие способы подключения", callback_data="menu_other_connect"),
             types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
         )
@@ -3339,24 +3434,28 @@ def main() -> None:
         )
 
     # ── Donation-flow: выбор тарифа (устройства → срок) → реквизиты ───────────
-    def _pay_devices_kb() -> types.InlineKeyboardMarkup:
+    def _pay_devices_kb(uid: int) -> types.InlineKeyboardMarkup:
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(
             types.InlineKeyboardButton("📱 3 устройства", callback_data="paytar_dev:3"),
             types.InlineKeyboardButton("📱 5 устройств", callback_data="paytar_dev:5"),
         )
+        if not db_is_test_used(uid):  # разовый тест 49₽/7д — показываем только если не использован
+            kb.add(types.InlineKeyboardButton("🧪 Сначала тест — 7 дней за 49 ₽", callback_data="paytar:3:0"))
         kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         return kb
 
     @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
     def callback_pay_show(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
         bot.send_message(
             call.message.chat.id,
             "💳 <b>Оформить подписку</b>\n\n"
             "Шаг 1 — сколько устройств подключаешь?\n"
             "3 — дешевле; 5 — для нескольких гаджетов или семьи.",
-            parse_mode="HTML", reply_markup=_pay_devices_kb(),
+            parse_mode="HTML", reply_markup=_pay_devices_kb(call.from_user.id),
         )
 
     @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("paytar_dev:"))
@@ -3394,10 +3493,13 @@ def main() -> None:
         t = tariffs.get_tariff(d, m)
         if not t:
             return
+        if m == 0 and call.from_user and db_is_test_used(call.from_user.id):
+            bot.send_message(call.message.chat.id, "🧪 Бесплатный тест уже был использован — выбери обычный тариф.")
+            return
         price = t["price_rub"]
-        per = "" if m == 1 else f" ({price // m} ₽/мес)"
+        per = f" ({price // m} ₽/мес)" if m == 3 else ""   # помесячная только для 3 мес (m=0 → деление на 0!)
         text = (
-            f"💳 <b>{d} устройств · {m} мес</b>\n"
+            f"💳 <b>{d} устр. · {tariffs.period_label(m)}</b>\n"
             f"Цена: <b>{price} ₽</b>{per} · доступ на {t['days']} дней\n\n"
             "Переведи на Т-Банк любым способом:\n"
             "📱 СБП по телефону: <code>+79213032918</code>\n"
@@ -3406,7 +3508,7 @@ def main() -> None:
         )
         kb = types.InlineKeyboardMarkup(row_width=1)
         kb.add(types.InlineKeyboardButton(f"✅ Я перевёл {price} ₽", callback_data=f"pay_claim:{d}:{m}"))
-        kb.add(types.InlineKeyboardButton("« Назад", callback_data=f"paytar_dev:{d}"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data=("pay_show" if m == 0 else f"paytar_dev:{d}")))
         kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         try:
             bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=kb)
