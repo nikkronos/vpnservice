@@ -341,8 +341,8 @@ def main() -> None:
 
         greeting = (
             "Привет! Это VPN Kronos - бот. 🔐\n\n"
-            f"🌐 Личный кабинет: {recovery_url}\n"
-            "⌛️ Канал с обновлениями: https://t.me/vpnkronos"
+            f'🌐 <a href="{recovery_url}">Личный кабинет (сайт)</a>\n'
+            '⌛️ <a href="https://t.me/vpnkronos">Канал с обновлениями</a>'
         )
 
         if not authorized:
@@ -408,22 +408,23 @@ def main() -> None:
                 markup.add(types.InlineKeyboardButton("🔗 Привязать email", callback_data="email_link"))
 
         if new_message:
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup,
+                             disable_web_page_preview=True)
         else:
-            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+            bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup,
+                             disable_web_page_preview=True)
 
     # ── Онбординг при /start в новом боте (под ENV-флагом ONBOARDING_ENABLED) ─
 
     _DISCLAIMER_TEXT = (
-        "<b>Онбординг.</b>\n\n"
-        "1. Сервис обеспечивает защищённое сетевое соединение для безопасной передачи данных. "
-        "Используется для законных личных и рабочих задач.\n"
-        "2. Трафик не лимитирован объёмом, но не используйте торренты — это создаёт избыточную "
-        "нагрузку на каналы.\n"
-        "3. Обратная связь приветствуется. По всем вопросам @nikkronos.\n"
-        "4. Приглашай друзей: при первой оплате друга — +14 дней тебе и ему. "
-        "Ссылка для приглашений в личном кабинете.\n"
-        "5. Вся важная информация будет публиковаться в тг канале: https://t.me/vpnkronos."
+        "Привет! Это <b>VPN Kronos</b>.\n\n"
+        "Сервис даёт защищённое сетевое соединение для повседневного доступа "
+        "с телефона и компьютера.\n\n"
+        "Сейчас:\n\n"
+        "1. подтвердим email;\n"
+        f"2. активируем {tariffs.TRIAL_DAYS} дней бесплатного доступа;\n"
+        "3. выдадим конфигурацию и инструкцию под твоё устройство.\n\n"
+        "Важно: торренты не поддерживаются, чтобы не создавать лишнюю нагрузку на каналы."
     )
 
     def _onboarding_needed(telegram_id: int) -> bool:
