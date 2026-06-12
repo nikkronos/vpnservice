@@ -530,6 +530,10 @@ def _migrate_add_subscription_columns() -> None:
             ("device_limit", "INTEGER NOT NULL DEFAULT 5"),
             # use_case: открытый ответ юзера «для чего VPN» (сегментация, онбординг).
             ("use_case", "TEXT"),
+            # test_used: 0/1 — использован ли разовый платный тест 49₽/7д (как trial_used).
+            ("test_used", "INTEGER NOT NULL DEFAULT 0"),
+            # last_reminder_date: дата последнего ежедневного напоминания (anti-дубль за день).
+            ("last_reminder_date", "TEXT"),
         ]
         for name, decl in cols:
             if name not in existing:
@@ -1859,6 +1863,53 @@ def db_get_use_case(telegram_id: int) -> Optional[str]:
             "SELECT use_case FROM users WHERE telegram_id = ?", (telegram_id,)
         ).fetchone()
     return (row["use_case"] if row else None) or None
+
+
+def db_is_test_used(telegram_id: int) -> bool:
+    """Использован ли разовый платный тест (49₽/7д). Как trial_used — один раз на юзера."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT test_used FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+    return bool(row and row["test_used"])
+
+
+def db_mark_test_used(telegram_id: int) -> None:
+    """Помечает разовый тест использованным (вызывать при зачислении тест-тарифа)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET test_used = 1 WHERE telegram_id = ?", (telegram_id,)
+        )
+
+
+def db_users_due_for_daily_reminder() -> List[Dict]:
+    """Юзеры для ЕЖЕДНЕВНОГО напоминания: доступ (подписка/триал/тест) истекает в
+    ближайшие 0..7 календарных дней И сегодня ещё не уведомляли. Покрывает все
+    типы доступа (по expires_at). Grandfather (expires_at IS NULL) — пропускаются.
+    days_left считает вызывающий (expiry_reminder.py) по календарю."""
+    _ensure_init()
+    today = datetime.utcnow().date().isoformat()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT telegram_id, email, expires_at, subscription_status "
+            "FROM users WHERE expires_at IS NOT NULL AND telegram_id IS NOT NULL AND active = 1 "
+            "AND date(expires_at) >= date('now') AND date(expires_at) <= date('now', '+7 days') "
+            "AND (last_reminder_date IS NULL OR last_reminder_date != ?)",
+            (today,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def db_mark_daily_reminder_sent(telegram_id: int, date_str: str) -> None:
+    """Помечает дату последнего ежедневного напоминания (idempotent в пределах дня)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET last_reminder_date = ? WHERE telegram_id = ?",
+            (date_str, telegram_id),
+        )
 
 
 def db_start_trial(telegram_id: int, days: int) -> Optional[str]:

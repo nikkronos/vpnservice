@@ -24,6 +24,8 @@ from .database import (
     db_get_device_limit,
     db_set_use_case,
     db_get_use_case,
+    db_is_test_used,
+    db_mark_test_used,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -313,6 +315,9 @@ def main() -> None:
     _onboarding_state: dict[int, dict] = {}
     # Открытый онбординг-вопрос «для чего VPN»: uid → ждём свободный ответ.
     _use_case_state: dict[int, dict] = {}
+    # ВРЕМЕННО (тест): эти tid проходят онбординг без email/OTP (тест-аккаунты, не
+    # получающие письма). Любой ввод на шаге email → финализация. Убрать после тестов.
+    _ONBOARDING_NO_EMAIL_IDS = {6133596373}
 
     def _is_authorized(telegram_id: int) -> bool:
         """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
@@ -721,6 +726,18 @@ def main() -> None:
         text = (message.text or "").strip()
 
         if step == "email":
+            # ── Тест-байпас: tid из _ONBOARDING_NO_EMAIL_IDS проходят без email/OTP.
+            if tid in _ONBOARDING_NO_EMAIL_IDS:
+                from .database import db_upsert_user
+                db_upsert_user({
+                    "telegram_id": tid,
+                    "email": f"test_{tid}@kronos.local",
+                    "email_verified": True,
+                    "active": True,
+                })
+                bot.send_message(message.chat.id, "✅ Тест-аккаунт: онбординг пройден без email.")
+                _finalize_onboarding(message.chat.id, tid)
+                return
             email = text.lower()
             if "@" not in email or "." not in email.split("@")[-1]:
                 bot.send_message(message.chat.id, "Это не похоже на email. Попробуй ещё раз.")
@@ -3036,6 +3053,11 @@ def main() -> None:
                 tid, days=days, plan=f"stars_{device_limit}dev",
                 status="active", device_limit=device_limit,
             )
+            if tariffs.months_from_days(days) == 0:  # Stars-оплата тест-тарифа 49₽/7д — разовый
+                try:
+                    db_mark_test_used(tid)
+                except Exception as e:
+                    logger.warning("db_mark_test_used (stars) failed for %s: %s", tid, e)
             logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
@@ -3150,6 +3172,11 @@ def main() -> None:
             new_exp = db_extend_subscription(
                 tid, days=days, plan=_plan, status="active", device_limit=dev_limit,
             )
+            if _months == 0:  # тест-тариф 49₽/7д — разовый, помечаем использованным
+                try:
+                    db_mark_test_used(tid)
+                except Exception as e:
+                    logger.warning("db_mark_test_used (claim) failed for %s: %s", tid, e)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
             inviter_tid = None
@@ -3260,6 +3287,9 @@ def main() -> None:
                 _d, _m = 5, 1
         _t = tariffs.get_tariff(_d, _m) or tariffs.get_tariff(5, 1)
         _days, _dev_limit, _price = _t["days"], _t["device_limit"], _t["price_rub"]
+        if _m == 0 and db_is_test_used(tid):
+            bot.send_message(call.message.chat.id, "🧪 Тест уже использован. Выбери обычный тариф через «Продлить подписку».")
+            return
         # Проверим, что юзер вообще зарегистрирован
         user_row = db_find_user_by_telegram_id(tid)
         if not user_row:
@@ -3390,25 +3420,28 @@ def main() -> None:
         )
 
     # ── Donation-flow: выбор тарифа (устройства → срок) → реквизиты ───────────
-    def _pay_devices_kb() -> types.InlineKeyboardMarkup:
+    def _pay_devices_kb(uid: int) -> types.InlineKeyboardMarkup:
         kb = types.InlineKeyboardMarkup(row_width=2)
         kb.add(
             types.InlineKeyboardButton("📱 3 устройства", callback_data="paytar_dev:3"),
             types.InlineKeyboardButton("📱 5 устройств", callback_data="paytar_dev:5"),
         )
-        kb.add(types.InlineKeyboardButton("🧪 Сначала тест — 7 дней за 49 ₽", callback_data="paytar:3:0"))
+        if not db_is_test_used(uid):  # разовый тест 49₽/7д — показываем только если не использован
+            kb.add(types.InlineKeyboardButton("🧪 Сначала тест — 7 дней за 49 ₽", callback_data="paytar:3:0"))
         kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         return kb
 
     @bot.callback_query_handler(func=lambda call: call.data == "pay_show")
     def callback_pay_show(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
         bot.send_message(
             call.message.chat.id,
             "💳 <b>Оформить подписку</b>\n\n"
             "Шаг 1 — сколько устройств подключаешь?\n"
             "3 — дешевле; 5 — для нескольких гаджетов или семьи.",
-            parse_mode="HTML", reply_markup=_pay_devices_kb(),
+            parse_mode="HTML", reply_markup=_pay_devices_kb(call.from_user.id),
         )
 
     @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("paytar_dev:"))
@@ -3445,6 +3478,9 @@ def main() -> None:
             return
         t = tariffs.get_tariff(d, m)
         if not t:
+            return
+        if m == 0 and call.from_user and db_is_test_used(call.from_user.id):
+            bot.send_message(call.message.chat.id, "🧪 Бесплатный тест уже был использован — выбери обычный тариф.")
             return
         price = t["price_rub"]
         per = f" ({price // m} ₽/мес)" if m == 3 else ""   # помесячная только для 3 мес (m=0 → деление на 0!)

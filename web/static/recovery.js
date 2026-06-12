@@ -665,7 +665,8 @@ document.addEventListener('DOMContentLoaded', () => {
     payBlock.appendChild(manualBtn);
 
     // Платный тест «в реальной жизни» — отдельной кнопкой (3 устр., 7 дней, 49 ₽).
-    if (findTariff(3, 0)) {
+    // Разовый: скрываем, если уже использован.
+    if (findTariff(3, 0) && !d.test_used) {
       const testBtn = document.createElement('button');
       testBtn.type = 'button';
       testBtn.className = 'btn-recovery btn-recovery-secondary';
