@@ -920,6 +920,9 @@ _SEG_ONBOARDED = (
     "(migrated_at IS NOT NULL AND email_verified = 1 "
     "AND email IS NOT NULL AND email NOT LIKE '%@kronos.internal')"
 )
+# Тест-получатели владельца — сегмент «test» шлёт только на них (проверка рассылок
+# без спама реальной базе). Аккаунт должен хотя бы раз нажать /start у бота.
+_SEG_TEST_IDS = (7882817110,)
 
 
 def db_users_by_segment(segment: str) -> List[Dict]:
@@ -941,6 +944,10 @@ def db_users_by_segment(segment: str) -> List[Dict]:
         where = f"{_SEG_BASE} AND NOT {_SEG_ACTIVE} AND NOT {_SEG_ONBOARDED}"
     elif segment == "inactive_used":
         where = f"{_SEG_BASE} AND NOT {_SEG_ACTIVE} AND {_SEG_ONBOARDED}"
+    elif segment == "test":
+        # Только тест-аккаунты владельца (не из БД) — для проверки рассылок.
+        return [{"telegram_id": t, "email": None, "expires_at": None, "migrated_at": None}
+                for t in _SEG_TEST_IDS]
     else:
         return []
     with _conn() as con:

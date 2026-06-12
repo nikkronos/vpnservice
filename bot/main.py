@@ -314,6 +314,7 @@ def main() -> None:
         "inactive": "Неактивные (все)",
         "inactive_no_onboarding": "Неактивные · не прошли онбординг",
         "inactive_used": "Неактивные · пользовавшиеся",
+        "test": "🧪 Тест (только мой 2-й акк)",
     }
 
     # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
@@ -2002,6 +2003,7 @@ def main() -> None:
             types.InlineKeyboardButton("💤 Неактивные (все)", callback_data="bcast_seg:inactive"),
             types.InlineKeyboardButton("📝 Неактивные · не прошли онбординг", callback_data="bcast_seg:inactive_no_onboarding"),
             types.InlineKeyboardButton("🔚 Неактивные · пользовавшиеся", callback_data="bcast_seg:inactive_used"),
+            types.InlineKeyboardButton("🧪 Тест (только мой 2-й акк)", callback_data="bcast_seg:test"),
             types.InlineKeyboardButton("« Назад", callback_data="admin_panel"),
         )
         bot.edit_message_text(
