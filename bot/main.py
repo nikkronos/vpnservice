@@ -26,6 +26,7 @@ from .database import (
     db_get_use_case,
     db_is_test_used,
     db_mark_test_used,
+    db_users_by_segment,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -305,6 +306,15 @@ def main() -> None:
 
     # Состояние ожидания текста для рассылки
     _pending_broadcast: set[int] = set()
+    # Выбранный сегмент рассылки (owner uid → segment key). См. db_users_by_segment.
+    _broadcast_segment: dict[int, str] = {}
+    _SEGMENT_LABELS = {
+        "all": "Все",
+        "active": "Активные (есть доступ)",
+        "inactive": "Неактивные (все)",
+        "inactive_no_onboarding": "Неактивные · не прошли онбординг",
+        "inactive_used": "Неактивные · пользовавшиеся",
+    }
 
     # Email-link flow: {telegram_id: {"state": "email"|"otp", "email": str}}
     _email_link_state: dict[int, dict] = {}
@@ -1982,21 +1992,44 @@ def main() -> None:
             bot.answer_callback_query(call.id, "Только для владельца.")
             return
         bot.answer_callback_query(call.id)
+        # Сброс предыдущего незавершённого выбора.
+        _pending_broadcast.discard(call.from_user.id)
+        _broadcast_segment.pop(call.from_user.id, None)
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(
+            types.InlineKeyboardButton("👥 Все", callback_data="bcast_seg:all"),
+            types.InlineKeyboardButton("✅ Активные (есть доступ)", callback_data="bcast_seg:active"),
+            types.InlineKeyboardButton("💤 Неактивные (все)", callback_data="bcast_seg:inactive"),
+            types.InlineKeyboardButton("📝 Неактивные · не прошли онбординг", callback_data="bcast_seg:inactive_no_onboarding"),
+            types.InlineKeyboardButton("🔚 Неактивные · пользовавшиеся", callback_data="bcast_seg:inactive_used"),
+            types.InlineKeyboardButton("« Назад", callback_data="admin_panel"),
+        )
+        bot.edit_message_text(
+            "📢 <b>Рассылка</b>\n\nВыбери сегмент получателей:",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=kb,
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("bcast_seg:"))
+    def callback_broadcast_segment(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        seg = call.data.split(":", 1)[1]
+        if seg not in _SEGMENT_LABELS:
+            return
+        _broadcast_segment[call.from_user.id] = seg
         _pending_broadcast.add(call.from_user.id)
         try:
-            users = get_all_users()
-            active = [u for u in users if u.active and u.telegram_id > 0]
-            count = len(active)
+            count = len(db_users_by_segment(seg))
         except Exception:  # noqa: BLE001
             count = "?"
         bot.edit_message_text(
-            f"📢 <b>Рассылка</b>\n\n"
-            f"Получателей: <b>{count}</b> активных пользователей.\n\n"
-            "Напиши текст сообщения — отправлю его всем.\n"
-            "<i>Поддерживается HTML-разметка: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
+            f"📢 <b>Рассылка → {_SEGMENT_LABELS[seg]}</b>\n\n"
+            f"Получателей: <b>{count}</b>.\n\n"
+            "Напиши текст — отправлю этому сегменту.\n"
+            "<i>HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML",
         )
 
     @bot.message_handler(
@@ -2006,34 +2039,39 @@ def main() -> None:
         """Получает текст рассылки от владельца и рассылает всем активным пользователям."""
         if not message.from_user:
             return
-        _pending_broadcast.discard(message.from_user.id)
+        uid = message.from_user.id
+        _pending_broadcast.discard(uid)
+        seg = _broadcast_segment.pop(uid, "all")
         broadcast_text = (message.text or "").strip()
         if not broadcast_text:
             bot.reply_to(message, "❌ Пустое сообщение. Рассылка отменена.")
             return
 
-        # Превью и подтверждение через inline-кнопки не делаем — просто рассылаем сразу.
-        # Если передумал — просто не отправляй текст.
+        # Шлём сразу по выбранному сегменту. Если передумал — просто не отправляй текст.
         try:
-            users = get_all_users()
+            recipients = db_users_by_segment(seg)
         except Exception as e:  # noqa: BLE001
-            bot.reply_to(message, f"❌ Ошибка чтения пользователей: {e!r}")
+            bot.reply_to(message, f"❌ Ошибка выборки сегмента: {e!r}")
             return
 
-        active_users = [u for u in users if u.active and u.telegram_id > 0]
-        status_msg = bot.reply_to(message, f"⏳ Рассылаю {len(active_users)} пользователям…")
+        seg_label = _SEGMENT_LABELS.get(seg, seg)
+        status_msg = bot.reply_to(message, f"⏳ Рассылаю {len(recipients)} ({seg_label})…")
         sent = 0
         failed = 0
-        for u in active_users:
+        for u in recipients:
+            tid = u.get("telegram_id")
+            if not tid:
+                continue
             try:
-                bot.send_message(u.telegram_id, broadcast_text, parse_mode="HTML")
+                bot.send_message(int(tid), broadcast_text, parse_mode="HTML",
+                                 disable_web_page_preview=True)
                 sent += 1
                 time.sleep(0.05)
             except Exception as e:  # noqa: BLE001
-                logger.warning("Broadcast: не отправлено %s: %s", u.telegram_id, e)
+                logger.warning("Broadcast: не отправлено %s: %s", tid, e)
                 failed += 1
         bot.edit_message_text(
-            f"✅ Рассылка завершена: отправлено <b>{sent}</b>, не доставлено <b>{failed}</b>.",
+            f"✅ Рассылка ({seg_label}) завершена: отправлено <b>{sent}</b>, не доставлено <b>{failed}</b>.",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             parse_mode="HTML",

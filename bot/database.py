@@ -910,6 +910,46 @@ def db_get_all_users() -> List[Dict]:
         return [dict(r) for r in rows]
 
 
+# Сегменты для рассылок (broadcast). active=1 — аккаунт включён (не cruft/бан).
+# «доступ активен» = expires_at в будущем (реальных grandfather=NULL у нас нет —
+# NULL это незавершённый онбординг/placeholder, в active НЕ попадает).
+# «онбординг завершён» = migrated + верифицированный НЕ синтетический email.
+_SEG_BASE = "telegram_id IS NOT NULL AND telegram_id > 0 AND active = 1"
+_SEG_ACTIVE = "(expires_at IS NOT NULL AND datetime(expires_at) > datetime('now'))"
+_SEG_ONBOARDED = (
+    "(migrated_at IS NOT NULL AND email_verified = 1 "
+    "AND email IS NOT NULL AND email NOT LIKE '%@kronos.internal')"
+)
+
+
+def db_users_by_segment(segment: str) -> List[Dict]:
+    """Юзеры по сегменту для рассылок:
+      all                    — все включённые аккаунты;
+      active                 — доступ активен (срок в будущем);
+      inactive               — доступ неактивен (NULL/истёк);
+      inactive_no_onboarding — неактивные, НЕ завершившие онбординг;
+      inactive_used          — неактивные, завершившие онбординг (отвалившиеся).
+    """
+    _ensure_init()
+    if segment == "all":
+        where = _SEG_BASE
+    elif segment == "active":
+        where = f"{_SEG_BASE} AND {_SEG_ACTIVE}"
+    elif segment == "inactive":
+        where = f"{_SEG_BASE} AND NOT {_SEG_ACTIVE}"
+    elif segment == "inactive_no_onboarding":
+        where = f"{_SEG_BASE} AND NOT {_SEG_ACTIVE} AND NOT {_SEG_ONBOARDED}"
+    elif segment == "inactive_used":
+        where = f"{_SEG_BASE} AND NOT {_SEG_ACTIVE} AND {_SEG_ONBOARDED}"
+    else:
+        return []
+    with _conn() as con:
+        rows = con.execute(
+            f"SELECT telegram_id, email, expires_at, migrated_at FROM users WHERE {where}"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def db_update_proxy_requested_at(telegram_id: int) -> None:
     """Записывает время последнего запроса MTProxy-ссылки пользователем."""
     _ensure_init()
