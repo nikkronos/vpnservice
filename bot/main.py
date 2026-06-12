@@ -656,17 +656,22 @@ def main() -> None:
         bot.send_message(
             chat_id,
             "🙋 Один короткий вопрос: <b>для чего тебе VPN в первую очередь?</b>\n\n"
-            "Напиши одним сообщением — YouTube, работа, нейросети, музыка, сайты, "
-            "что угодно. Это поможет сделать сервис лучше под тебя.",
+            "Это поможет сделать сервис лучше под тебя.",
             parse_mode="HTML", reply_markup=markup,
         )
         return True
 
     @bot.callback_query_handler(func=lambda call: call.data == "usecase_answer")
     def callback_usecase_answer(call: types.CallbackQuery) -> None:  # type: ignore[override]
-        # Кнопка-подсказка: состояние уже ждёт ввод, просто подталкиваем написать
-        # (вторая кнопка нужна, чтобы не нажали автоматом единственный «Пропустить»).
-        bot.answer_callback_query(call.id, "Напиши ответ одним сообщением 👇")
+        # «Ответить» → показываем примеры и ждём свободный текст (state уже стоит,
+        # но переустановим на случай если был сброшен). Юзер пишет и отправляет.
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            _use_case_state[call.from_user.id] = {"step": "await"}
+        bot.send_message(
+            call.message.chat.id,
+            "Напиши одним сообщением — YouTube, работа, нейросети, музыка, сайты, что угодно.",
+        )
 
     @bot.callback_query_handler(func=lambda call: call.data == "usecase_skip")
     def callback_usecase_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
