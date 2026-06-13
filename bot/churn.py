@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 CHURN_TEXT = (
-    "Жаль, что не продолжил 😔\n\n"
+    "Жаль, что доступ закончился 😔\n\n"
     "Что стало причиной? Один тап — поможет нам стать лучше."
 )
 CHURN_REASONS: List[Tuple[str, str]] = [
@@ -27,7 +27,7 @@ CHURN_REASONS: List[Tuple[str, str]] = [
 ]
 
 ONB_TEXT = (
-    "Ты начал настройку, но не закончил 🤔\n\n"
+    "Похоже, настройка осталась незаконченной 🤔\n\n"
     "Что помешало? Один тап — поможет нам стать лучше."
 )
 ONB_REASONS: List[Tuple[str, str]] = [

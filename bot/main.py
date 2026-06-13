@@ -734,7 +734,7 @@ def main() -> None:
                 kb.add(types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"))
                 bot.send_message(chat_id, "Спасибо! Давай починим — опиши проблему в поддержке, поможем 👇", reply_markup=kb)
             else:  # not_needed / found_other / other
-                bot.send_message(chat_id, "Спасибо, что попробовал 🙌 Будем рады вернуть.")
+                bot.send_message(chat_id, "Спасибо за интерес 🙌 Будем рады вернуть.")
         else:  # onb (не прошли онбординг)
             if code in ("too_hard", "no_email", "other"):
                 bot.send_message(chat_id, "Спасибо! Закончить настройку — минута: жми /start, поможем.")
