@@ -47,7 +47,7 @@ git log --oneline -3
 
 ---
 
-## Инфраструктура (май 2026)
+## Инфраструктура (июнь 2026)
 
 | Сервер | IP | Что на нём |
 |--------|-----|-----------|
@@ -92,6 +92,10 @@ git log --oneline -3
 | Голый MTProto на eu1 | ❌ Блок по сигнатуре | — |
 | Cloudflare на LTE whitelist | ❌ Даже CF IPs не в whitelist | — |
 
+**Подписка `/sub` = 4 узла** (метки в Happ): 🇪🇺 Европа (yc) · 🇪🇺 Европа-2 (yc2) · 🇩🇪 Германия (eu1 direct) · 🇷🇺 Россия (main). yc/yc2 — **фронт-релеи в eu1** (правило #0), не прямые выходы.
+
+**Покрытие (факт, тест владельца 06-13 на T2):** РКН режет по **IP-репутации, не транспорту** (память `project_vpn_rkn_ip_block`). На мобильных/фильтрующих сетях надёжны только Яндекс-узлы (Европа/Европа-2) + AmneziaWG; eu1 (Германия) и main (Россия) прямым входом могут не подниматься даже без БС. **Мегафон при БС — известный гэп** (ждём тест человека); **Yota** решено 05-21 (БС-ретест ждёт). Покрытие операторов НЕ считать «закрытым».
+
 ---
 
 ## Архитектура (код)
@@ -132,13 +136,13 @@ scripts/
 ### Ключевые концепции
 
 - **server_id:** `eu1` (AmneziaWG, Docker), логически был `eu2` — нормализован в `eu1` через `storage.py`
-- **peer key формат (с 2026-06-10, Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` — composite-PK таблицы `peers`. Раньше был `platform` (per-OS), сменён на **именованные устройства** (`devices` table: device_id/telegram_id/name/os) — фикс коллизии iPad/iPhone (фидбэк Ани) + база под «семейный» тариф. **`os`** (`pc`/`ios`/`android`) — свойство устройства, формат доставки. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут). **Backward-compat shim в `storage.py`:** функции принимают `platform=` (legacy) и мапят на device с нужным os; `Peer.platform` — алиас `Peer.os`. Поэтому бот/ЛК/wireguard_peers работают без правок. **UX «Мои устройства» НА ПРОДЕ в боте (B3, 06-10) И в ЛК (B4, 06-11): список/добавить/обновить/удалить/переименовать. cap по тарифу — `db_get_device_limit` (3/5; грандфазер/триал=5), не хардкод.** ЛК-эндпоинты: `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Фаза 2 B завершена.
+- **peer key (Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` (composite-PK `peers`). Раньше `platform` (per-OS) → перешли на **именованные устройства** (таблица `devices`: device_id/telegram_id/name/os). `os` (`pc`/`ios`/`android`) — только формат доставки. **Shim в `storage.py`:** принимает `platform=` (legacy), мапит на device; `Peer.platform` = алиас `Peer.os` → бот/ЛК/wireguard_peers без правок. UX «Мои устройства» (список/добавить/обновить/удалить/переименовать) в боте и ЛК; эндпоинты `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Cap по тарифу — `db_get_device_limit` (3/5; грандфазер/триал=5), не хардкод. _(детали внедрения: DONE_LIST 06-10/06-11)_
 - **Платформы/os:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
 - **device-хелперы** (`bot/database.py`): `db_list_devices`/`db_get_device`/`db_add_device`/`db_rename_device`/`db_delete_device`/`db_count_devices`.
 - **Admin auth:** `ADMIN_SECRET` (64-char hex) — для `/api/users`, `/api/traffic`
 - **Recovery auth:** `RECOVERY_SECRET` — для legacy recovery endpoints
 - **traffic_accounting (SQLite):** накопительный lifetime-трафик по pubkey, reset-aware (счётчики awg обнуляются при рестарте/перегенерации). Пишется из `/api/traffic` при просмотре + cron `*/5` `scripts/traffic_accounting.py`. Столбец «Всего» в панели.
-- **Модель аккаунта (биллинг, Фаза 0, 2026-05-25):** в `users` поля `subscription_status`/`expires_at`/`trial_used`/`plan`/`referral_code`/`referred_by`/`password_hash`/`sub_token` + таблица `payments`. Хелперы в `database.py` (`db_is_access_active`, `db_start_trial`, `db_extend_subscription`, `db_ensure_referral_code`, `db_set_password`, `db_ensure_sub_token`, …). **expires_at NULL = grandfathered**, но реальных grandfather-юзеров нет (только email-only placeholder). **Enforcement ВКЛЮЧЕН** (`ENFORCEMENT_ENABLED=1` + `enforce_expired.py` hourly + per-user VLESS revoke). **Существующие НЕ grandfather'нуты** — при миграции 27.05 им выдали 14-дн триал (~30 истекают 2026-06-10; решение 2026-06-03: оставить триал→оплату). Новые стартуют с триала. **Триал = 7 дней** (с 2026-06-12; источник `tariffs.TRIAL_DAYS`, был 14). REFERRAL_REWARD_DAYS=14 (не путать с триалом). Доп. поля `users` (миграции 06-11/06-12): `device_limit` (лимит устройств по тарифу 3/5; грандфазер=5), `use_case` (открытый онбординг-ответ «для чего VPN» → сегментация, в Google Sheets), `test_used` (разовый платный тест 49₽/7д использован), `last_reminder_date` (anti-дубль ежедневных напоминаний), `drop_reason`/`drop_reason_at`/`churn_asked_at` (churn-опрос причин отвала → Google Sheets; дедуп). **Рассылка сегментирована** (owner «📢 Рассылка»: all/active/inactive/inactive_no_onboarding/inactive_used/test → текст или опрос причин; `db_users_by_segment`).
+- **Модель аккаунта (биллинг, Фаза 0):** `users` поля `subscription_status`/`expires_at`/`trial_used`/`plan`/`referral_code`/`referred_by`/`password_hash`/`sub_token` + таблица `payments`. Хелперы (`db_is_access_active`, `db_start_trial`, `db_extend_subscription`, `db_ensure_referral_code`, `db_set_password`, `db_ensure_sub_token`, …). **expires_at NULL = grandfathered** (реальных нет). **Enforcement ВКЛ** (`ENFORCEMENT_ENABLED=1` + `enforce_expired.py` hourly + per-user VLESS revoke). **Триал 7 дней** (`tariffs.TRIAL_DAYS`); `REFERRAL_REWARD_DAYS=14` (не путать). Доп. поля `users`: `device_limit` (3/5; грандфазер=5), `use_case` (онбординг «для чего VPN» → Google Sheets), `test_used` (разовый тест 49₽/7д), `last_reminder_date` (anti-дубль напоминаний), `drop_reason`/`drop_reason_at`/`churn_asked_at` (churn-опрос → Sheets). **Рассылка сегментирована** (`db_users_by_segment`: all/active/inactive/inactive_no_onboarding/inactive_used/test → текст или опрос).
 - **Subscription-URL (validated 2026-05-25):** `GET /sub/<sub_token>` → base64-список VLESS-REALITY ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`). HAPP/Streisand/V2Box/Hiddify импортируют как «subscription» — один URL, авто-выбор сервера, авто-обновление. Гейт `db_is_access_active` — истёк срок → пустая подписка → все устройства отваливаются (чистый enforcement для Фазы 4). Спайк: общие share-ссылки; per-user UUID — TODO. `ProxyFix(x_proto, x_host)` в app.py чтобы за nginx Flask отдавал https-ссылки.
 - **Cloudflare в РФ заблокирован/throttled** (durable, 2026-05-25): DPI режет TLS к CF — у владельца Safari не открывает CF-fronted домен. **CF используем только как DNS (grey-cloud)**, не как прокси. HTTPS — прямой с нашего хоста (Fornex direct + LE cert).
 - **Зависимость:** `qrcode[pil]` (QR в ЛК). В `requirements.txt`; на сервере уже в venv.
@@ -317,8 +321,10 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 
 | Нужно | Читай |
 |-------|-------|
-| Открытые задачи | `ROADMAP_VPN.md` |
-| История изменений | `DONE_LIST_VPN.md` |
+| **Навигация по докам** | **`docs/README.md`** (индекс + правила source-of-truth + правило свежести 7 дн) |
+| Открытые задачи | `ROADMAP_VPN.md` (только открытое) |
+| История изменений | `DONE_LIST_VPN.md` (хронология + оглавление) |
+| Монетизация / платежи | `docs/monetization-and-payments.md` |
 | Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-12.md` |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |

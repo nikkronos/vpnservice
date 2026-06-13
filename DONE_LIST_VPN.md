@@ -1,1228 +1,577 @@
 # DONE_LIST_VPN — выполненные задачи VPN/Proxy проекта
 
-## 2026-06-12 — Churn-опрос + сегментированная рассылка (S1+S2+S3) НА ПРОДЕ
+> Хронология выполненного (newest-first). Единый формат: `## дата — заголовок` +
+> сжатые буллеты (что сделано / решение / коммит). Детали — в коммитах и
+> `docs/sessions/SESSION_SUMMARY_*`. Открытые задачи — в `ROADMAP_VPN.md`.
+> Сжато 2026-06-13 (порядок в документах). Записей: 86 (включая 7 вех, ранее живших
+> только в ROADMAP-пометках + сессиях — перенесены сюда при чистке ROADMAP).
 
-Диагностика воронки: спрашиваем у отвалившихся причину. Ветка `feature/churn-survey` → main (`1173213`). Смоук владельца (тест-сегмент на 2-й аккаунт) ок.
+## Оглавление
 
-- **S1 — сегментированная рассылка** (owner «📢 Рассылка»): `db_users_by_segment` — all / active / inactive / inactive_no_onboarding / inactive_used + **test** (только на 2-й акк владельца 7882817110, для проверок). Флоу: сегмент → счёт → «📝 текст | ❓ опрос» → отправка (пейсинг, 403-скип, отчёт). Сегменты на проде: active 26 / inactive_used 16 / inactive_no_onboarding 13.
-- **S2 — опрос причин + win-back.** `bot/churn.py` (единый источник текстов/причин/клавиатур, 2 вида: `churn` 3.2 / `onb` 3.1). Колонки `users.drop_reason`/`drop_reason_at`/`churn_asked_at` (миграция). Бот: `_send_churn_survey` + callback `drop:<kind>:<code>` (сохранить причину → дедуп → убрать кнопки → win-back; «не работало»/«другое» → уточнение свободным текстом). Win-back: дорого→тест49₽/тарифы, забыл→продлить, не работало→поддержка; onb→«закончи /start». `drop_reason` → Google Sheets. **Авто-T+1** (`expiry_reminder`): истёк вчера + неактивен + онбординг завершён + не спрошен → churn-опрос. **T-0:** кнопка «🤔 Не планирую продлевать» (churn_open) в напоминании. Дедуп `churn_asked_at` (T-0/авто/рассылка не дублируют).
-- **S3 — рассылка опроса по бэклогу:** в флоу рассылки выбор «опрос причин (churn)» для inactive_used/test, «опрос про онбординг (onb)» для inactive_no_onboarding/test. Дедуп по churn_asked_at (пропуск уже спрошенных).
-- Деплой: бэкап БД+код → scp → миграция (3 колонки) → restart vpn-bot → контролируемый смоук-опрос на 7882817110.
+**2026-06**
+- 2026-06-12 — Churn-опрос + сегментированная рассылка (S1+S2+S3)
+- 2026-06-12 — Продуктовые доводки воронки (триал/тест/напоминания/онбординг/UX)
+- 2026-06-11 — Тарифы 199/249/449/599 НА ПРОДЕ
+- 2026-06-11 — VLESS enforcement-лаг закрыт (sync ежечасно)
+- 2026-06-11 — fail2ban на main/yc/yc2
+- 2026-06-11 — Фаза 2 B4: устройства в ЛК → Фаза 2 B завершена
+- 2026-06-11 — yc2 ночной false-FAIL устранён
+- 2026-06-11 — Гигиена: ссылки RULES_CURSOR.md → RULES.md
+- 2026-06-10 — Фаза 2 B3: «Мои устройства» в боте (фикс Ани)
+- 2026-06-10 — Фаза 2 B1+B2: per-device слой (cutover)
+- 2026-06-10 — access_audit расширен на main-wg0 + legacy
+- 2026-06-10 — Подписка/ЛК через Яндекс-фронт (БС-резильентность)
+- 2026-06-10 — Фаза 2 A-Stage1: iplimit-наблюдение
+- 2026-06-10 — Поштучный разбор eu1 «shared» + liveness-аудит
+- 2026-06-10 — Фрод-зона eu1: попытка Этапа 4 откачена (релей yc/yc2→eu1)
+- 2026-06-10 — Подписка: Яндекс-серверы первыми
+- 2026-06-10 — yc2 досинхронизирован
+- 2026-06-04 — UX-фикс: единый путь подключения (@veryvoro)
+- 2026-06-03 — Админ-панель: активность+VLESS, /api/services; диагностика T-7
+- 2026-06-03 — Per-user VLESS UUIDs на main/yc (9 этапов)
+- 2026-06-03 — peers.json → SQLite Phase 3 (консолидация завершена)
+- 2026-06-02 — Мониторинг eu1 + чистка доков + .gitattributes
+- 2026-06-02 — Уведомление РКН подано (вариант B)
+- 2026-06-02 — Консолидация peers.json → SQLite, Phase 0-2
+- 2026-06-01 — Enforcement gap (AWG): soft-revoke + auto-restore
+- 2026-06-01 — Персональные данные: /privacy + acceptance + trans-border
+
+**2026-05**
+- 2026-05-31 — Реферальная система: UI в ЛК + E2E
+- 2026-05-31 — Публичные страницы: лендинг / оферта / контакты
+- 2026-05-29 — Health-check cross-server + VLESS-телеметрия (Вариант C)
+- 2026-05-28 — Фаза 3b: @vpnkronos_bot + онбординг + Support + триал
+- 2026-05-27 — Telegram Stars + ручная СБП/карта + админ-форма (Phase 3g+3g+)
+- 2026-05-25 (вечер) — supportkronos.online, прямой HTTPS, subscription validated
+- 2026-05-25 — ЛК: модель аккаунта + UX + триал/реферал + пароль (Фазы 0–2)
+- 2026-05-24 — Учёт трафика lifetime + Email/Всего + swap + диагностика скорости
+- 2026-05-21 (вечер) — Recovery-сайт передел + Error-103 fallback
+- 2026-05-21 — Yota/Мегафон при БС РЕШЕНО + fix AmneziaWG persistent peers
+- 2026-05-20 — Финальный тест CDN relay при БС
+- 2026-05-19 — Yandex CDN relay (XHTTP) + выбор оператора
+- 2026-05-16 — Тест VLESS+REALITY при белых списках
+- 2026-05-15 — Авторизация веб-панели + трекинг прокси
+- 2026-05-14 — Аудит безопасности веб-панели
+- 2026-05-14 — IPv6 в AllowedIPs (защита от leak)
+- 2026-05-13 — Platform-based доставка конфига
+- 2026-05-13 — Trojan-сетап задокументирован
+- 2026-05-11 — Защита Fornex от брутфорса/UDP-флуда
+- 2026-05-11 — Багфикс eu2 → eu1 при /regen
+- 2026-05-09 — xHTTP packet-up на YC VM
+- 2026-05-08 — Анализ конкурентов, удаление eu2, редизайн панели
+- 2026-05-07 — Рефакторинг UX бота + git setup
+- 2026-05-06 — Yandex Cloud VLESS+REALITY relay
+- 2026-05-05 — Cloudflare CDN стек для LTE
+
+**2026-04**
+- 2026-04-13 — Предпрод-план коммерциализации + синхронизация AI-идей
+- 2026-04-12 — Доступ к мониторингу/recovery (UFW + ссылки)
+- 2026-04-11 — Пост-миграция бота на Fornex (Россия/EU/SSH)
+- 2026-04-11 — vpn-web и /recovery на Fornex; отключение Timeweb-панели
+- 2026-04-10 — MTProxy Fake TLS на Fornex (8444), /proxy_rotate
+- 2026-04-02 — Логические слоты rus1/rus2/eu1/eu2 + recovery EU1+EU2
+- 2026-04-02 (доп.) — Spec-08: без нового VPS
+- 2026-04-02 — Спека вторая нода (RU2/EU2), GearUp-документ
+
+**2026-03**
+- 2026-03-30 — Сводная документация MTProxy + README
+- 2026-03-30 — Деплой: явный pip в venv (PEP 668)
+- 2026-03-30 — Ротация MTProxy: /proxy_rotate, override-файл
+- 2026-03-30 — README: MTProxy Fake TLS vs голый MTProto
+- 2026-03-26 — LTE blackhole, MVP/юнит-экономика
+- 2026-03-25 — Веб recovery: Telegram/VPN + ссылка в боте
+- 2026-03-23 (продолжение) — Документация попытки LTE + eu1
+- 2026-03-23 — Мобильный резерв: VLESS+REALITY + /mobile_vpn
+- 2026-03-15 — Сторонние альтернативы для Telegram
+- 2026-03-14 — Диагностика тайм-аута AmneziaWG, /broadcast
+- 2026-03-07 — Telegram-прокси Fake TLS, алгоритм разблокировки, оценка провайдера
+
+**2026-02**
+- 2026-02-26 — Автоматизация выдачи конфигов AmneziaWG + удаление /proxy
+- 2026-02-23 — Восстановление eu1, эксперименты Remnawave/Xray/MTProto (неудачны)
+- 2026-02-22 — Чистый сброс eu1: AmneziaWG, проверка ПК/iOS
+- 2026-02-21 — Веб-панель: деплой, этапы 2–3
+- 2026-02-21 — Бот: Европа = AmneziaWG
+- 2026-02-21 — AmneziaWG на eu1 работает, iOS через «Поделиться»
+- 2026-02-21 — Стратегия обхода РКН, выбор AmneziaWG
+- 2026-02-20 — Улучшение UX + troubleshooting-доки
+- 2026-02-18 — WireGuard + Shadowsocks и клиенты
+- 2026-02-18 — Установка Telegram MTProto Proxy
+- 2026-02-18 — Интеграция бота: инструкции, MTProto, VPN+GPT
+- 2026-02-15 — Отладка eu1: WG UDP из РФ к Fornex не работает
+- 2026-02-14 — Вторая нода eu1 (Fornex, Германия)
+- 2026-02-13 — Лимиты трафика + рабочая /regen
+- 2026-02-11 — Self-service через Telegram-бота
+- 2026-02-09 — Базовая структура + первая WireGuard-нода
 
 ---
+
+## 2026-06-12 — Churn-опрос + сегментированная рассылка (S1+S2+S3) НА ПРОДЕ
+
+Диагностика воронки: спрашиваем у отвалившихся причину. Ветка `feature/churn-survey` → main (`1173213`). Смоук владельца (тест-сегмент на 2-й акк) ок.
+- **S1 — сегментированная рассылка** (owner «📢 Рассылка»): `db_users_by_segment` — all / active / inactive / inactive_no_onboarding / inactive_used / **test** (2-й акк владельца). Флоу: сегмент → счёт → «📝 текст | ❓ опрос» → отправка (пейсинг, 403-скип, отчёт). На проде: active 26 / inactive_used 16 / inactive_no_onboarding 13.
+- **S2 — опрос причин + win-back.** `bot/churn.py` (единый источник текстов/причин, 2 вида: `churn` 3.2 / `onb` 3.1). Колонки `users.drop_reason`/`drop_reason_at`/`churn_asked_at`. Callback `drop:<kind>:<code>` → сохранить причину → дедуп → win-back; «не работало»/«другое» → уточнение текстом. `drop_reason` → Google Sheets. **Авто-T+1** (`expiry_reminder`): истёк вчера + неактивен + онбординг завершён + не спрошен → опрос. T-0: кнопка «🤔 Не планирую продлевать».
+- **S3 — рассылка опроса по бэклогу** (churn для inactive_used, onb для inactive_no_onboarding) с дедупом по `churn_asked_at`.
 
 ## 2026-06-12 — Продуктовые доводки воронки (триал/тест/напоминания/онбординг/UX)
 
-По разбору воронки (фокус: не рост триалов, а понять платящих). Ветка `feature/product-tweaks` → main (`3361848`). Всё задеплоено + смоук владельца по ходу.
-
-- **Триал 14→7 дней.** `TRIAL_DAYS` централизован в `bot/tariffs.py` (был захардкожен в ~8 местах бота + отдельно в web). Реферал +14 не тронут. Только новые триалы.
-- **Платный тест 49₽/7д/3 устр. — РАЗОВЫЙ** (как триал). Тариф `(3,0)` в tariffs (months=0 = тест; хелперы `period_label`/`months_from_days`). `users.test_used` (миграция) + `db_is_test_used`/`db_mark_test_used`; помечается при зачислении (claim_approve months==0 / Stars days<=7). Скрыт/блокируется повторно в боте (`_pay_devices_kb`, callback_pay_tariff, pay_claim) и ЛК (account/info.test_used, claim-payment/create-stars-invoice → 409). Кнопка «🧪 Сначала тест — 7 дней за 49 ₽».
-- **Ежедневные напоминания с 7 дней** (вместо T-7/3/0). `expiry_reminder.py`: `db_users_due_for_daily_reminder` (окно 0..7 дн) + `last_reminder_date` (anti-дубль за день). Текст по числу дней. Покрывает подписку/триал/тест. cron уже ежедневный.
-- **Онбординг-вопрос «для чего VPN»** (свободный текст, любой ответ): после активации/пропуска триала → `users.use_case` (миграция). FSM `_use_case_state` + кнопки «✍️ Ответить» (показывает примеры) / «⏭ Пропустить». **Сбор в Google Sheets** (лист Users, колонка use_case).
-- **«🔄 Не работает» под каждой выдачей конфига** (бот: `_deliver_config`/`_deliver_vless_link`/vpn_quick → menu_regen; ЛК: на результат-экранах, `lastConfigRetry` повторяет генерацию). Из главного меню убрана (дублировала).
-- **Тексты:** приветствие «VPN Kronos - бот» + гиперссылки ЛК/канал; онбординг-интро переписан (email→7д→конфиг, торренты не поддерживаются); кнопки «Начать настройку», «🔗 Подключить VPN».
-- **Цвета:** ЛК-кнопки (Продлить зелёная / Поддержка красная / Пароль серая). **Цветные кнопки бота** — Bot API 9.4 `style` (primary/success/danger): апгрейд `pyTelegramBotAPI 4.17→4.34` (requirements + venv); Подключить синяя, Продлить зелёная, Поддержка красная. Рендер на свежих клиентах; старые — грейсфул. Rollback: `pip install pyTelegramBotAPI==4.17.0`.
-- Тест-байпас онбординга (6133596373) добавлялся на время тестов — **убран** перед merge.
-
----
+По разбору воронки. Ветка `feature/product-tweaks` → main (`3361848`).
+- **Триал 14→7 дней.** `TRIAL_DAYS` централизован в `bot/tariffs.py` (был захардкожен ~8 мест). Реферал +14 не тронут. Только новые триалы.
+- **Платный тест 49₽/7д/3 устр. — РАЗОВЫЙ** (как триал). Тариф `(3,0)` (months=0=тест). `users.test_used` + `db_is_test_used`/`db_mark_test_used`; скрыт/блок повторно в боте и ЛК (409). Кнопка «🧪 Сначала тест — 7 дней за 49 ₽».
+- **Ежедневные напоминания с 7 дней** (вместо T-7/3/0): `db_users_due_for_daily_reminder` (окно 0..7) + `last_reminder_date`. Покрывает подписку/триал/тест.
+- **Онбординг-вопрос «для чего VPN»** (свободный текст) → `users.use_case` + **Google Sheets**. FSM + кнопки «✍️ Ответить»/«⏭ Пропустить».
+- **«🔄 Не работает» под каждой выдачей конфига** (бот + ЛК `lastConfigRetry`); из главного меню убрана.
+- **Тексты** (приветствие, онбординг-интро) + **цветные кнопки бота** (Bot API 9.4 `style`, апгрейд `pyTelegramBotAPI 4.17→4.34`). Rollback: `pip install pyTelegramBotAPI==4.17.0`.
 
 ## 2026-06-11 — Тарифы 199/249/449/599 НА ПРОДЕ (3/5 устр. × 1/3 мес)
 
-Бизнес-приоритет #1 из ROADMAP. 2-шаговый выбор (устройства → срок), cap устройств привязан к тарифу. Ветка `feature/tariffs` → main (`51292f3`). Смоук владельца (бот + ЛК) ок.
-
-**Тарифная сетка** (единый источник `bot/tariffs.py`; цена считается на сервере, клиент шлёт только devices+months):
+Бизнес-приоритет #1. 2-шаговый выбор (устройства → срок). Ветка `feature/tariffs` → main (`51292f3`). Смоук (бот+ЛК) ок.
 
 | Устройств | 1 мес | 3 мес |
 |---|---|---|
-| 3 | 199 ₽ / 150 ⭐ | 449 ₽ / 350 ⭐ (30 дн / 90 дн) |
+| 3 | 199 ₽ / 150 ⭐ | 449 ₽ / 350 ⭐ |
 | 5 | 249 ₽ / 200 ⭐ | 599 ₽ / 450 ⭐ |
 
-- **DB:** `users.device_limit` + `payment_claims.device_limit` (миграции, DEFAULT 5 = **грандфазер** существующих + триал; на проде применилось — все 58 юзеров = 5). `db_extend_subscription`/`db_create_payment_claim` несут device_limit; `db_get_device_limit`.
-- **Cap по тарифу:** бот + ЛК читают `db_get_device_limit` (хардкод 5 убран). Существующим = 5; при покупке 3-тарифа лишние устройства **не удаляются**, только блок добавления сверх лимита (решение владельца).
-- **Бот:** `pay_show` → выбор устройств (3/5) → срок (1/3) → экран тарифа + реквизиты + «Я перевёл {₽}». Тариф несётся через claim → approve проставляет device_limit+дни+цену. Stars `successful_payment` читает device_limit из payload (`stars_sub:tid:days:dl:ts`).
-- **ЛК (`recovery.js`):** 2-шаговый picker в payBlock (перерисовка цен), Stars one-time + авто (авто только для 1 мес — Stars subscription = 30 дн), ручная оплата несёт тариф. Цены с бэка (`/api/account/info` → `tariffs`). `?v=20260611b`.
-- **web:** `create-stars-invoice`/`claim-payment` принимают (devices, months), валидируют по таблице (`_resolve_tariff`). `/admin/credit` — поле «лимит устройств» (3/5/не менять).
-- **Деплой:** бэкап кода (`*.bak.20260611-170210`) + **БД** (`vpn.db.bak.tariffs.20260611-140150`) → scp 6 файлов → AST+import-чеки → restart bot+web (active, журнал чист) → миграция применена → роуты 401 (живы) → health 0 FAIL.
-
-**Открыто (мелочи):** бот-админ-кредит (`callback_admin_credit_user`) device_limit не трогает (COALESCE сохраняет; веб-`/admin/credit` поле есть). Триал = 5 устр. (грандфазер-дефолт).
-
----
+- Единый источник `bot/tariffs.py` (цена считается на сервере; клиент шлёт devices+months).
+- **DB:** `users.device_limit` + `payment_claims.device_limit` (DEFAULT 5 = грандфазер + триал; все 58 юзеров = 5). `db_get_device_limit`.
+- **Cap по тарифу:** бот+ЛК читают `db_get_device_limit` (хардкод 5 убран). При покупке 3-тарифа лишние устройства не удаляются, только блок добавления сверх лимита.
+- **Деплой:** бэкап кода + БД → scp 6 файлов → AST+import → restart bot+web → миграция → health 0 FAIL.
 
 ## 2026-06-11 — VLESS enforcement-лаг закрыт (sync ежечасно + no-change guard)
 
-**Проблема (вскрыта алертом `vless_config_consistency` 11:00 UTC, diff 26):** `enforce_expired` режет AWG ежечасно, а `sync_xray_users` убирал истёкшие VLESS-UUID лишь раз в 6 ч (`7 */6`). → истёкший юзер до ~6 ч сохранял **VLESS (главный путь)** после grace = enforcement-лик; плюс в окне grace→sync БД и Xray-config законно расходятся на размер когорты → ложные FAIL-алерты (сегодня когорта 26 истёкших триалов, «DOWN 74 мин», само-вылечилось 12:07-синком).
-
-**Фикс (`scripts/sync_xray_users.py`):**
-- **No-change guard** в `sync_one_server`: сравнение new vs old `clients[]` (order-independent) + `policy_changed`; идентично → config не трогаем, Xray НЕ рестартим. Бонус: прежние 4 ежедневных safety-net-прогона перестали зря рестартить.
-- **Cron `7 */6` → `7 *`** (ежечасно): VLESS-отзыв догоняет AWG. Лик 6ч→~1ч; окно ложного FAIL 74мин→≤~1ч.
-- **Деплой:** бэкап (`scripts/sync_xray_users.py.bak.*`) + scp + server AST OK; **guard провалидирован на проде** — реальный прогон `--all --no-shared` дал «✓ нет изменений, не рестартим» ×3, Xray на yc2 не перезапущен (ActiveEnterTimestamp 12:07:23 до == после). Cron заменён (12/12 строк целы, off-grid :07 сохранён).
-
-**Остаток (опц.):** краткий ложный FAIL на когорте истечений ещё возможен (≤1 цикл) — добивается debounce'ом чека (алерт если diff держится ≥2 циклов). Не критично (лик закрыт). Задокументировано в CLAUDE.md (правило #10 + описание `vless_config_consistency`).
-
----
+**Проблема** (алерт `vless_config_consistency`): `enforce_expired` режет AWG ежечасно, а `sync_xray_users` убирал истёкшие VLESS-UUID раз в 6 ч → истёкший до ~6 ч сохранял VLESS (главный путь) = enforcement-лик + ложные FAIL на когортах истечений.
+- **`sync_xray_users.py`:** **no-change guard** (сравнение clients[]/policy; идентично → config не трогаем, Xray не рестартим) + cron `7 */6` → `7 *` (ежечасно). Лик 6ч→~1ч.
+- Guard провалидирован на проде (×3 «нет изменений, не рестартим»). Документировано в CLAUDE.md (#10).
+- **Остаток (опц.):** debounce чека (алерт если diff держится ≥2 циклов).
 
 ## 2026-06-11 — fail2ban на main/yc/yc2 (подавление SSH brute-force)
 
-Закрывает follow-up из записи «yc2 ночной false-FAIL» ниже: точечный SSH-ретрай (`645cb63`) лечил симптом, а сам ночной brute-force (76 sshd-событий/5 мин: socksuser/obi/root с разных IP) оставался — шум в логах, нагрузка, риск дропов мониторинга. fail2ban на серверах не стоял.
+Закрывает follow-up «yc2 ночной false-FAIL» (ниже). `645cb63` лечил симптом, brute-force (76 sshd-событий/5мин) оставался.
+- `apt install fail2ban` на yc2/yc/main (Ubuntu 24.04). **Fornex НЕ трогали** (jump/мониторинг-хост).
+- `/etc/fail2ban/jail.local`: `[sshd]`, `backend=systemd`, maxretry=5/findtime=10m/bantime=1h, **`ignoreip` содержит Fornex `185.21.8.91`** (иначе fail2ban забанит мониторинг = каскад).
+- **Готча Ubuntu:** SSH-юнит = `ssh.service`, не `sshd.service` → пин `journalmatch`.
+- **Верификация:** fail2ban-regex ловит реальные события; тест-бан в nft (на yc сосуществует с ufw); на main забанил 7 реальных атакующих IP; Fornex ни на одном не забанен.
+- **health_check** +`fail2ban.service` для main/yc/yc2 (29→32 проверки).
+- **Follow-up:** Fornex без fail2ban (риск самобана с динам. IP); main key-only хардненг (1 legacy WG-user).
 
-**Сделано (canary yc2 → yc → main, согласовано с владельцем):**
-- `apt install fail2ban python3-systemd` на **yc2, yc, main** (все Ubuntu 24.04, fail2ban 1.0.2). **Fornex НЕ трогали** — он jump/мониторинг-хост, его IP в whitelist.
-- `/etc/fail2ban/jail.local` (идентичен на трёх): `[sshd] enabled`, `backend=systemd`, `maxretry=5`, `findtime=10m`, `bantime=1h`, **`ignoreip = 127.0.0.1/8 ::1 185.21.8.91`**. `185.21.8.91 = Fornex`: health_check / ip_usage_watcher / sync_xray_users / vless_summary_accounting ходят по SSH с Fornex на yc/yc2/main каждые 5–15 мин → без whitelist fail2ban забанил бы мониторинг = каскадный сбой.
-- **Готча Ubuntu:** systemd-юнит SSH называется `ssh.service`, не `sshd.service` → стоковый sshd-фильтр ловил бы **0 событий**. Пин: `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`.
-- `systemctl enable --now fail2ban` на трёх.
+## 2026-06-11 — Фаза 2 B4: устройства в ЛК (фронт) → Фаза 2 B ЗАВЕРШЕНА
 
-**Верификация (на каждом):** jail `active`+`enabled`; `ignoreip` содержит Fornex; `fail2ban-regex` против живого журнала ловит реальные события (yc2 95882 / yc 2598 / main 53419 matched → фильтр реально работает, готча закрыта); тест-бан `203.0.113.66` (TEST-NET) вставляет правило в **nft** (banaction nft-backend на 24.04; на **yc сосуществует с активным ufw** — отдельная таблица `inet f2b-table`) → снят. **main (`PasswordAuthentication yes` + `PermitRootLogin yes`, активная атака):** fail2ban забанил **7 реальных IP за секунды** (вкл. `43.99.57.203` из журнала диагностики). **Fornex НИ НА ОДНОМ не забанен**; свежий Fornex→host SSH работает.
-
-**health_check (`scripts/health_check.py`):** `+("systemd","fail2ban.service")` в `REMOTE_CHECK_PLAN` для main/yc/yc2 (29→32 проверки), поверх `645cb63` (`_run_remote_resilient` сохранён). Задеплоен на Fornex (бэкап `scripts/health_check.py.bak.20260611-110259`), AST + `--dry-run` зелёные: `main/yc/yc2:fail2ban.service OK`. Теперь алертит, если fail2ban упадёт. Cron `*/15` подхватит сам (скрипт, не демон).
-
-**НЕ делали (по решению владельца):** MaxStartups оставили дефолтным (`10:30:100`) — минимальное изменение; fail2ban косвенно снижает флуд.
-
-**Открытые follow-up:** (1) Fornex без fail2ban — jump-хост, заходишь с динамического домашнего IP (не в whitelist) → риск самобана; решать отдельно. (2) main: `PasswordAuthentication`+root-login включены — кандидат на key-only хардненг, но там 1 legacy WG-user → отдельной задачей.
-
----
-
-## 2026-06-11 — Фаза 2 B4: устройства в ЛК (фронт) НА ПРОДЕ + rename → Фаза 2 B ЗАВЕРШЕНА
-
-Закрыт последний кусок per-device — те же «Мои устройства» в веб-ЛК (зеркало бот-флоу). Бэкенд B4 (4 эндпоинта) лежал на ветке `feature/per-device-lk` с 06-10; добавлен 5-й (rename) + весь фронт.
-
-- **`web/app.py`:** `/api/recovery/device-rename` (`{token,device_id,name}` → `db_rename_device`, конфиг не трогается) + импорт `db_rename_device`. 4 эндпоинта devices/add/regen/delete уже были на ветке.
-- **`recovery.html`:** кнопка входа «🖥 Мои устройства» в главном меню + секции `stepDevices` (список) и `stepDeviceResult` (выдача конфига). cache-bust `?v=20260611a`.
-- **`recovery.js`:** `loadDevices`/`renderDevicesList`/`renderDeviceRow` (имя+ОС, [✏️ Имя][🔄 Обновить][🗑 Удалить]) / add (выбор ОС → конфиг) / regen / delete (confirm: `tg.showConfirm` в Mini App, `window.confirm` в браузере) / rename (inline-инпут — `window.prompt` в TG Mini App недоступен). `renderAwgPayload` — общая выдача config/QR/`vpn://` (зеркало `[data-platform]`-флоу: android→vpn url, в TG→QR+копия, браузер→файл). cap 5, авто-имена.
-- **Деплой:** бэкап (`web/*.bak.20260611-104931`) → scp 3 файла → AST app.py OK → restart vpn-web (active, журнал чист) → curl: 5 device-роутов → 401 (auth-гейт, не 404). **Смоук владельца: список (браузер + Mini App), add/regen/delete/rename, кросс-консистентность с ботом — OK.**
-- **Merge** `feature/per-device-lk` → main (`caecf9d` + merge `44940b6`).
-
-**Фаза 2 B завершена** (B1+B2+B3+B4). Per-device ценность полная в боте И в ЛК. Разблокированы тарифы по числу устройств (соло 3 / семейный 5 — привязать `plan` к cap).
-
----
+Последний кусок per-device — «Мои устройства» в веб-ЛК (зеркало бот-флоу). Merge `feature/per-device-lk` → main (`caecf9d`+`44940b6`).
+- **`web/app.py`:** `/api/recovery/device-rename` (+ 4 эндпоинта devices/add/regen/delete были на ветке).
+- **`recovery.html`/`recovery.js`:** «🖥 Мои устройства» — список/add(ОС→конфиг)/regen/delete/rename; `renderAwgPayload` (config/QR/`vpn://`), cap 5.
+- **Деплой:** бэкап → scp 3 файла → AST → restart vpn-web → 5 device-роутов 401. Смоук владельца (браузер+Mini App, кросс-консистентность с ботом) ок.
+- **Фаза 2 B завершена** (B1+B2+B3+B4). Разблокированы тарифы по числу устройств.
 
 ## 2026-06-11 — yc2 ночной false-FAIL мониторинга устранён (ретрай SSH)
 
-**Симптом (повторялся):** ночью (~02:00 UTC) прилетал алерт `vless_config_consistency` `yc2_rc=255`, «DOWN ~14 мин» → затем RESOLVED. Владелец заметил паттерн «именно ночью, ~15 мин».
-
-**Диагноз (по логам, не на глаз):** НЕ простой сервиса. Xray на yc2 `NRestarts=0` (последний рестарт — плановый sync 06:07, вне окна); журнал в окне 01:50–02:25 непрерывен (1605 строк, без gap); 0 OOM/hung за 6 ч. Причина — массированный ночной SSH brute-force (76 sshd-событий/5 мин; fail2ban не стоит) упирает sshd в MaxStartups; в :00 совпадают Fornex-кроны (health-check `*/15` + ip_usage_watcher `*/10`) → отдельный SSH-коннект чека `vless_config_consistency` отбивается rc=255 → **false-FAIL**. Юзеры не отваливались (Xray обслуживал весь интервал).
-
-**Фикс (`scripts/health_check.py`, `645cb63`):** `_run_remote_resilient` — ретрай на rc=255/timeout (3 попытки, backoff 2с) для 3 SSH-вызовов чека. Реальные ошибки команды (rc≠0 и ≠255) не маскируются. Задеплоено + dry-run на проде (`53/53/53 OK`, без трейсбеков).
-
-**Заодно:** на yc2 применён persist `swappiness=10` (был 60 — файл `/etc/sysctl.d/99-swap.conf` существовал, но не применился после boot; выровнено с yc, CLAUDE.md #12). НЕ причина алерта (давления на память не было), гигиена/страховка от будущего memory-freeze.
-
-**Follow-up (зафлагован отдельной задачей):** fail2ban на yc/yc2/main — давит сам флуд (меньше шума/дропов/нагрузки). **Критично:** whitelist Fornex-IP `185.21.8.91` (хост мониторинга/кронов), иначе fail2ban забанит мониторинг.
-
----
+**Симптом:** ночью ~02:00 UTC алерт `vless_config_consistency yc2_rc=255`, «DOWN ~14 мин» → RESOLVED.
+- **Диагноз (по логам):** НЕ простой сервиса (Xray NRestarts=0, журнал непрерывен, 0 OOM). Причина — ночной SSH brute-force упирает sshd в MaxStartups; в :00 совпадают Fornex-кроны → SSH-коннект чека отбивается rc=255 → false-FAIL. Юзеры не отваливались.
+- **Фикс (`health_check.py`, `645cb63`):** `_run_remote_resilient` — ретрай на rc=255/timeout (3 попытки). Реальные ошибки команды не маскируются.
+- **Заодно:** yc2 persist `swappiness=10` (выровнено с yc).
+- **Follow-up:** fail2ban на yc/yc2/main (сделано, см. выше).
 
 ## 2026-06-11 — Гигиена: ссылки RULES_CURSOR.md → RULES.md
 
-5 доков (`security.md` + архив/old-сессии) ссылались на переименованный на уровне workspace `RULES_CURSOR.md`. Поправлено на `RULES.md` (`913c1dc`). Были незакоммичены от прошлой сессии — почищено рабочее дерево.
-
----
+5 доков (`security.md` + архив/old-сессии) ссылались на переименованный `RULES_CURSOR.md` → поправлено на `RULES.md` (`913c1dc`).
 
 ## 2026-06-10 — Фаза 2 B3: «Мои устройства» в боте НА ПРОДЕ (фикс Ани ✅)
 
-Поверх B1+B2 (device-слой) — UX именованных устройств в боте. **Баг Ани закрыт на проде:** 2 устройства одной ОС (iPhone+iPad) теперь сосуществуют (раньше коллизили на per-OS ключе).
-
-- **`wireguard_peers`:** `device_id` протянут в `create_amneziawg_peer_and_config_for_user` + `regenerate_...` (явный слот устройства; None → shim по os); `delete_amneziawg_device` (убирает AWG-peer из runtime eu1 + слоты + запись devices).
-- **`bot/main.py`:** кнопка «🖥 Мои устройства» в «Другие способы» + хендлер `callback_devices`: список (имя+ОС, [🔄 Обновить][🗑] на каждом) / «➕ Добавить» (ОС → авто-имя → новый device+конфиг) / обновить конкретное / удалить (с подтверждением). **cap 5**, авто-имена («iPhone/iPad 2» и т.п.). Рабочий per-OS путь не тронут (аддитивно).
-- **Деплой:** ветка `feature/per-device-ux` → AST + import-check (bot.main грузится чисто) → restart vpn-bot (active, журнал чист) → **смоук владельца на тест-аккаунте: список / добавление 2-го iOS / обновление / удаление — ок** → merge в main.
-
-**Осталось в B:** B4 — те же устройства в ЛК (аддитивно, бот — основной интерфейс, не блокер). Переименование устройства — мелкий follow-up (сейчас авто-имя). **Тарифы по числу устройств — разблокированы** (лимит слотов есть; enforcement шеринга — через iplimit-наблюдение).
-
----
+Поверх B1+B2 — UX именованных устройств. **Баг Ани закрыт:** 2 устройства одной ОС (iPhone+iPad) сосуществуют.
+- **`wireguard_peers`:** `device_id` в create/regen + `delete_amneziawg_device`.
+- **`bot/main.py`:** «🖥 Мои устройства» в «Другие способы» — список / добавить (ОС→авто-имя→конфиг) / обновить / удалить. cap 5. Per-OS путь не тронут (аддитивно).
+- **Деплой:** ветка `feature/per-device-ux` → AST+import → restart → смоук владельца → merge.
 
 ## 2026-06-10 — Фаза 2 B1+B2: per-device слой данных НА ПРОДЕ (cutover)
 
-Заменили per-OS слоты на именованные устройства — фикс коллизии iPad/iPhone (Аня) + база под «семейный» тариф. Делали на ветке `feature/per-device` (B0 тест → B1 БД → B2 storage+shim), деплой — отдельным проверенным cutover'ом.
-
-**Что:** ключ `peers` `(tid,server,platform)` → `(tid,server,device_id)` + таблица `devices`. `platform`→`os` (свойство). **Backward-compat shim** в storage (принимает `platform=`, мапит на device; `Peer.platform`=алиас `os`) → бот/ЛК/wireguard_peers **без правок**. db-хелперы + device-хелперы. Миграция `_migrate_peers_platform_to_device` (1:1, ключи клиента не меняются → старые .conf живут) + guard в `_migrate_peers_json_to_sqlite` (скип на device-схеме).
-
-**Cutover (staged, с откатом):** бэкап БД (`vpn.db.bak.preB.*`) + кода (`*.bak.preB.*`) → stop vpn-bot/vpn-web → деплой → миграция (init_db) → start → smoke. **Инцидент по ходу:** `_migrate_peers_json_to_sqlite` падал на колонке platform (не был device-aware) → сервисы крешились → пофикшен guard'ом за минуты.
-
-**Верификация на проде:** миграция **31→31 peer (1:1, без потерь)** + 31 device, схема device_id. Сервисы active, `/api/stats`+`/api/traffic` HTTP 200. Синтетика (read/write/regen/cleanup через shim) ✓. **Реальный смоук владельца на тест-аккаунте: AmneziaWG-конфиг + регенерация — ок.** Тесты `test_per_device_migration` + `test_peers_sqlite` зелёные.
-
-**Осталось в B:** B3 — UX «Мои устройства» в боте (добавить именованное / обновить конкретное / удалить), B4 — то же в ЛК. Сейчас работает через shim (per-OS поведение), мультидевайс одной ОС схемно уже возможен. Имплемент-док: `docs/plan-phase2B-per-device-impl.md`.
-
----
+Заменили per-OS слоты на именованные устройства (фикс коллизии iPad/iPhone + база под «семейный» тариф).
+- **Что:** ключ `peers` `(tid,server,platform)` → `(tid,server,device_id)` + таблица `devices`. `platform`→`os`. **Backward-compat shim** в storage → бот/ЛК/wireguard_peers без правок. Миграция `_migrate_peers_platform_to_device` (1:1, старые .conf живут).
+- **Cutover (staged, с откатом):** бэкап БД+код → stop → деплой → миграция → start → smoke. Инцидент по ходу: `_migrate_peers_json_to_sqlite` падал на device-схеме → пофикшен guard'ом.
+- **Верификация:** 31→31 peer (1:1) + 31 device; сервисы active; тесты зелёные; смоук владельца ок. Имплемент-док `docs/plan-phase2B-per-device-impl.md`.
 
 ## 2026-06-10 — access_audit расширен на main-wg0 + legacy-строки (блайнд-спот закрыт)
 
-**Зачем:** аудит видел только VLESS (4 сервера) + AWG-eu1, но НЕ main-wg0 (legacy WireGuard) и не peer-строки на снятых серверах. Это «сколько зон пропустили».
-
-**Сделано (`scripts/access_audit.py`, read-only):**
-- `audit_main_wg0()` — SSH main `wg show wg0 dump`, классификация runtime-пиров по жизни.
-- `audit_legacy_peer_rows()` — peer-строки на серверах вне eu1: живы ли в каком-либо runtime (eu1-awg/main-wg0) или мёртвый DB-cruft.
-
-**Находки + резолюция (06-10):**
-- **main wg0: было 4 пира, 2 живых ВНЕ таблицы.** Тяжёлый `Mjvdy` (~96 ГБ, Жуковский, 185.175.130.251) — по правилу владельца («если не @aaguseinov и не в новом боте → не нужен») опознан как НЕ @aaguseinov (тот в Москве/Билайн, активно на новом eu1-AWG) и НЕ в боте (Жуковский-IP ни у кого в трекинге) → **удалён обратимо** (`wg set wg0 peer … remove`; данные сохранены на main `/root/wg0-removed-Mjvdy.*.txt`, allowed_ips `10.0.0.0/24`; восстановление `wg set wg0 peer <pk> allowed-ips 10.0.0.0/24`). Остался `/5BeCINho` (СПб, 2.6 МБ, старый — вероятно «1 legacy user» из доков, оставлен).
-- **6 legacy peer-строк** (eu2:2, rus1:3, rus2:1) — мёртвый cruft (нет ни в одном runtime). По просьбе владельца **НЕ удалены из БД, а помечены `active=0`** (история сохранена — напр. `6133596373` без email = не дошёл онбординг). `audit_legacy_peer_rows` теперь считает только active=1 → секция чиста. Бэкап БД сделан перед UPDATE.
-
-**Урок применён:** не удалял вслепую — forensic-сверка pubkey с runtime ДО вывода «мёртв» (как с eu1-shared).
-
----
+Аудит видел VLESS+AWG-eu1, но не main-wg0 и не peer-строки на снятых серверах.
+- **`scripts/access_audit.py`:** `audit_main_wg0()` (SSH `wg show wg0 dump`) + `audit_legacy_peer_rows()`.
+- **Находки:** main wg0 — тяжёлый `Mjvdy` (~96 ГБ, Жуковский) опознан как НЕ нужный (не @aaguseinov, не в боте) → **удалён обратимо** (данные на main `/root/wg0-removed-Mjvdy.*`). Остался `/5BeCINho` (СПб, вероятно «1 legacy user», оставлен). 6 legacy peer-строк (cruft) → помечены `active=0` (история сохранена, не удалены).
+- **Урок:** forensic-сверка pubkey с runtime ДО вывода «мёртв».
 
 ## 2026-06-10 — Подписка/ЛК через Яндекс-фронт (БС-резильентность)
 
-**Проблема:** `supportkronos.online` (ЛК + `/sub`) резолвился в немецкий IP eu1. При БС немецкий IP недоступен → HAPP не обновляет подписку → наш главный failover-рычаг (ротация серверов при ударе РКН → подписка авто-обновляется) под БС НЕ работал.
-
-**Сделано (staged, без даунтайма):**
-- На **yc + yc2** поднят `socat sub-forward.service` (:8443 passthrough → Fornex:8443; TLS терминируется на Fornex существующим LE-cert, на Яндекс серты не нужны). yc потребовал `ufw allow 8443` (на yc2 ufw выключен).
-- **DNS A `supportkronos.online`** переключён eu1 → **yc + yc2** (round-robin, TTL 60, grey-cloud) через CF API. eu1:8443 nginx остаётся бэкендом (не выключен) → клиенты со старым кэшем работали всё переключение, **даунтайма ноль**.
-- health-check: + yc/yc2 `:8443` (27→29 проверок) — путь стал критичным.
-
-**Проверено:** с реального РФ-клиента `supportkronos.online:8443` → HTTP 200, cert валиден, резолв в Яндекс (yc); `/sub` через оба фронта = байт-в-байт та же подписка (sha совпал с direct). Латентность через Яндекс ~0.5-0.7с (хоп yc→Fornex) — для подписки/ЛК норм.
-
-**⚠️ Caveat:** это **no-regret по IP** (Яндекс ≥ немецкий под БС). Полная БС-устойчивость (не режут ли по SNI `supportkronos.online` — «честный» SNI без REALITY-маскировки) **не доказана** — валидировать при следующем БС. Если режут по SNI → следующий шаг — маскировка эндпоинта.
-
----
+**Проблема:** `supportkronos.online` резолвился в немецкий IP eu1 → при БС недоступен → HAPP не обновлял подписку (главный failover-рычаг не работал под БС).
+- На yc+yc2 — `socat sub-forward.service` (:8443 passthrough → Fornex:8443; TLS на Fornex). DNS A → yc+yc2 (round-robin, TTL 60, grey-cloud). eu1:8443 остаётся бэкендом → даунтайма ноль. health-check +yc/yc2:8443.
+- **⚠️ Caveat:** no-regret по IP (Яндекс ≥ немецкий под БС); устойчивость по SNI `supportkronos.online` не доказана — валидировать при БС.
 
 ## 2026-06-10 — Фаза 2 A-Stage1: iplimit-НАБЛЮДЕНИЕ запущено (без enforcement)
 
-Старт keystone (одобрен арх-док `docs/plan-phase2-keystone-architecture.md`, все 5 решений по рекомендациям). Первый шаг — замерить реальное распределение «IP на юзера» неделю, чтобы пороги анти-шеринга калибровать по данным, а не на глаз.
-
-- **Таблица `ip_usage`** (`bot/database.py` `_SCHEMA`): `(telegram_id, ip, server_id, first/last_seen, hits)`, PK (tid, ip). Retention 48ч.
-- **`scripts/ip_usage_watcher.py`** (cron `*/10`): парсит access-log всех 4 входов (eu1 локально + main/yc/yc2 SSH), вытаскивает `from <real IP> … email: tid_X@kronos`, upsert в `ip_usage`. **Релей-строки `127.0.0.1` (yc/yc2→eu1) игнорируются** — там не реальный клиент. `--report` показывает distinct-IP per юзер (15м/60м/24ч), `--dry-run` превью.
-- **Проверено на проде:** парсер работает (yc дал 783 события → 11 юзеров/11 IP), таблица создаётся через `_ensure_init`, отчёт: **макс 2 IP на юзера (дом+мобайл), шеринга нет** — чистый baseline. eu1/main низкотрафиковые (подписка ведёт на yc первым после реордера).
-- **Ключевой принцип (арх-док):** iplimit = distinct-IP/окно = анти-шеринг (разные люди/локации), НЕ счёт устройств на одной сети. **Enforcement (Stage 2) — потом, после калибровки.** Не рубим вслепую (урок инцидента 06-10).
-
-**Следующее в Фазе 2:** неделя наблюдения → калибровка порогов; параллельно B (per-device слоты, таблица `devices`, фикс коллизии Ани). Затем A-Stage2 (enforcement) → Фаза 3 тарифы.
-
----
+Старт keystone (`docs/plan-phase2-keystone-architecture.md`). Замер «IP на юзера» неделю → калибровка порогов анти-шеринга по данным.
+- **Таблица `ip_usage`** (retention 48ч) + **`scripts/ip_usage_watcher.py`** (cron `*/10`): парсит access-log 4 входов, `from <IP> … tid_X@kronos`. Релей-строки `127.0.0.1` игнор. `--report`.
+- **Проверено:** макс 2 IP на юзера (дом+мобайл), шеринга нет — чистый baseline. **Enforcement (Stage 2) — после калибровки.**
 
 ## 2026-06-10 — Поштучный разбор eu1 «shared» + liveness-аудит (в наблюдении)
 
-После инцидента (см. ниже) — разобрали не-per-user UUID на eu1 поштучно, со 100% доказательством, что есть что, ПРЕЖДЕ чем удалять.
-
-- **`scripts/vless_uuid_forensics.py`** (read-only): кросс-референс каждого не-per-user UUID по inbound/outbound всех 4 серверов. Результат: **1 релей** (`359e23cc`, yc/yc2→eu1 — единственный outbound-кред во всей инфре), **9 eu1-only client-share** на vless-tcp (нигде не outbound, не на других серверах → не инфра).
-- **Liveness:** eu1 per-user STATS не работают (только `inbound>>>` агрегаты — by design, per-user телеметрия лишь на main/yc). Ловим через **access-log** (`email:` в journald). За ~16ч журнала — **0 использований всех 9**.
-- **Инструментовка (`scripts/instrument_eu1_shares.py --apply`):** добавлен tracking-email `auditshare_<id8>@kronos` 9 shared (аддитивно, релей/per-user не тронуты; backup+validate+restart, релей пережил ~3с блип). Теперь их трафик виден per-UUID в access-log.
-- **Наблюдение (`scripts/eu1_share_audit_sampler.sh`, cron `23 */6`):** durably копит в `/var/log/eu1-share-audit.log`, кто из 9 использовался (journald хранит ~16ч → sampler с lookback 8ч).
-
-**▶ Как завершить (следующие заходы):** через несколько дней глянуть `/var/log/eu1-share-audit.log`. Если все 9 = «никто не использовался» → они мертвы → удалить `sync_eu1_vless.py --no-shared --force` (RELAY_PRESERVE сам сбережёт релей) → снять sampler-cron + удалить `instrument_eu1_shares.py`/`eu1_share_audit_sampler.sh`. Если какой-то UUID появился → это живой юзер на старой ссылке: НЕ рубить вслепую, мигрировать/предупредить.
-
----
+После инцидента (ниже) — разбор не-per-user UUID на eu1 со 100% доказательством.
+- **`scripts/vless_uuid_forensics.py`** (read-only): **1 релей** (`359e23cc`, yc/yc2→eu1) + **9 eu1-only client-share** на vless-tcp.
+- **Liveness:** через access-log (eu1 per-user STATS не работают by design). За ~16ч — 0 использований всех 9.
+- **Инструментовка** (`instrument_eu1_shares.py`) + наблюдение (`eu1_share_audit_sampler.sh`, cron `23 */6` → `/var/log/eu1-share-audit.log`).
+- **▶ Завершить:** если 9 = «не использовались» → удалить `sync_eu1_vless.py --no-shared --force` (RELAY_PRESERVE бережёт релей) + снять обвязку. Если UUID всплыл → живой юзер, мигрировать.
 
 ## 2026-06-10 — Фрод-зона eu1: ПОПЫТКА Этапа 4 ОТКАЧЕНА (вскрыт релей yc/yc2→eu1)
 
-**Что хотели:** удалить 11 «shared» UUID на eu1 (vless-tcp:9 + vless-ws:1 + vless-xhttp:1), как Этап 7 для main/yc, чтобы весь VLESS стал per-user.
-
-**Что пошло не так:** `sync_eu1_vless.py --no-shared` снёс shared → **выход «Европы» перерубило.** Владелец: «Европа не грузит, Германия/Россия — плохо». Диагностика логов: yc xray падал на VLESS-**outbound** по ws; eu1 отбивал `invalid request user id: 359e23cc… from 127.0.0.1`.
-
-**Корень (критический недокументированный факт):** **yc и yc2 («Европа») — НЕ прямые выходы, а фронт-релеи.** Их routing шлёт ВЕСЬ трафик в outbound `vless+ws → 185.21.8.91:80/vpn` (eu1 vless-ws). UUID `359e23cc-…` = **релей-credential**, общий для yc/yc2. У него нет tid-email → `access_audit` метил его «SHARED/фрод», но это несущая инфра. «243 ГБ tx на vless-ws» = релей-трафик Европы, а не фрод-юзер. Классический [[feedback_no_delete_runtime_blind]]. Память: `project_vpn_yc_relay_topology`.
-
-**Восстановление:** откат eu1-конфига из бэкапа `config.json.bak.eu1sync.*` (валидировать `xray run -test -format=json` — имя .bak не даёт авто-детект формата) → рестарт xray → 0 ошибок на eu1/yc/yc2. Снят опасный cron `17 */6 sync_eu1_vless --no-shared`.
-
-**Защита (чтобы не повторилось):**
-- `sync_eu1_vless.py`: `RELAY_PRESERVE={359e23cc…}` бережётся ВСЕГДА (даже в `--no-shared`); реальный `--no-shared` теперь требует `--force` (dry-run можно). Прочие 9 shared на vless-tcp — статус не доказан, не трогать без поштучной проверки.
-- `access_audit.py` расширен на yc2 + релей-UUID помечается отдельно (не «фрод»).
-
-**Статус фрод-зоны eu1:** НЕ закрыта и в текущем виде закрывать нельзя — eu1 vless-ws несёт релей. Per-user enforcement на eu1 относится к ПРЯМЫМ входам (vless-tcp/xhttp), которые уже per-user (grace-режим). Broadcast Этапа 3 НЕ нужен (ничего не удаляли). Реордер подписки (Яндекс первыми) — остаётся, он корректен.
-
----
+**Хотели:** удалить 11 «shared» UUID на eu1. **Что пошло не так:** `sync_eu1_vless.py --no-shared` снёс shared → **выход «Европы» перерубило.**
+- **Корень (критический факт):** **yc/yc2 («Европа») — НЕ прямые выходы, а фронт-релеи** → outbound `vless+ws → eu1:80/vpn`. UUID `359e23cc` = релей-credential (без tid-email → `access_audit` ошибочно метил «фрод»). Память `project_vpn_yc_relay_topology`, [[feedback_no_delete_runtime_blind]].
+- **Восстановление:** откат eu1-конфига из бэкапа → рестарт → 0 ошибок. Снят опасный cron `17 */6 sync_eu1_vless`.
+- **Защита:** `RELAY_PRESERVE={359e23cc}` бережётся всегда; `--no-shared` теперь требует `--force`. `access_audit` помечает релей отдельно.
+- **Статус:** фрод-зона eu1 НЕ закрывается как `--no-shared` (eu1 vless-ws несёт релей). Прямые входы (vless-tcp/xhttp) уже per-user.
 
 ## 2026-06-10 — Подписка: Яндекс-серверы первыми (pre-broadcast фикс)
 
-**Проблема (фидбэк владельца):** при подготовке broadcast «переподключись» выяснилось, что по подписке Германия (eu1) и Россия (main) «не работают», работает только Европа. Корень — НЕ конфиг (per-user UUID есть на всех, аудит tracked=50 везде), а **IP-репутация РКН** (`project_vpn_rkn_ip_block`): немецкий eu1 и Timeweb main режутся на фильтрующих сетях, Яндекс выживает. В подписке Германия стояла **первой** → юзер видел «сломано».
-
-**Фикс:** `_build_subscription_links` (`web/app.py`) — порядок серверов изменён на **Европа (yc) → Европа-2 (yc2) → Германия (eu1) → Россия (main)**. Рабочий-везде Яндекс теперь по умолчанию. Германию (быстрая на чистой сети) и Россию (main = путь Yota/Мегафон при БС, SNI=cloud.mail.ru) сохранили как ниши, но не дефолтом — резать нельзя. Реордер **авто-разъезжается по клиентам за ~12ч** (Profile-Update-Interval `/sub`) — без broadcast.
-
-**Проверено:** AST OK, vpn-web restart active, журнал чист, на деплойнутом коде `_build_subscription_links` отдаёт порядок Европа/Европа-2/Германия/Россия. Разблокирует безопасный broadcast Этапа 3 (после теста владельца на фильтрующем устройстве).
-
----
+**Проблема:** по подписке Германия (eu1) и Россия (main) «не работают», работает только Европа — IP-репутация РКН (`project_vpn_rkn_ip_block`), а Германия стояла первой → юзер видел «сломано».
+- **Фикс:** `_build_subscription_links` (`web/app.py`) — порядок **Европа (yc) → Европа-2 (yc2) → Германия (eu1) → Россия (main)**. Авто-разъезд по клиентам за ~12ч (без broadcast).
 
 ## 2026-06-10 — yc2 досинхронизирован (sync_xray_users + health_check)
 
-**Проблема:** yc2 (РФ-резерв, заведён 06-09 как статичный клон yc) не входил в cron-sync и мониторинг. cron `sync_xray_users.py --all --no-shared` держал main/yc актуальными, а yc2 застывал → с первыми оплатами/истечениями (~10.06) клиенты на yc2 дрейфнули бы: оплаченный без UUID на yc2 не пускается, истёкший с оставшимся UUID ходит бесплатно (мини-фрод-зона на резерве).
-
-**Фикс:**
-- `scripts/sync_xray_users.py`: запись `yc2` в `SERVERS` (ssh `yc2` / inbound `vless-xhttp` / flow="" / `db_column=vless_uuid_yc` — клон yc, общая колонка / sudo). `--server` choices += `yc2`; `--all` → `[main, yc, yc2]` (crontab не трогали — `--all` подхватил).
-- `scripts/health_check.py`: yc2 в `REMOTE_HOSTS` + `REMOTE_CHECK_PLAN` (reachable/xray/:443/disk); `check_vless_config_consistency` расширен — yc2 сверяется с `db_yc` (детектор дрейфа клона). Счётчик проверок 23 → 27.
-
-**Верификация (на проде, read-only сначала):** yc2 reachable через Fornex-jump, user `ubuntu`+passwordless sudo, inbound `vless-xhttp`, паритет 50/50/50 (db_yc / yc / yc2). Локальный+серверный AST OK. Dry-run sync yc2 (50 per-user, 0 shared). Реальный sync yc2: backup → validate OK → restart → xray active, :443 listening. `health_check --dry-run` = 27/27 green, `vless_config_consistency: cfg_yc2=50 (diff 0)`.
-
-**Эффект:** оплаты/истечения теперь синхронизируются на yc2 автоматически; дрейф клона ловится health-check'ом. Первый шаг мастер-плана `docs/plan-blocking-antifraud-traffic-tariffs.md` закрыт.
-
----
+yc2 (РФ-резерв, клон yc от 06-09) не входил в cron-sync/мониторинг → дрейфнул бы с первыми оплатами/истечениями.
+- **`sync_xray_users.py`:** yc2 в `SERVERS` (db_column=`vless_uuid_yc` — клон). `--all` → [main, yc, yc2].
+- **`health_check.py`:** yc2 в `REMOTE_HOSTS`/`CHECK_PLAN`; `vless_config_consistency` для yc2 сверяется с db_yc. 23→27 проверок.
+- **Верификация:** паритет 50/50/50, sync yc2 OK, health 27/27. Первый шаг `docs/plan-blocking-antifraud-traffic-tariffs.md` закрыт.
 
 ## 2026-06-04 — UX-фикс: единый путь подключения (фидбэк @veryvoro)
 
-**Диагностика:** @veryvoro «на мобильном ничего не работает». Сервер был исправен (23 OK/0 FAIL весь день). Корень клиентский: (1) AmneziaWG не работает на мобильном (UDP, by design); (2) её VLESS был на старой shared-ссылке, убитой Этапом 7 (03.06), новую персональную подписку не переимпортировала. Путь фрагментирован — юзер не знает, какой механизм нужен.
-
-**Фикс** (тексты/разводка, логику не трогали; синхронно бот/ЛК/MiniApp):
-- Ссылка-подключение (`/sub`) везде = **«Подключить VPN»** (раньше бот «Быстрый VPN», ЛК «Доступ к VPN»). Билинговую «подписку» (оплата) не трогали.
-- Бот подменю «Получить VPN»: 🔗 Подключить VPN (главный) / 💻 AmneziaWG — макс. скорость ПК/Wi-Fi (⚠️ не для мобильного) / 📡 Мобильный.
-- `🔄 Обновить конфиг` → **`🔄 Не работает`** → разводка ПК (сброс AmneziaWG) vs Телефон/«Подключить» (переотдаёт ссылку + «удали старый профиль в HAPP, добавь новую») — закрывает ловушку Ани.
-- В тексте AmneziaWG — предупреждение «не для мобильного». Убрано враньё про «vpn:// отвалится».
-- ЛК/MiniApp: заголовок «🔗 Подключить VPN», AmneziaWG-канал «не для мобильного интернета».
-
-Задеплоено, смоук владельца прошёл. CLAUDE.md «Бот — текущий UX» актуализирован. Детали: `docs/sessions/SESSION_SUMMARY_2026-06-04.md`.
-
----
+**Диагностика:** @veryvoro «на мобильном ничего не работает». Сервер исправен. Корень клиентский: AmneziaWG не для мобильного (UDP), а VLESS был на старой shared-ссылке (убита Этапом 7) — новую подписку не переимпортировал.
+- **Фикс (тексты/разводка):** ссылка `/sub` везде = «Подключить VPN»; `🔄 Обновить конфиг` → `🔄 Не работает` с разводкой ПК/Телефон; AmneziaWG помечен «не для мобильного». Синхронно бот/ЛК/MiniApp. `SESSION_SUMMARY_2026-06-04.md`.
 
 ## 2026-06-03 — Админ-панель: активность+VLESS, /api/services из health-check; диагностика T-7
 
-**Активность учитывает VLESS** (`d9464b4`): `/api/stats` счётчики `active_24h/7d/30d` теперь по `max(AWG handshake, VLESS last_seen, vless_requested_at)` per-юзер (тот же сигнал, что бейджи). Было «3 за 24ч» (AWG-only) → стало 16.
-
-**`/api/services` из health-check state** (`d9464b4`): читает `/var/lib/vpn-health/state.json`, маппит на 5 user-facing сервисов (🛡️ AmneziaWG / 📲 VLESS Россия-main / 📲 VLESS Европа-yc / 🌐 VLESS-WS / 📎 MTProxy) + staleness (mtime>20мин→unknown, палит зависший health-check) + fallback. Убран захардкоженный неверный IP `158.160.0.1`. Фронт (index.html+main.js) — динамический рендер.
-
-**Диагностика массового T-7 reminder** (`b6d66ab`): НЕ баг. `db_users_due_for_expiry_notif` корректна. Корень — при миграции 27.05 существующим выдали 14-дн триал вместо grandfather → ~30 истекают 10.06, разом достигли T-7. Решение владельца: оставить триал (монетизация). Доки/память исправлены (enforcement ВКЛ, grandfather не делали).
-
----
+- **Активность учитывает VLESS** (`d9464b4`): счётчики `active_*` по `max(AWG handshake, VLESS last_seen, vless_requested_at)`. Было «3 за 24ч» → 16.
+- **`/api/services`** из `/var/lib/vpn-health/state.json` → 5 user-facing сервисов + staleness; убран хардкод IP `158.160.0.1`.
+- **Массовый T-7 reminder** (`b6d66ab`) — НЕ баг: при миграции 27.05 выдали 14-дн триал → ~30 истекают 10.06 разом. Решение: оставить триал. Доки/память исправлены.
 
 ## 2026-06-03 — peers.json → SQLite Phase 3 (консолидация завершена)
 
-Завершение консолидации хранения peers. После суток наблюдения за dual-write на проде:
-- **Reconcile перед выключением:** `main` = `e6d460f` (UUID-агент закрыл Этапы 7-9, rebase на мой peers-слой сработал чисто). Мой `storage.py` не тронут агентом. Сервер == main.
-- **Наблюдение успешно:** dual-write держался сутки — **27 json == 27 таблица, 0 расхождений**, за период **3 реальных peer-write** (новый сигнап + enforce) → write-path отвалидирован на живом трафике.
-- **`storage.py`:** `DUAL_WRITE_JSON=False` — запись в `peers.json` отключена (файл остаётся статическим fallback-снимком, читается только если таблица пуста). Удалено мёртвое зеркало `users.json` (`_sync_user_to_json` + вызов) — SQLite единственный источник правды и для users.
-- **Тест** (Python 3.13): 20/20, включая проверку что при `False` json не пишется.
-- Задеплоено на Fornex (только `storage.py`, `database.py` агента не трогал), рестарт vpn-bot/web, верификация.
+После суток наблюдения dual-write:
+- **`storage.py`:** `DUAL_WRITE_JSON=False` (peers.json больше не пишется, остаётся read-only fallback). Удалено мёртвое зеркало `users.json`.
+- Наблюдение: 27 json == 27 таблица, 0 расхождений, 3 реальных write. Тест 20/20. Источник правды только `vpn.db` → будущая Postgres-миграция «одна БД → другая».
 
-**Итог:** консолидация полная — JSON-файлы (`peers.json`, `users.json`) больше не пишутся, источник правды только `vpn.db`. Будущая Postgres-миграция теперь «одна БД → другая».
+## 2026-06-03 — Per-user VLESS UUIDs на main/yc (🔥 ключевое, 9 этапов, 7 коммитов)
 
----
+Было: общий UUID на inbound (на eu1 — пул 9 share) → нельзя отозвать/биллить/посчитать per-юзер. Стало: per-user UUID на main/yc.
+- БД-миграция `vless_uuid_{eu1,main,yc}` + хелперы (`4c5caa3`); выдача ссылок per-user (`ea479d7`); backfill 42 юзера (`da996b4`).
+- **`sync_xray_users.py`** через config.json+restart (runtime API silent-fail) (`2648538`); БД = source of truth, cron safety-net.
+- Этап 7 (`92de823`): удаление shared-UUID на main/yc + `policy.levels.0.statsUser*`. 44→42 clients (истёкшие отфильтровались).
+- Этап 8 (`2ffe90f`): VLESS soft-revoke (тот же SQL-фильтр grace 12h) + auto-restore hook + health-check `vless_config_consistency`.
+- Этап 9 (`4e3fe18`): `vless_user_traffic` + парсинг `tid_X@kronos` → per-user трафик в `/api/traffic`.
+- **Эффекты:** закрыт enforcement gap для VLESS; защита от шеринга (UUID отзываем); per-user телеметрия/биллинг. Открытая подзадача — eu1 vless-ws (релей+9 share, см. 06-10). `SESSION_SUMMARY_2026-06-03.md`.
 
 ## 2026-06-02 — Мониторинг eu1 + чистка доков + .gitattributes
 
-**Лёгкий мониторинг eu1** (`6eb38cc`): `scripts/eu1_monitor.sh` (cron `*/5`, теперь 8 кронов) пишет CSV (load/RAM/swap/conntrack/awg-peers/rx-tx eth0) в `/var/log/eu1-monitor.log`. Без speedtest (не грузим 100-Мбит порт). Под расследование жалоб «скорость иногда падает» — корреляция метрик с временем жалобы. Задеплоен, протестирован.
-
-**Глубокая чистка доков** (`b1c548a`, `4f98e04`): 18 устаревших доков (classic-WG / Shadowsocks / Remnawave / historical эпохи) → `docs/archive/` (git rename, история сохранена). Баннеры «устарело/реализовано» на `spec-05`, `spec-07`, `deployment.md`, `eu1-setup-and-troubleshooting.md`, `backup-restore.md` (последний — добавлен блок «что бэкапить сейчас»: `vpn.db` + AWG PSK). 13 активных доков — фикс inbound-ссылок на `archive/`, битых ссылок в актуальных доках нет. `docs/` root ~40→31, `docs/specs/` ~10→4. DONE_LIST/sessions/archive не трогались (история).
-
-**`.gitattributes`** (`0283986`): LF форсится для `*.sh`/`*.py` — защита от CRLF при ре-чекауте на Windows (скрипты деплоятся на Linux). Renormalize 0 изменений (блобы уже LF).
-
----
+- **`scripts/eu1_monitor.sh`** (`6eb38cc`, cron `*/5`): CSV метрик (load/RAM/swap/conntrack/awg/rx-tx) в `/var/log/eu1-monitor.log`. Под жалобы «скорость падает».
+- **Чистка доков** (`b1c548a`,`4f98e04`): 18 устаревших → `docs/archive/` (git rename); баннеры «устарело» на spec-05/07, deployment, eu1-setup, backup-restore. `docs/` root ~40→31, specs ~10→4.
+- **`.gitattributes`** (`0283986`): LF для `*.sh`/`*.py` (защита от CRLF на Windows).
 
 ## 2026-06-02 — Уведомление РКН об обработке ПД подано (вариант B)
 
-Стали оператором ПД (email + telegram_id юзеров) → подали уведомление на pd.rkn.gov.ru. **Номер 100306737, ключ 15161399.** Принято в ИС уполномоченного органа, в реестр ~неделя.
-
-**Ключевые решения по ходу:**
-- Уведомление **одно** (не два) — трансграничная передача = раздел внутри формы.
-- **Вариант B (остаёмся на Fornex, подаём честно)** — взвесили против переноса управлялки (бот+`vpn.db`) на RU. Перенос отложен: риски (Telegram-API из РФ untested, корреляция отказов с TimeWeb-REALITY, кросс-граница SSH, тайминг с UUID-агентом) перевесили localization-выгоду. Бот управляет нодами через SSH — технически отвязан, но не сейчас.
-- В форме: место БД = **Германия**; трансгранично = **США (Resend)** + **Германия (хостинг)**; организация, ответственная за хранение = **Fornex = ИП Лавков О.А., ИНН 772774400302, ОГРНИП 314774625401362, Москва** (российский ИП, хоть сервер в Германии); цель = «исполнение гражданско-правового договора»; основание = согласие + договор; категории ПД = email + «иные» (telegram_id, оплаты, тех.данные); субъекты = клиенты + «давшие согласие на трансгранично».
-- РКН показал авто-плашку про 242-ФЗ (БД не в РФ) — ожидаемо для B, не отказ.
-
-**Гайд по полям формы:** `docs/rkn-notification-guide.md` (с реальной структурой: выпадающие списки, ФИАС-справочник адреса, и т.д.).
-**Разблокировало:** регистрацию мерчанта ЮKassa (следующий шаг владельца).
-
----
+Оператор ПД (email+telegram_id) → подали на pd.rkn.gov.ru. **Номер 100306737, ключ 15161399.** В реестр ~неделя.
+- Уведомление одно (трансгранично = раздел в форме). **Вариант B (остаёмся на Fornex, подаём честно)** — перенос управлялки на RU отложен (риски: Telegram-API из РФ untested, корреляция отказов, кросс-граница SSH).
+- В форме: место БД = Германия; трансгранично = США (Resend) + Германия (хостинг); ответств. хранение = Fornex (ИП Лавков, рос. ИП). Авто-плашка 242-ФЗ — ожидаемо для B, не отказ.
+- Гайд: `docs/rkn-notification-guide.md`. Разблокировало регистрацию ЮKassa.
 
 ## 2026-06-02 — Консолидация peers.json → SQLite (таблица `peers`), Phase 0-2
 
-«Переделать БД» (refactor-вариант — НЕ путать с Postgres-миграцией в P3). До этого peers жили **только** в `bot/data/peers.json` (таблицы `peers` в SQLite не было, вопреки старому описанию в CLAUDE.md — это был реальный второй источник правды, кусал 2026-05-29). Источник правды переведён в SQLite; публичный API storage не менялся → ~30 call sites не тронуты.
+«Переделать БД» (refactor, не Postgres). До этого peers жили только в `peers.json` (второй источник правды, кусал 29.05).
+- **Phase 0** (`689e8f2`): таблица `peers` (composite-PK = ключ peers.json) + `_migrate_peers_json_to_sqlite()` + `db_get_all_peers/upsert/delete` + `PRAGMA busy_timeout=5000`.
+- **Phase 1:** storage читает из таблицы (fallback JSON если пусто) + dual-write зеркало (`DUAL_WRITE_JSON=True`). API/dataclass не тронуты (~30 call sites целы).
+- **Cutover (Phase 2):** бэкап → dry-run на копии прод-данных (26→26) → деплой → миграция ДО рестарта → `peers_sync_check` 20/20 eu1==awg, 2 legacy LIVE целы. Велось в `feat/peers-to-sqlite` → main (FF). Координация с per-user-UUID агентом (сверено md5).
+- **Остаётся Phase 3:** выключить dual-write (сделано 06-03, см. выше).
 
-**Phase 0 — схема + миграция (`bot/database.py`, commit `689e8f2`):**
-- Таблица `peers` (composite-PK `telegram_id:server_id:platform` — точная копия ключа peers.json) + индекс `public_key`. Без FK (сохранена вольность JSON: legacy/синтетические отрицательные tid).
-- `_migrate_peers_json_to_sqlite()` в цепочке `init_db()` — идемпотентно, по образцу `_migrate_from_json` (users.json). Пропуск записей без wg_ip/public_key.
-- `db_get_all_peers / db_upsert_peer / db_delete_peer`.
-- `PRAGMA busy_timeout=5000` в `_conn()` — страховка от «database is locked» (bot+web+cron пишут конкурентно).
+## 2026-06-01 — Enforcement gap (AWG): soft-revoke при истечении + auto-restore
 
-**Phase 1 — storage поверх БД (`bot/storage.py`):**
-- `_load_peers_data()` читает из таблицы, fallback на JSON если таблица пуста.
-- `upsert_peer/delete_peer` → запись в БД + dual-write зеркало `peers.json` (флаг `DUAL_WRITE_JSON=True`). Сигнатуры и dataclass `Peer` не тронуты.
+- `scripts/enforce_expired.py` (cron `0 * * * *`): отзыв AWG-peer у `expires_at < now-12h`. Soft: `awg set peer remove` + persist, credentials в peers.json остаются (`active=False`).
+- `wireguard_peers.py`: `revoke_amneziawg_peer_soft`/`restore_amneziawg_peer_runtime`/`restore_user_revoked_peers`.
+- **Auto-restore при оплате** (hook `_restore_and_notify` в 4 местах: bot Stars/claim_approve/admin_credit + web/admin/credit) — peer возвращается с тем же pubkey/ip, старый .conf работает без переимпорта.
+- Уведомления юзеру (отзыв/восстановление) + владельцу (сводка). E2E на синтетике (tid=999999999) ок. Gap для VLESS закрыт позже per-user UUID (06-03). `SESSION_SUMMARY_2026-06-01.md`.
 
-**Скрипты:** `scripts/migrate_peers_check.py` (бэкап + сверка JSON↔таблица), `scripts/test_peers_sqlite.py` (self-contained тест, 18 проверок).
+## 2026-06-01 — Персональные данные: /privacy + acceptance + trans-border (раунды 2-3)
 
-**Валидация перед прод-деплоем:** локально (Python 3.13, поставлен в эту сессию) — syntax/import + тест 18/18; **dry-run на КОПИИ реальных прод-данных** в /tmp (нулевой риск) — 26 JSON → 26 в таблице, 0 расхождений.
+- **`/privacy`** — Политика обработки ПД (152-ФЗ, 10 разделов), версия 01.06.2026, п.6.2 про трансграничную передачу через Resend (US).
+- **Acceptance notice на `/recovery`** (под «Получить код») + ссылки в подвалах всех публичных страниц. Подготовило подачу РКН (06-02). `SESSION_SUMMARY_2026-06-01.md`.
 
-**Cutover (Phase 2, dual-write ON):**
-- Бэкап прод (`peers.json` + `vpn.db` + старые `.py`) → `*.precutover.20260602-072957`.
-- Деплой по SCP, миграция на проде **ДО рестарта**: 26→26, 0 расхождений. Рестарт vpn-bot + vpn-web — active, журнал чист.
-- `peers_sync_check.py` поверх таблицы: **20/20 eu1-пиров == awg show**, 2 legacy LIVE-пира («НЕ ТРОГАТЬ») целы, lost=0. Веб 200.
-- Смоук владельца: статус / Получить VPN / подписка / резерв per-device — бот отдаёт.
+## 2026-05-31 — Реферальная система: UI в ЛК + уведомления + E2E
 
-**Коммиты:** `689e8f2` (Phase 0-1), `ab215c6` (UTF-8 fix скриптов), `994973d` (CLAUDE.md sync). Велось в ветке `feat/peers-to-sqlite`, смержено в `main` (FF).
+Бэкенд жил, UI был спрятан (`e1b90ea`) → возвращён и расширен.
+- ЛК: блок «👥 Приглашай друзей» (+14 тебе / +14 другу при первой оплате), счётчик, копировать/share. Реф-ссылка `t.me/vpnkronos_bot?startapp=ref_<CODE>` + fallback `/start ref_<CODE>`.
+- Уведомления пригласителю при регистрации друга (web+bot) и при первой оплате.
+- **E2E 06-01** на 2 TG-аккаунтах: регистрация по ссылке → оплата → оба +14, `referral_bonus_paid=1`. Найден/закрыт UI sequencing bug.
 
-**Координация:** параллельно с per-user-UUID агентом (Этапы 7-9 на паузе). Сверено перед деплоем (md5 серверного кода == база) — затирания нет. Бриф агенту — по запросу владельца.
+## 2026-05-31 — Публичные страницы: лендинг / оферта / контакты (+ юр.правка 06-01)
 
-**Остаётся — Phase 3 (после ~03.06 10:45):** выключить `DUAL_WRITE_JSON` + убрать мёртвое зеркало `users.json` (`_sync_user_to_json`). После суток наблюдения за real write-path. Детали: `docs/sessions/SESSION_SUMMARY_2026-06-02.md`.
+Разблокировало Фазу 4 (ЮKassa). Файлы: `web/templates/{landing,oferta,contacts}.html`, `landing.css`, routes в `app.py`.
+- **Лендинг `/`** — публичный, УТП без слова «VPN» (модерация), тариф, 3 шага. Админка `/` → `/admin` (за auth).
+- **`/oferta`** — договор 9 разделов (возврат за неисп. период; ПД = email+telegram_id). **`/contacts`** — ФИО / ИНН 470420524404 / самозанятый / СПб.
+- **Юр.правка 06-01:** оферта в технической плоскости («настройка/сопровождение защищённого сетевого соединения», риск 149-ФЗ ст.15.8); явный пункт «не для обхода ограничений РФ»; лендинг — убраны рискованные формулировки. Mini App / `/sub` не затронуты. `SESSION_SUMMARY_2026-06-01.md`.
 
----
+## 2026-05-29 — Health-check cross-server (main+yc) + VLESS-телеметрия (Вариант C)
+
+- **Health-check (`scripts/health_check.py`):** 12 локальных → 22 проверки (+main: xray/wg-quick/:443/:51820/диск; +yc: xray/:443/диск) через Fornex SSH-jump. Reachable-gate (один сетевой провал не даёт каскад). Тест FAIL→RESOLVE на yc ок.
+- **VLESS-телеметрия Вариант C** (`2ddba8f`): proof-of-life (`vless_requested_at` + `/sub` авто-refresh → status=active) + per-server summary (`patch_xray_stats.py` + `vless_summary_accounting.py` cron `*/5` → `vless_server_traffic`; карточка «VLESS трафик» в админке). Per-user точность — позже (06-03). `SESSION_SUMMARY_2026-05-29.md`.
+
+## 2026-05-28 — Фаза 3b: переезд на @vpnkronos_bot + онбординг + Support + триал
+
+Большая сессия миграции (`5e73512`,`0ed6ffc`,`f872b70`,`52eaea0`,`f0ce23d`). `SESSION_SUMMARY_2026-05-29.md`.
+- **Swap токена → `@vpnkronos_bot`** + `users.migrated_at` + хелперы; **FSM-онбординг** (дисклеймер→email→OTP→триал/пропуск); ENV `ONBOARDING_ENABLED=1`/`ENFORCEMENT_ENABLED=1`. `/migrate_reset` (selective reset не-перешедших).
+- **Enforcement gate** `_check_access_or_block` (vpn_quick/get_config/regen/mobile); web 402.
+- **Пробный период** (триал 14д в онбординге + кнопка в меню).
+- **Broadcast-миграция** 34 legacy-юзеров (владелец); старый `@thisvpnforfriends_bot` молчит.
+- **Support Variant B** (`52eaea0`): двусторонние тикеты `support_tickets`/`support_messages` (один open на юзера); «🆘 Поддержка» → форвард + ответ owner inline [Ответить/Закрыть/История]; `/support_list|view|close`; deeplink `/start support`.
+- **MenuButtonWebApp** регрессия закрыта (`f0ce23d`): левая кнопка → `MenuButtonCommands`, Mini App через `/lk`+inline.
+- Mini App «альтернативные способы» → иерархия «Резервные конфиги» (05-27).
 
 ## 2026-05-27 — Telegram Stars + ручная СБП/карта + админ-форма зачисления (Phase 3g + 3g+)
 
-Промежуточный платёжный стек до автоматизации. Stars-флоу + рабочий ручной флоу + админ-форма; авто-зачисление платежей вынесено отдельной развилкой в ROADMAP («Автоматизация платежей»).
+Промежуточный платёжный стек до автоматизации.
+- **Phase 3g — Stars** (`d0155e8`): `/api/billing/create-stars-invoice` (XTR, payload `stars_sub:tid:days:ts`) + `successful_payment` хендлер (idempotency по `telegram_payment_charge_id` → `db_record_payment` → `db_extend_subscription(+30)` → `db_apply_referral_bonus(+14)`). Кнопка в ЛК.
+- **Phase 3g+ — ручная СБП/карта** (`8ee3541`): реквизиты Т-Банк (СБП `+79213032918`, карта `2200700760464759`) в ЛК + «✉️ Написать @nikkronos». **`/admin/credit`** — форма ручного зачисления (idempotent по `external_id`).
+- **Фикс UX:** `trial_available = not trial_used AND expires_at IS NULL` (грандфазер не видит кнопку триала).
+- Осталось: автоматизация платежей (4 варианта в ROADMAP).
 
-**Phase 3g — Telegram Stars (одноразовая оплата, commit `d0155e8`):**
-- `web/app.py`: `/api/billing/create-stars-invoice` — `createInvoiceLink` с currency=XTR, payload `stars_sub:{tid}:{days}:{ts}`. Константы `STARS_MONTHLY_PRICE=150`, `SUBSCRIPTION_DAYS_PER_PAYMENT=30`.
-- `bot/main.py`: `pre_checkout_query` (approve all) + `successful_payment` хендлер. Парсит payload → idempotency через `db_find_payment_by_external_id(telegram_payment_charge_id)` → `db_record_payment` (status=succeeded) → `db_extend_subscription(+30 дн)` → `db_apply_referral_bonus(+14 дн обоим)` → уведомления юзеру и пригласившему.
-- `web/static/recovery.js`: кнопка «⭐ Оплатить Telegram Stars (150 ⭐)» в payBlock, `tg.openInvoice` с callback.
+## 2026-05-25 (вечер) — Домен supportkronos.online, прямой HTTPS на Fornex, subscription-спайк validated
 
-**Phase 3g+ — Ручная СБП/карта + админ-форма (commit `8ee3541`):**
-- `web/app.py`: константа `MANUAL_PAY` (СБП `+79213032918` Т-Банк, карта `2200 7007 6046 4759` Т-Банк, owner_tg `nikkronos`, rub `200`). Отдаётся в `/api/account/info`.
-- `web/static/recovery.js`: pay-block теперь показывается всем (убрано `days_left > 730` скрытие — владелец-grandfather мог тестировать). Разворачивающийся блок «💳 Оплатить СБП / картой» с реквизитами (кнопка «Скопировать номер» / «Скопировать номер карты») + шаблон комментария «VPN <email>» + кнопка «✉️ Написать @nikkronos после оплаты» (`openTelegramLink` в TG, новая вкладка в браузере).
-- `web/app.py`: **`/admin/credit`** — HTML-форма ручного зачисления оплаты (за `@_require_admin_auth`, render_template_string). Поля: email **или** telegram_id, дни, сумма, валюта (RUB/USD/XTR), провайдер (manual_sbp/card/crypto/other), external_id (idempotency), заметка. POST → `db_record_payment` (status=succeeded) → `db_extend_subscription` → `db_apply_referral_bonus`. Повторный submit с тем же `external_id` → ошибка, двойного зачисления нет.
-
-**Фикс UX:**
-- `trial_available = (not trial_used) AND (expires_at IS NULL)` — grandfather (`expires_at='2099-01-01'`) больше не видит кнопку триала. Ранее владелец случайно её активировал — статус стал «ПРОБНЫЙ ПЕРИОД», но 26500+ дней (безвредно).
-
-**CSS:** `.manual-pay-box` (пунктирная граница сверху), `.manual-pay-title`, `.muted` — стилизация развёрнутого блока реквизитов.
-
-**Что осталось:** автоматизация платежей — 4 варианта в ROADMAP (Crypto / Stars-subscription / уникальные копейки + парсер / самозанятость + Lava). Владелец думает.
-
----
-
-## 2026-05-25 (вечер) — Домен `supportkronos.online`, прямой HTTPS на Fornex, subscription-спайк validated
-
-Пост FSystem88/1717 → решили проверить модель «subscription-URL + HAPP» на нашей инфре (аддитивно).
-
-**Спайк (БД/бэкенд):**
-- `users.sub_token` + helpers (`db_ensure_sub_token`, `db_find_user_by_sub_token`).
-- `GET /sub/<token>` → base64 наших REALITY-ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`). Гейт `db_is_access_active` (хук enforcement Фазы 4).
-- ЛК: блок «Подписка» (ссылка + QR). ProxyFix → за прокси Flask отдаёт https-ссылки.
-
-**Дорога к HTTPS:**
-- Купили `supportkronos.online` (reg.ru, WHOIS-privacy). Нейтральное «support»-имя — маскировка.
-- CF Tunnel отвалился (Zero Trust требует не-Mir карту).
-- CF proxy + Origin Rule + Browser Integrity Check off — серверно работало, но **HAPP падал в таймаут**. **Safari владельца тоже не открывает `https://supportkronos.online` через CF** (DPI RST = «сетевое подключение прервано»). → **Cloudflare не надёжен в РФ для нашего use-case** (durable finding).
-- **Дроп CF.** A-запись → grey-cloud (DNS-only) → Fornex `185.21.8.91`. LE-сертификат через **DNS-01 via CF API token** (certbot-dns-cloudflare, авто-продление). **nginx на :8443 ssl http2** → :5001 (443 занят Xray REALITY). Файл `docs/scripts/nginx-supportkronos-8443.conf`.
-
-**Validated в HAPP:** подтянулись 2 сервера (YC-Reality + RU-REALITY), Wi-Fi + LTE — работают. **БС-полевой тест отдельно** (БС сейчас нет).
-
-**Закрепление:**
-- `VPN_RECOVERY_URL=https://supportkronos.online:8443/recovery` в env (бот + ссылки).
-- Инструкции ios/android/windows: URL заменён.
-- ЛК: «Подписка» поднята выше — главный CTA, остальные каналы — «Альтернативные способы (конкретные конфиги)».
-- `env_vars.example.txt` обновлён.
-
-**Серверно (вне git):** A-запись grey, LE cert, nginx :8443, CF API token в `/root/.secrets/cloudflare.ini`.
-
-**Также этим вечером:**
-- Переименованы метки серверов в подписке: `YC-Reality / RU-REALITY` → **🇪🇺 Европа / 🇷🇺 Россия** (commit `0d74701`, URL-encoded UTF-8 в `_SUB_LABEL_MAP`).
-- Создан **новый бот** в BotFather: `@vpnkronos_bot` (display `vpnkronos`). Токен у владельца + у нас (в env при деплое Phase 3b). Бренд: Kronos / VPN Kronos.
-- Зафиксирована **цена 200 ₽/мес** (середина рынка, УТП «работает при БС»).
-- Открыты для использования две большие TG-фичи: **Mini Apps** (auto-login через initData) и **Star Subscriptions** (Bot API 8.0). Mini App — доп. способ авторизации (email/пароль остаются). Stars — вторая кнопка оплаты после ЮKassa.
-- **Master-план Phase 3+4+5: `docs/plan-phase-3-4-5.md`** (читать первым при потере контекста).
-- **ЮKassa setup инструкция владельцу: `docs/yookassa-setup-instruction.md`** (200₽/мес, самозанятый, чеки через ФНС, webhook на `/api/billing/yookassa-webhook`).
-
-**Что осталось:** Phase 1b (БС-robust RU clean-443 host), per-user UUID на main/yc, БС-полевой тест subscription, broadcast-миграция старого бота, **ЮKassa-регистрация владельцем**. Детали — `docs/plan-phase-3-4-5.md`.
-
----
+Проверили модель «subscription-URL + HAPP» на нашей инфре.
+- **Спайк:** `users.sub_token` + `GET /sub/<token>` → base64 REALITY-ссылок (YC `www.microsoft.com` + main `cloud.mail.ru`), гейт `db_is_access_active`. ЛК-блок «Подписка» + QR. ProxyFix.
+- **HTTPS:** купили `supportkronos.online` (нейтральное «support»-имя). **CF не надёжен в РФ** (HAPP таймаут, Safari владельца не открывает через CF — DPI RST, durable). → дроп CF, A-запись grey-cloud → Fornex; LE через DNS-01 (CF API token); **nginx :8443 ssl** → :5001 (443 занят REALITY). `docs/scripts/nginx-supportkronos-8443.conf`.
+- **Validated в HAPP** (2 сервера, Wi-Fi+LTE). Метки `🇪🇺 Европа / 🇷🇺 Россия` (`0d74701`). Создан бот `@vpnkronos_bot`. Цена 200₽/мес. Master-план `docs/plan-phase-3-4-5.md`, `docs/yookassa-setup-instruction.md`.
 
 ## 2026-05-25 — Личный кабинет: модель аккаунта + UX + триал/реферал + пароль (Фазы 0–2)
 
-Старт коммерциализации через ЛК. План по фазам: 0 модель → 1 домен/YC-хост/HTTPS+БС-тест → 2 UX ЛК → 3 бот под ЛК → 4 enforcement+оплата → 5 реферал-начисление.
-
-**Фаза 0 — модель аккаунта (`bot/database.py`):**
-- `users` +колонки: subscription_status, expires_at, trial_used, plan, referral_code, referred_by, password_hash. Таблица `payments`.
-- Хелперы: subscription/trial/referral/payment/password (`db_is_access_active`, `db_extend_subscription`, `db_start_trial`, `db_ensure_referral_code`, `db_count_referrals`, `db_set_referred_by`, `db_set_password`, `db_has_password`, …). expires_at NULL = grandfathered.
-
-**Фаза 2 — UX ЛК (`web/`):**
-- QR-коды (qrcode[pil]) для VLESS / MTProxy / AmneziaWG-конфига (iOS/Android — скан в приложении).
-- Заметная primary-кнопка копирования; единая колонка 640px + ритм (выравнивание/воздух); hero-заголовок + объяснение на входе.
-- Экран **«Мой аккаунт»**: статус/срок, кнопка триала (14д), реферальный блок (код/ссылка/счётчик), быстрые кнопки каналов.
-- **Вход по паролю** (email+пароль) + установка/смена пароля (werkzeug hash, ≥8); `verify-otp` ловит `?ref` для атрибуции.
-- Эндпоинты: `/api/account/info`, `/account/start-trial`, `/account/set-password`, `/api/auth/login-password`. Константы TRIAL_DAYS=14, REFERRAL_REWARD_DAYS=14.
-
-**Бот:** приветствие → «ForFriends» + ссылка на ЛК + канал `@vforfriends`.
-
-**Инструкции бота переписаны (вечер, фидбэк тестера Ани):** ios/android/windows были устаревшими (iOS описывал VLESS+V2Box как основной, хотя основной = AmneziaWG) → нетехнический юзер не понимал, куда вставлять `vless://`. Теперь единая модель «два варианта, у каждого своё приложение» + явный блок «куда что вставлять» (vless → Streisand/Happ/V2Box/Hiddify; AmneziaWG-конфиг → Amnezia) + опора на ЛК с QR. Исправлена ошибка в Error-103 («Hiddify — тот же конфиг», неверно: в Hiddify только vless). Задача «конфиг на устройство» (iPad/iPhone оба `ios` → коллизия) — в ROADMAP, отложено до платящих.
-
-**Решения:** домен — нейтральный на базе ForFriends (предпоч. не .ru); хост ЛК — YC (whitelisted, при БС нужен whitelisted-SNI хостинг); оплата — ЮKassa(карты+СБП)→Stars→крипта; триал 14д; реферал «дни обоим» +14.
-
-**Косметика до Фазы 4:** enforcement выключен (у всех «Бессрочный»); реф-бонус начисляется при оплате; пароль по HTTP — безопасен только с HTTPS (Фаза 1).
-
-Коммиты: `1cfb5ec`, `c0e2384`, `9d561ba`, `0b3f6a7`, `3647133`. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-25.md`.
-
----
+Старт коммерциализации через ЛК (`1cfb5ec`,`c0e2384`,`9d561ba`,`0b3f6a7`,`3647133`).
+- **Фаза 0 (БД):** `users` +subscription/expires/trial/plan/referral/password; таблица `payments`; хелперы (`db_is_access_active`, `db_extend_subscription`, `db_start_trial`, …). `expires_at NULL = grandfathered`.
+- **Фаза 2 (UX ЛК):** QR (qrcode[pil]), копирование, hero, экран «Мой аккаунт» (статус/срок/триал/реферал), вход по паролю (werkzeug). `TRIAL_DAYS=14`, `REFERRAL_REWARD_DAYS=14`.
+- **Инструкции бота переписаны** (фидбэк Ани): единая модель «два варианта, у каждого своё приложение» + «куда что вставлять». Задача per-device (iPad/iPhone коллизия) — в ROADMAP. `SESSION_SUMMARY_2026-05-25.md`.
 
 ## 2026-05-24 — Учёт трафика lifetime + колонки Email/Всего + swap + диагностика скорости
 
-**Панель мониторинга:**
-- Колонка **Email** — галочка email-верификации (джойн `email_verified` по `telegram_id`). Caveat: только для юзеров с активным AWG-peer; полная картина — CSV.
-- Колонка **Всего** — накопительный lifetime-трафик пользователя.
-
-**Reset-aware учёт трафика (SQLite):**
-- Таблица `traffic_accounting(public_key PK, telegram_id, lifetime_rx/tx, last_rx/tx, updated_at)`.
-- `db_accumulate_traffic` — детект сброса счётчика (current < last → приращение = current); `db_get_lifetime_by_user` — SUM по юзеру (включая удалённые peer'ы).
-- `/api/traffic` накапливает при просмотре + отдаёт `total_bytes`; `scripts/traffic_accounting.py` — cron `*/5` на случай простоя панели.
-- Baseline засеян текущими счётчиками 24.05 (ретроактива нет, дальше растёт надёжно).
-
-**Инфра (Fornex eu1, вне git):**
-- **swap 2 ГБ** + `swappiness=10` — страховка от OOM (RAM 2 ГБ).
-- cron `*/5 traffic_accounting.py`.
-
-**Диагностика «упала скорость»:**
-- Сервер здоров: load 0.31/2 ядра, CPU 86% idle, 0 пакетных ошибок, BBR+fq уже включены.
-- Bandwidth: 4–8 потоков = 93–95 Мбит/с → **жёсткий потолок ~100 Мбит/с (порт VPS)**. Делится на всех онлайн-юзеров.
-- Тариф: Cloud NVMe 2 (2/2/20), 936 ₽/мес. **Fornex подтвердил (тикет): порт до 100 Мбит/с, лимита трафика нет.**
-- **Клиентский замер 2026-05-25** (ПК, СПб): без VPN 278↓, AWG **84↓**, VLESS 59↓. VPN не упирается в порт — узкое место путь RU→DE (RTT 2→60мс). **Решение: деньги не тратим** (апгрейд/переезд для одиночной скорости бесполезны). AWG ≈ +40% к VLESS → AWG основной.
-- Коммиты: `9246d7a`, `8e71b02`. Детали — `docs/sessions/SESSION_SUMMARY_2026-05-24.md`.
-
----
+- **Панель:** колонки Email (галочка верификации) + Всего (накопительный lifetime).
+- **Reset-aware учёт:** таблица `traffic_accounting` + `db_accumulate_traffic` (детект сброса) + `scripts/traffic_accounting.py` (cron `*/5`).
+- **Инфра:** swap 2 ГБ + `swappiness=10` на eu1.
+- **Диагностика скорости:** сервер здоров; потолок ~100 Мбит/с (порт VPS). Клиентский замер (СПб): без VPN 278↓, AWG 84↓, VLESS 59↓ → узкое место путь RU→DE, **деньги не тратим**, AWG основной. `9246d7a`,`8e71b02`.
 
 ## 2026-05-21 (вечер) — Recovery-сайт полный передел + Error-103 fallback
 
-**Recovery (`/recovery`):**
-- Удалены 3 legacy секции по Telegram ID + 5 legacy endpoint'ов: `/api/recovery/vpn`, `/mobile-vpn`, `/telegram-proxy`, `/proxy-link`, `/vpn-by-email`
-- Новый UX: email/OTP → главное меню с 3 каналами → подстраница выбора → результат
-  - **Основной VPN**: выбор ПК / iOS / Android → AmneziaWG-конфиг (для Android — `vpn://` deep link)
-  - **Мобильный резерв**: выбор оператора → VLESS (megafon/yota → main REALITY cloud.mail.ru, остальные → eu1 REALITY)
-  - **MTProxy**: кнопка «Открыть в Telegram» + ссылка
-- Новые backend endpoint'ы: `/api/recovery/awg-config-by-email`, `/mobile-link-by-email`, `/proxy-link-by-email` — все по email-token (helper `_verify_email_session`)
-- Стили: добавлен `.btn-menu` (большие многострочные) + `.btn-back`
-- В UI после выдачи AWG-конфига есть встроенный Error-103 fallback с инструкцией
-
-**Бот:**
-- `instruction_windows_short.txt`: добавлен блок про AmneziaVPN Error 103 (закрыть Amnezia*, запуск от админа, перезагрузка, либо Hiddify как альтернатива)
-
-**Что не сделано:** персональные UUIDs для main REALITY (запарковано в ROADMAP отдельной задачей).
-
----
+- **`/recovery`:** удалены 3 legacy-секции по Telegram ID + 5 legacy endpoint'ов. Новый UX: email/OTP → 3 канала (Основной VPN ПК/iOS/Android / Мобильный резерв по оператору / MTProxy). Новые email-token эндпоинты (`awg-config-by-email`, `mobile-link-by-email`, `proxy-link-by-email`). Встроенный Error-103 fallback.
+- **Бот:** `instruction_windows_short.txt` — блок про Error 103.
+- Не сделано: персональные UUIDs для main REALITY (запарковано).
 
 ## 2026-05-21 — Yota/Мегафон при БС РЕШЕНО + critical fix AmneziaWG persistent peers
 
-**Главное:** ✅ **VLESS+REALITY на main Timeweb с SNI=cloud.mail.ru — работает на Мегафон/Yota при активных белых списках.** Подтверждено реальным тестом (друг на Yota, `digitalocean.com` режется → БС активны → VPN при этом работает).
-
-### Архитектура решения
-- **Whitelist у Yota** работает по IP-подсетям (whitelisted: Timeweb, VK Cloud, Mail.ru Cloud, Cloud.ru, Selectel) + SNI inspection (whitelisted: cloud.mail.ru, cloud.vk.com, и т.д.). Наш `81.200.146.32` (Timeweb) подтверждённо в whitelist.
-- **REALITY** делает TLS Client Hello с SNI=`cloud.mail.ru` (whitelisted) → DPI пропускает → наш Xray расшифровывает VLESS-туннель внутри.
-- **Dest = cloud.mail.ru** — Xray делает реальный TLS-handshake к cloud.mail.ru для fronting. Снаружи наш сервер выглядит как mirror Mail.ru Cloud (отдаёт настоящий cert от VK LLC).
-- `cloud.vk.com` как dest не подошёл — нестандартный TLS, ломает REALITY-fronting (`target sent incorrect server hello`). Перебрали 6 кандидатов через openssl: cloud.mail.ru / yandex.ru / timeweb.cloud отдают чистый TLS 1.3.
-
-### Серверная инфраструктура
-- **main Timeweb** (`81.200.146.32`) — новая VPN-нода:
-  - Установлен Xray VLESS+REALITY на :443 (private key + public key generated через `xray x25519`, shortid=04d9b6c0)
-  - nginx на :80 для ACME (server_name=ru.vpnnkrns.ru, location /.well-known/acme-challenge/)
-  - Let's Encrypt cert для `ru.vpnnkrns.ru` через certbot (auto-renew enabled)
-  - WireGuard на UDP/51820 для 1 legacy user — оставлено без изменений
-- **DNS:** Cloudflare → `ru.vpnnkrns.ru` (A) → `81.200.146.32`, **DNS only (grey cloud)**
-- **Бот:** `VLESS_CDN_TLS_SHARE_URL` обновлён на новую REALITY-ссылку с main. Для оператора Мегафон/Yota приоритет: TLS-ссылка → HTTP-CDN → REALITY.
-
-### VLESS-ссылка (текущая в боте для Мегафон/Yota)
-```
-vless://359e23cc-f90c-4e43-97af-bd1b662ff043@81.200.146.32:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=cloud.mail.ru&fp=chrome&pbk=QlzHHy5Z1QXBpSK8wtyrjPfFkGHnAoNorhflEyFkcFg&sid=04d9b6c0&type=tcp&headerType=none#RU-REALITY
-```
-
-### Critical fix: AmneziaWG потерял peers после reboot Fornex
-- **Симптом:** после reboot Fornex 28 из 30 peers пропали из `awg show`. Пользователи получили `.conf` от бота, но не могли подключиться (handshake fail).
-- **Причина:** скрипт `/opt/amnezia-add-client.sh` использовал `awg-quick save awg0 2>/dev/null || true` — команда fail-silent в нашем AmneziaWG-контейнере. Peers сохранялись только в running-state ядра, не в `/opt/amnezia/awg/awg0.conf`. После рестарта контейнера (от apt upgrade docker-ce + reboot) — потерялись.
-- **Восстановление:** Python-скрипт проходом по `peers.json`, для каждого active eu1-peer'a → `docker exec amnezia-awg2 awg set awg0 peer <pubkey> preshared-key /tmp/psk.key allowed-ips <wg_ip>/32`. Восстановлено 21 peer (3 изначальных + 21 новых = 24 в awg).
-- **Persistent fix:**
-  - Создан `/opt/amnezia-save-conf.sh` — общий helper: `awg showconf awg0` + ручная вставка `Address = 10.8.1.0/24` → запись в `/opt/amnezia/awg/awg0.conf`.
-  - `/opt/amnezia-add-client.sh` и `/opt/amnezia-remove-client.sh` пропатчены: вместо нерабочей `awg-quick save` вызывают `/opt/amnezia-save-conf.sh`.
-  - Cron `*/5 * * * * /opt/amnezia-save-conf.sh` — safety net.
-
-### Что НЕ сделали в этой сессии (пробовали и закрыли)
-- WS-extension в YC API Gateway — поддерживает только Cloud Functions backend, не HTTP-passthrough (Path 1 из postmortem).
-- VLESS+XHTTP через API Gateway с `'*': '*'` query passthrough — серверная сторона теперь работала (HTTP 200), но клиент Streisand iOS всё равно не устанавливал тоннель. Подтвердили окончательный вердикт postmortem'а: **XHTTP через любые Yandex HTTP/2-edge не работает у клиентов**. API Gateway удалён.
-- VLESS+WS+TLS на main `ru.vpnnkrns.ru` — работает на Wi-Fi и других операторах. На Yota не работает: DPI режет TLS Client Hello с не-whitelisted SNI (симптом «сетевое подключение прервано» = RST после TCP-handshake). Этот промежуточный setup стёрт переводом на REALITY.
-
-### apt upgrades (попутно)
-- **YC vrprnt:** apt upgrade + reboot, kernel `6.8.0-117-generic`. Xray REALITY поднялся автоматически.
-- **main Timeweb:** apt upgrade (без kernel update в этой партии). Reboot не понадобился.
-- **Fornex eu1:** apt upgrade (docker-ce + libgnutls + rsync) + reboot, kernel `6.8.0-117-generic`. Простой ~3 мин. Все сервисы поднялись автоматом — именно этот reboot выявил скрытый баг AmneziaWG persistent peers.
-
-### Коммиты
-(будут после этой записи)
-
-### Что нового в репозитории
-- `docs/sessions/SESSION_SUMMARY_2026-05-21.md` — полная хронология
-- `docs/scripts/nginx-ru-vpnnkrns.conf.example` — текущий nginx-конфиг на main (только :80 для ACME)
-- `docs/scripts/xray-main-reality.json.example` — текущий Xray REALITY-конфиг на main
-- `docs/scripts/amnezia-save-conf.sh.example` — helper-скрипт для persistent awg0.conf
-
----
+**✅ VLESS+REALITY на main Timeweb (SNI=cloud.mail.ru) работает на Мегафон/Yota при БС.** Подтверждено тестом друга на Yota (digitalocean.com режется → БС активны).
+- **Архитектура:** whitelist Yota по IP-подсетям (Timeweb в whitelist) + SNI inspection; REALITY ClientHello SNI=cloud.mail.ru (whitelisted), dest=cloud.mail.ru:443 (fronting под Mail.ru Cloud). cloud.vk.com не подошёл (нестандартный TLS).
+- **main Timeweb:** Xray VLESS+REALITY :443 (shortid=04d9b6c0), nginx :80 ACME, LE cert; WG UDP/51820 для 1 legacy. DNS grey-cloud. Бот: `VLESS_CDN_TLS_SHARE_URL`.
+- **Critical fix:** после reboot Fornex 28/30 AWG-peers пропали — `awg-quick save` fail-silent в контейнере. Восстановлено по `peers.json`. **Persistent:** `/opt/amnezia-save-conf.sh` (`awg showconf` + ручной Address) вызывается из add/remove + cron `*/5`. **Не возвращать `awg-quick save`.**
+- Закрыто (пробовали): WS-ext в YC API Gateway, XHTTP через API Gateway (клиент не коннектится), VLESS+WS+TLS на main (Yota режет не-whitelisted SNI). `SESSION_SUMMARY_2026-05-21.md`. Новые: `nginx-ru-vpnnkrns.conf.example`, `xray-main-reality.json.example`, `amnezia-save-conf.sh.example`.
 
 ## 2026-05-20 — Финальный тест CDN relay при активных БС
 
-- **YC VM IP `158.160.236.147`** — протестирован на Yota при активном БС → "не смог подключиться к серверу". IP не в whitelist. Подтверждено окончательно.
-- **Yandex CDN WebSocket** — запрос в поддержку YC → ответ: "техническая возможность отсутствует, сценарий не поддерживается". Закрыто окончательно.
-- **Yandex CDN POST** — метод отсутствует в списке разрешённых методов CDN. XHTTP через CDN невозможен.
-- **Следующий кандидат:** Yandex API Gateway (`*.apigw.yandexcloud.net`) — поддерживает WebSocket proxy. Проверить доступность при следующем БС событии.
-- **Инфраструктура nginx на Fornex:** установлен nginx, роутит трафик на порту 80 по заголовку `Host` и `Upgrade`: WS → Xray:8080, XHTTP → Xray:8081. Xray переехал с порта 80 на localhost.
-- **Исправлен баг:** YC VM использует Fornex:80 как WS outbound. После смены Xray на XHTTP relay сломался. Nginx исправил роутинг по `$http_upgrade`.
+- YC VM IP `158.160.236.147` на Yota при БС — не подключается (IP не в whitelist). Yandex CDN WebSocket — поддержка YC: «сценарий не поддерживается». XHTTP через CDN POST невозможен.
+- Следующий кандидат: Yandex API Gateway (`*.apigw.yandexcloud.net`).
+- nginx на Fornex роутит порт 80 по `Host`/`Upgrade`: WS → Xray:8080, XHTTP → Xray:8081.
 
 ## 2026-05-19 — Yandex CDN relay (XHTTP) + выбор оператора в боте
 
-- **Xray на Fornex:** транспорт порта 80 переключён WS → XHTTP (SplitHTTP). Путь `/vpn`, UUID без изменений.
-- **Yandex CDN relay:** `cdn.vpnnkrns.ru` → Fornex:80 через XHTTP. CDN пробрасывает запросы к origin (подтверждено логами). Кеширование было уже выключено.
-- **Выяснено:** Yandex CDN не поддерживает WebSocket через консоль — только через заявку в поддержку. XHTTP — обходное решение, CDN-совместимое.
-- **Новая ссылка CDN:** `vless://359e23cc...@cdn.vpnnkrns.ru:80?type=xhttp&path=%2Fvpn` — добавлена в `env_vars.txt` как `VLESS_CDN_SHARE_URL`.
-- **Бот — выбор оператора:** кнопка «📱 Мобильный VPN» теперь показывает клавиатуру (Билайн / Мегафон/Yota / МТС / Т-Мобайл / Т2). Мегафон/Yota получает CDN ссылку, остальные — REALITY.
-- **Исправлен баг:** `parse_mode="HTML"` в `safe_reply()` вызывал `TypeError` → кнопка не реагировала.
-- Тест CDN на Мегафон/Yota при активных белых списках — **ждём следующего события**.
+- Xray на Fornex порт 80: WS → XHTTP (SplitHTTP, путь `/vpn`). `cdn.vpnnkrns.ru` → Fornex:80, CDN пробрасывает к origin. Новая `VLESS_CDN_SHARE_URL`.
+- Бот: «📱 Мобильный VPN» → выбор оператора (Билайн/Мегафон-Yota/МТС/Т-Мобайл/Т2). Мегафон/Yota → CDN, остальные → REALITY. Тест при БС ждёт события.
 
 ## 2026-05-16 — Тест VLESS+REALITY при белых списках
 
-- **VLESS+REALITY xHTTP (Yandex Cloud)** протестирован на Yota/Мегафон при активных белых списках РКН — **не работает**
-- **AmneziaWG** при БС не работает нигде (UDP блокируется) — известно давно
-- **T2 (Tele2)** — работает, у них нет жёстких белых списков
-- Вывод: при активных БС у сервиса нет рабочего решения для Yota/Мегафон. Ограничение зафиксировано, решение требует протокол поверх HTTPS (Trojan TLS или аналог)
+- VLESS+REALITY xHTTP (YC) на Yota/Мегафон при БС — **не работает**; AmneziaWG при БС нигде (UDP). **T2 (Tele2) — работает** (нет жёстких whitelist).
+- Вывод: при БС для Yota/Мегафон нужен протокол поверх HTTPS (привело к решению 21.05).
 
 ## 2026-05-15 — Авторизация веб-панели + трекинг прокси
 
-- **Закрыта веб-панель `/`** от публичного доступа: HTML login-форма с Flask session (`session["logged_in"]`). Логин: `admin`, пароль: `ADMIN_SECRET`. `/recovery` остался публичным.
-- **`web/templates/login.html`** создан и добавлен в git (тёмная тема, в стиле панели).
-- **Убран Basic Auth** (не работал в Chrome без HTTPS, не передавался в fetch-запросах JS).
-- **Колонка «Прокси»** в таблице пользователей: показывает когда пользователь последний раз запрашивал MTProxy-ссылку.
-  - `bot/database.py`: миграция поля `proxy_requested_at`, функция `db_update_proxy_requested_at()`
-  - `bot/main.py`: запись при нажатии кнопки «📎 Прокси Telegram» и команде `/proxy`
-  - `web/app.py` + `web/static/main.js`: отображение в панели
+- Закрыта панель `/` HTML login-формой (Flask session; admin / `ADMIN_SECRET`). `/recovery` публичен. Убран Basic Auth. `web/templates/login.html`.
+- Колонка «Прокси» (`proxy_requested_at` + `db_update_proxy_requested_at`).
 
 ## 2026-05-14 — Аудит безопасности веб-панели
 
-- **`/api/users`**: убрана авторизация по telegram_id (легко угадать). Теперь требует `ADMIN_SECRET` — случайная 64-char hex строка из `env_vars.txt`.
-- **Legacy recovery endpoints** (`/api/recovery/vpn`, `/api/recovery/telegram-proxy`, `/api/recovery/proxy-link`, `/api/recovery/mobile-vpn`): добавлена проверка `RECOVERY_SECRET` через заголовок `X-Recovery-Secret` или тело запроса. Без секрета — 403/503. Frontend (`/recovery`) использует email/OTP, эти эндпоинты не затронуты.
-- **`/api/traffic`**: убран `telegram_id` из публичного ответа — остались только `username`, `wg_ip`, трафик.
-- **`bot/config.py`**: добавлены поля `admin_secret` и `recovery_secret` в `BotConfig`.
-- **`env_vars.example.txt`**: добавлены примеры новых переменных.
-- Приватные ключи WG/Xray: не хранятся в БД, генерируются на сервере и отдаются единожды — OK.
-- Email/OTP флоу: защищён session token'ом — OK.
+- `/api/users` → требует `ADMIN_SECRET` (64-char hex). Legacy recovery endpoints → `RECOVERY_SECRET`. `/api/traffic` — убран telegram_id из публичного ответа. `bot/config.py` +`admin_secret`/`recovery_secret`. Приватные ключи не в БД.
 
 ## 2026-05-14 — IPv6 в AllowedIPs (защита от IPv6 leak)
 
-- **Задача:** трафик к IPv6-адресам шёл мимо VPN — реальный IP виден на сайтах с IPv6.
-- **Решение:** добавлен `::/0` в `AllowedIPs` для ПК и iOS конфигов.
-- **Изменено:** `/opt/amnezia-add-client.sh` на Fornex (боевой скрипт eu1) + `bot/wireguard_peers.py` + оба примера в `docs/scripts/`.
-- **Android:** не затронут — функция `_make_amneziawg_config_android_safe()` уже срезала `::/0` (Error 1000), всё работает корректно.
-- **Примечание:** существующие конфиги не меняются, только новые и после `/regen`.
-
-## 2026-05-11 — Защита сервера Fornex от брутфорса и UDP-флуда
-
-- **Причина:** скачок CPU до 98.69% из-за SSH-брутфорса (нет fail2ban) + возможный UDP-флуд на порт 39580.
-- **fail2ban** установлен и активен — банит IP после неудачных попыток входа.
-- **SSH по паролю отключён** — только ключ. Важно: настройка была в `/etc/ssh/sshd_config.d/50-cloud-init.conf` (перекрывает основной конфиг).
-- **SSH-ключ Fornex:** `C:\Users\krono\.ssh\id_ed25519_fornex`, алиас `ssh fornex` в `~/.ssh/config`.
-- **Rate-limit UDP 39580** через iptables (1000 пакетов/сек), сохранён через `iptables-persistent`.
-- **sysstat** установлен — история CPU/сети: `sar -u 1 10`.
-- Подробно: `docs/sessions/SESSION_SUMMARY_2026-05-11.md`
+- Трафик к IPv6 шёл мимо VPN → добавлен `::/0` в AllowedIPs для ПК/iOS. `/opt/amnezia-add-client.sh` + `wireguard_peers.py` + примеры. Android не затронут (срезает `::/0`, Error 1000). Только новые/regen.
 
 ## 2026-05-13 — Platform-based доставка конфига (vpn:// Android, файл iOS/PC)
 
-- **Задача:** упростить подключение — убрать навигацию по файловой системе где возможно.
-- **Новый флоу:** кнопка «📲 Получить VPN» в /start → выбор платформы [💻 ПК | 🍎 iOS | 🤖 Android] → доставка под платформу. То же для «Обновить конфиг».
-- **Android:** `vpn://` deep link — тап в Telegram → AmneziaVPN импортирует автоматически. Реализован через `generate_vpn_url()` в `wireguard_peers.py`: qCompress (zlib + 4-байтный big-endian заголовок) + base64url.
-- **iOS:** `.conf` файл + инструкция «Поделиться → AmneziaWG». Буфер обмена не поддерживается (нет кнопки в AmneziaWG iOS); QR из галереи тоже нет — только камера.
-- **ПК:** `.conf` файл как раньше.
-- **android_safe=True** автоматически для Android (один DNS, обход ErrorCode 1000).
-- **Файлы:** `bot/main.py` (новые callbacks, `_deliver_config`, `_show_platform_keyboard`), `bot/wireguard_peers.py` (`generate_vpn_url`).
+- «📲 Получить VPN» → выбор платформы → доставка. Android: `vpn://` deep link (`generate_vpn_url`: qCompress zlib + base64url). iOS/ПК: `.conf`. `android_safe=True` для Android.
 
 ## 2026-05-13 — Задокументирован Trojan-сетап (проверенная схема, не нами)
 
-- **Источник:** личный опыт знакомого, работает в РФ (май 2026).
-- **Протокол:** Trojan поверх TLS — трафик неотличим от HTTPS.
-- **Клиент:** ShadowRocket (iOS, платный ~$3). Поддерживает Trojan/VLESS/SS.
-- **Ключевые настройки:**
-  - UDP отключён — снижает поверхность детектирования.
-  - **IPv6 отключён** — критично: несколько пользователей получили блокировку именно из-за IPv6-leak (туннель шёл через IPv4, а браузер/ОС коннектился по IPv6 напрямую).
-- **Сервер:** VPS в Нидерландах (не российский хостинг).
-- **Бонус-практика:** VPS с Ubuntu + GUI + Remote Desktop как «чистый браузер» для регистрации аккаунтов (Apple ID и др.) без запроса номера телефона.
-- **Вывод для нашего проекта:** IPv6 leak — реальный вектор блокировки, не только теоретический. Учитывать при развитии.
+- Trojan поверх TLS (неотличим от HTTPS), клиент ShadowRocket, VPS NL. UDP+IPv6 off (IPv6-leak — реальный вектор блокировки). Вывод: учитывать IPv6-leak. Не внедряем пока хватает REALITY.
+
+## 2026-05-11 — Защита сервера Fornex от брутфорса и UDP-флуда
+
+- CPU 98% из-за SSH-брутфорса → fail2ban установлен; SSH по паролю отключён (настройка в `/etc/ssh/sshd_config.d/50-cloud-init.conf`). Rate-limit UDP 39580 (iptables, persistent). sysstat. Ключ `id_ed25519_fornex`, алиас `ssh fornex`.
 
 ## 2026-05-11 — Багфикс: eu2 → eu1 при /regen и /get_config
 
-- **Проблема:** пользователи с `preferred_server_id = "eu2"` получали ошибку «Не удалось добавить peer в WireGuard» при `/regen`. Причина: `normalize_preferred_server_id` не конвертировала `eu2` → `eu1`, бот пытался использовать классический WireGuard (`wg0`) который уже не работает — сервер перешёл на AmneziaWG (`awg0`).
-- **Фикс:** `bot/storage.py` — добавлен `"eu2"` в список legacy-слотов, нормализуемых в `eu1`.
-- **Деплой:** патч применён точечно через `sed` на Fornex, `vpn-bot` перезапущен.
+- Юзеры с `preferred_server_id="eu2"` падали (бот шёл в неработающий wg0). Фикс: `bot/storage.py` — `eu2` в legacy-слоты, нормализуемые в `eu1`. Патч через sed на Fornex.
 
 ## 2026-05-09 — xHTTP packet-up на YC VM (обход ТСПУ-заморозки)
 
-- **Проблема:** ТСПУ замораживает TCP+REALITY сессии после 15–20 КБ; `/mobile_vpn` не работает у Yota/MegaFon в whitelist-режиме.
-- **Изменение:** транспорт на YC VM (`158.160.236.147`) переключён с `TCP + xtls-rprx-vision` на `xHTTP packet-up` (каждый пакет — отдельный HTTP-запрос, нет долгоживущей сессии для заморозки).
-- **Файл на сервере:** `/usr/local/etc/xray/config.json` — `network: xhttp`, `xhttpSettings: {mode: packet-up, path: /download}`, убран `flow`.
-- **Бот:** `VLESS_REALITY_SHARE_URL` в `/opt/vpnservice/env_vars.txt` на Fornex обновлена (`type=xhttp&mode=packet-up&path=%2Fdownload`); `vpn-bot.service` перезапущен.
-- **Статус:** развёрнуто ✅, тест на MegaFon-SIM — ожидает фидбэка от пользователей.
-- **Документация:** `docs/yandex-cloud-reality-setup.md` обновлён.
+- ТСПУ замораживает TCP+REALITY после 15–20 КБ. Транспорт YC VM `TCP+vision` → `xHTTP packet-up` (path `/download`, без `flow`). `VLESS_REALITY_SHARE_URL` обновлён. `docs/yandex-cloud-reality-setup.md`.
 
 ## 2026-05-08 — Анализ конкурентов, удаление eu2, редизайн панели мониторинга
 
-### Анализ конкурентов
-
-- **VlexNet:** balance-модель (бесплатно за рефералов), Mini App, Telegram-прокси бесплатно, 3 дня пробного, без карты.
-- **Barin VPN:** 13 399 пользователей/мес, слот-машина как геймификация, Telegram OAuth для веб-кабинета, 199₽/3 устройства.
-- **SPACE Connect:** уточнены данные — Mini App ✅ (через Happ), split tunneling, 8610 пользователей/мес, 1% партнёрская программа.
-- Обновлена таблица сравнения в `docs/competitors-analysis.md` (7 конкурентов, новые строки: Telegram proxy, split tunneling, новостной канал, геймификация, подарочный VPN).
-- **Вывод по анализу:** все конкуренты используют key-based систему (не .conf), белые списки у конкурентов не работают — наш VLESS+REALITY через YC — преимущество на LTE.
-
-### Удаление eu2 из бота
-
-- **`bot/wireguard_peers.py`:** `not in ("eu1", "eu2")` → `!= "eu1"` (3 вхождения); `get_available_servers()` — eu2 удалён.
-- **`bot/storage.py`:** приоритет поиска peer `["rus1", "rus2", "eu1", "eu2"]` → `["eu1"]`.
-- **`bot/main.py`:** все `in ("eu1", "eu2")` → `== "eu1"`; кнопка «🖥 Выбрать сервер» удалена из меню (3 места); удалены хендлеры `cmd_server` и `callback_server_select`; упоминание `/server` в тексте бота убрано.
-
-### Редизайн панели мониторинга (http://185.21.8.91:5001/)
-
-**Проблема трафика (root cause):** панель работает на eu1, старый код SSHился к eu1 с eu1 (self-SSH). AmneziaWG живёт в Docker-контейнере `amnezia-awg2` — `awg` недоступен на хосте напрямую.
-
-**Исправление:** `_get_awg_dump_eu1()` теперь использует `docker exec amnezia-awg2 awg show awg0 dump` вместо локального subprocess.
-
-**Изменения файлов:**
-- **`web/app.py`:** добавлены `_parse_wg_dump_full()` (парсит rx, tx, last_handshake по pubkey), `_get_awg_dump_eu1()` (docker exec); `/api/traffic` возвращает список пользователей с rx_bytes, tx_bytes, last_handshake, отсортированный по трафику; `/api/services` упрощён до AmneziaWG + VLESS.
-- **`web/templates/index.html`:** полный переписан — тёмная тема, статус-бар (AWG/VLESS точки, счётчики), таблица пользователей (IP, ↓ Принято, ↑ Отправлено, Последний сеанс), статическая сводка конфигов, footer с Recovery.
-- **`web/static/main.js`:** переписан — `fmt(bytes)` (КБ/МБ/ГБ), `relTime(ts)` («● сейчас» / «N мин назад» / «N ч назад» / «никогда»), автообновление каждые 60 сек.
-- **`web/static/style.css`:** полная замена старой светлой темы на тёмную неоновую (CSS variables, neon glow для dot-on, cyan accent, purple tx, зелёный «сейчас»).
-- **`web/templates/recovery.html`:** удалён блок «Слот EU2», описание упрощено, кнопка переименована в «Восстановить VPN».
-
-**Результат:** трафик отображается корректно (8.3 ГБ, 7.6 ГБ и т.д.), last_handshake показывает «● сейчас» / время, строки без трафика уходят вниз и затемняются.
+- **Конкуренты:** VlexNet, Barin VPN (199₽/3устр), SPACE Connect (Mini App, split tunneling). Все key-based; наш VLESS+REALITY через YC — преимущество на LTE. `docs/competitors-analysis.md` (7 конкурентов).
+- **Удаление eu2** из бота (storage/wireguard_peers/main; кнопка «Выбрать сервер» убрана).
+- **Редизайн панели:** root cause трафика — self-SSH; `_get_awg_dump_eu1()` → `docker exec amnezia-awg2 awg show awg0 dump`. Тёмная тема, `/api/traffic` по юзерам, автообновление 60с.
 
 ## 2026-05-07 — Рефакторинг UX бота + git setup
 
-- **VLESS code-блок:** `/mobile_vpn` теперь отправляет ссылку в `<code>` блоке — Telegram не авто-линкует `www.yandex.ru` внутри строки, копирование чистое.
-- **Удалены команды:** `/get_config_android`, `/regen_android`, `/my_config`, `/help` — убраны из кода полностью.
-- **Inline-меню /start:** вместо списка 13 команд — 7 inline-кнопок + кнопка ⚙️ Администратор (только владельцу).
-- **Inline админ-панель:** 5 кнопок — статистика, пользователи, ротация прокси, добавить пользователя (state machine), рассылка с подтверждением.
-- **Исправление:** `call.message.from_user` → `call.from_user` в menu-callbacks (бот ≠ пользователь).
-- **GitHub:** первый коммит в `nikkronos/vpnservice`, 54 файла (реструктуризация + YC-Reality + bot refactor).
-- **Yota:** расследование — ссылка корректная, проблема в whitelist MegaFon. Проверить при следующем событии.
-- **Сессия:** `SESSION_SUMMARY_2026-05-07.md`.
+- VLESS-ссылка в `<code>` (чистое копирование). Удалены команды `/get_config_android`,`/regen_android`,`/my_config`,`/help`. Inline-меню /start (7 кнопок + ⚙️ Администратор). Первый коммит в `nikkronos/vpnservice` (54 файла). `SESSION_SUMMARY_2026-05-07.md`.
 
 ## 2026-05-06 — Yandex Cloud VLESS+REALITY relay (резерв для LTE whitelist-режима)
 
-- **Диагностика:** Timeweb (81.200.146.32) тоже недоступен на LTE — whitelist не включает даже российский хостинг.
-- **Yandex Cloud VM:** создан аккаунт (грант 4000₽), VM `vrprnt` — Ubuntu 24.04, Shared-core 2vCPU/1GB, публичный IP `158.160.236.147`, зона `ru-central1-d`.
-- **Xray:** установлен, конфиг VLESS+REALITY (port 443, SNI `www.yandex.ru`); UFW открыт 443/tcp; Security Group YC добавлено входящее правило TCP 443.
-- **Ключи:** UUID `11dd653c-944b-4320-b29e-f1a9f2d75db8`, PublicKey `XKK9qJfFVdG3fegYC5vP8uF-OIzYK6YzKPz-sLVh_lE`, ShortId `ad88588f88ea4246`.
-- **Бот:** `VLESS_REALITY_SHARE_URL` в `env_vars.txt` на Fornex обновлена на YC-Reality ссылку; `vpn-bot.service` перезапущен. Команда `/mobile_vpn` отдаёт YC-Reality ссылку.
-- **Тест:** VPN подключается по Wi-Fi ✅. Тест на LTE в whitelist-режиме — ожидает следующего ограничения.
-- **Документация:** `docs/yandex-cloud-reality-setup.md` создан с полными параметрами VM и конфига.
-- **Сессия:** `SESSION_SUMMARY_2026-05-06.md`.
+- Timeweb тоже недоступен на LTE-whitelist. YC VM `vrprnt` (158.160.236.147, Ubuntu 24.04), Xray VLESS+REALITY :443 (SNI `www.yandex.ru` — позже сменён). `/mobile_vpn` отдаёт YC-Reality. Тест Wi-Fi ✅, LTE-whitelist ждёт. `docs/yandex-cloud-reality-setup.md`.
 
 ## 2026-05-05 — Cloudflare CDN стек для мобильного LTE (настроен, whitelist-блок)
 
-- **Cloudflare:** зарегистрирован аккаунт, домен `vpnnkrns.ru` добавлен, NS изменены на CF (`ray`/`susan`), домен Active.
-- **DNS:** `sub.vpnnkrns.ru` → A → `185.21.8.91`, Proxied; SSL Flexible; WebSockets включены.
-- **Xray на Fornex:** конфиг переписан с REALITY на **VLESS + WebSocket** (port 80, no TLS); `ufw allow 80/tcp`; сервис активен.
-- **env_vars.txt (Fornex):** `VLESS_REALITY_SHARE_URL` обновлена на CDN-ссылку (`sub.vpnnkrns.ru:443`, `type=ws`, `alpn=http/1.1`).
-- **Итог:** LTE whitelist-режим блокирует даже Cloudflare IPs — решение отложено до снятия ограничений (после 9 мая 2026). CDN-стек сохранён как рабочий резерв для обычных условий.
-- **Сессия:** `SESSION_SUMMARY_2026-05-05.md`.
+- CF аккаунт + домен `vpnnkrns.ru`; `sub.vpnnkrns.ru` → Fornex, Proxied, WS on. Xray на Fornex → VLESS+WS (port 80, no TLS). **Итог:** LTE-whitelist блокирует даже CF IP → отложено; CDN-стек как резерв для обычных условий. `SESSION_SUMMARY_2026-05-05.md`.
 
 ## 2026-04-13 — Документирован предпрод-план коммерциализации + синхронизация с AI-идеями
 
-- Добавлен документ **`docs/commercialization-prelaunch-plan-2026-04.md`**:
-  - as-is архитектура (Fornex/Timeweb, слоты `rus1/rus2/eu1/eu2`, recovery и MTProxy flow);
-  - prelaunch-риски (техника, продукт, коммерция/юридика);
-  - обязательный минимум до платного запуска (PostgreSQL, production web stack, мониторинг, бэкапы/restore, webhook-безопасность, подписки);
-  - этапный план A/B/C/D и Definition of Ready.
-- Включена синхронизация с внешними AI-идеями из профильных чатов:
-  - что брать в проект сейчас (PostgreSQL, agent-автоматизация рутины, точечные MCP-интеграции),
-  - что отложить (рекламные Meta-агенты как не-core для VPN-инфраструктуры).
-- `ROADMAP_VPN.md` обновлён: добавлен отдельный блок «Предпрод-пакет для коммерциализации» со ссылкой на новый документ.
+- `docs/archive/commercialization-prelaunch-plan-2026-04.md`: as-is архитектура, prelaunch-риски, минимум до запуска (Postgres, prod web stack, мониторинг, бэкапы, webhook), план A/B/C/D. Брать сейчас: Postgres, agent-автоматизация; отложить: рекламные Meta-агенты. (Файл архивирован 06-13.)
 
 ## 2026-04-12 — Исправление доступа к мониторингу и recovery (UFW + обновление устаревших ссылок)
 
-- **Причина:** после переноса `vpn-web.service` на Fornex порт 5001 не был открыт в UFW — сервис работал, но снаружи был недоступен. Дополнительно: ряд файлов содержал старые ссылки `81.200.146.32:5001` (Timeweb).
-- **Сервер Fornex:** `ufw allow 5001/tcp && ufw reload` — панели `http://185.21.8.91:5001/` и `http://185.21.8.91:5001/recovery` снова доступны.
-- **Репозиторий (2 коммита):**
-  - `env_vars.example.txt` — пример `VPN_RECOVERY_URL` обновлён на Fornex IP.
-  - `docs/mtproxy-proxy-rotation.md` — ссылка Web recovery и заголовок раздела обновлены (Timeweb → Fornex).
-  - `docs/blocking-bypass-strategy.md` — URL панели мониторинга в разделе LTE-тестов обновлён на Fornex.
-  - `docs/deployment.md` — шаг `ufw allow 5001/tcp` вынесен как **обязательный** пункт в разделе деплоя `vpn-web`; добавлен шаг проверки curl.
-- **Сессия:** `SESSION_SUMMARY_2026-04-12.md`.
+- После переноса `vpn-web` на Fornex порт 5001 не был открыт → `ufw allow 5001/tcp`. Обновлены старые ссылки `81.200.146.32:5001` → Fornex в env-примере, mtproxy-rotation, blocking-bypass, deployment.
 
-## 2026-04-11 — Документация и код: пост-миграция бота на Fornex (Россия `/get_config`, EU `/regen`, SSH)
+## 2026-04-11 — Документация и код: пост-миграция бота на Fornex (Россия/EU/SSH)
 
-- **Контекст:** бот на Fornex; Россия (rus1) — WireGuard остаётся на **main** (Timeweb). В проде выявлено: на Fornex не было **`wireguard-tools`** → в логах `FileNotFoundError: 'wg'`, пользователь не получал ответ на `/get_config` для России. Второй кейс: в `env_vars.txt` был путь **`WG_EU1_SSH_KEY_PATH=/root/.ssh/id_ed25519_eu1`**, файла ключа на новом VPS не было → `/regen` AmneziaWG (в т.ч. слот eu2) — ошибка SSH до eu1.
-- **Операции на проде (зафиксировано для повторения):** `apt install -y wireguard-tools`; `ssh-keygen` для `id_ed25519_eu1` + добавление `.pub` в `authorized_keys` на EU; `systemctl restart vpn-bot`; проверка `ssh -i ... root@185.21.8.91 "echo OK"`.
-- **Репозиторий:** **`docs/deployment.md`** — раздел «Бот (Telegram)» переименован с устаревшего «Timeweb»; добавлен **чеклист хоста бота после переноса на Fornex** (wg, WG_SSH_*, WG_EU1_SSH_KEY_PATH, eu2 vs SSH); правка примера `WG_EU1_SSH_KEY_PATH` в блоке env; MTProxy — правка «сервер бота» вместо только Timeweb. **`env_vars.example.txt`** — комментарий про ключ на хосте бота. **`README_FOR_NEXT_AGENT.md`** — путь к `env_vars.txt` и ссылка на чеклист. **`bot/wireguard_peers.py`** — при отсутствии `wg` поднимается понятный `WireGuardError` с текстом про `apt install wireguard-tools`; сообщение об ошибке SSH к eu1 без упоминания Timeweb, с шагами после переноса VPS.
-- **Сессия:** **`SESSION_SUMMARY_2026-04-11.md`**.
+- На Fornex не было `wireguard-tools` (`/get_config` Россия падал) + не было ключа `id_ed25519_eu1` (`/regen` EU падал). Операции: `apt install wireguard-tools`, ssh-keygen + authorized_keys на EU. `deployment.md` — чеклист хоста бота; `wireguard_peers.py` — понятные ошибки. `SESSION_SUMMARY_2026-04-11.md`.
 
 ## 2026-04-11 — `vpn-web` и `/recovery` на Fornex; отключение панели на Timeweb
 
-- **Цель:** одна площадка с ботом — мониторинг **`http://185.21.8.91:5001/`** и **`/recovery`** на Fornex; **`VPN_RECOVERY_URL`** в `env_vars.txt`; трафик **main** на панели через **`WG_SSH_*`** (ключ `id_ed25519_main`, `authorized_keys` на Timeweb).
-- **Systemd Fornex:** создан и включён **`vpn-web.service`** (`PORT=5001`), проверка `curl` → 200.
-- **Timeweb:** **`systemctl disable --now vpn-web.service`**, порт 5001 не слушается.
-- **Код/доки (репозиторий):** дефолт **`vpn_recovery_url`** и fallback в **`bot/main.py`**, **`bot/config.py`**; **`docs/deployment.md`**, **`docs/telegram-mtproxy-operators-guide.md`**, **`docs/vpn-web-migration-fornex-plan.md`** (статус «выполнено»), **`SESSION_SUMMARY_2026-04-10.md`**, **`README_FOR_NEXT_AGENT.md`**.
+- Мониторинг + `/recovery` переехали на Fornex (`vpn-web.service`, PORT=5001); `VPN_RECOVERY_URL` обновлён; трафик main через `WG_SSH_*` (ключ `id_ed25519_main`). Timeweb-панель `disable --now`.
 
-## 2026-04-10 — MTProxy Fake TLS на Fornex (порт 8444), починка `/proxy_rotate`, проброс `MTPROXY_*` в subprocess
+## 2026-04-10 — MTProxy Fake TLS на Fornex (порт 8444), починка /proxy_rotate
 
-- **Контекст:** после переноса бота на Fornex ротация MTProxy падала: Docker не мог занять **хост 443** — порт занят **`xray.service`** (REALITY). Принцип: не менять Xray/AmneziaWG; внешний порт MTProxy — **8444** (свободен; **8443** был у старого `mtproto-proxy`).
-- **Код (репозиторий, `main`):** `bot/main.py` — понятное сообщение при конфликте порта 443; `subprocess.run(..., env=environment_for_mtproxy_rotate(...))`. `bot/config.py` — `environment_for_mtproxy_rotate()`: `os.environ` + все **`MTPROXY_*`** из `env_vars.txt`. `env_vars.example.txt` — пример `MTPROXY_PORT` / `MTPROXY_PUBLIC_IP`.
-- **Прод Fornex:** `env_vars.txt` — `MTPROXY_PORT=8444`, `MTPROXY_PUBLIC_IP=185.21.8.91`, обновлён `MTPROTO_PROXY_LINK` после ротации; `git pull`, `systemctl restart vpn-bot`; контейнер **`mtproxy-faketls`** — `8444->443`; удалён **`mtproto-proxy`**.
-- **Документы:** `SESSION_SUMMARY_2026-04-10.md`; план переноса панели/recovery на Fornex — `docs/vpn-web-migration-fornex-plan.md`.
-- **Код (перенос панели):** `web/app.py` — трафик **main** через SSH при наличии `WG_SSH_HOST`; проверка MTProxy по порту из ссылки `/proxy`. `env_vars.example.txt` — `WG_SSH_*`; обновлены `docs/vpn-web-migration-fornex-plan.md`, `web/README.md`, `README_FOR_NEXT_AGENT.md` (главная `/` и `/recovery`).
+- После переноса бота Docker не мог занять хост 443 (занят Xray REALITY) → MTProxy внешний порт **8444**. `bot/config.py` `environment_for_mtproxy_rotate()` (проброс `MTPROXY_*` в subprocess). Контейнер `mtproxy-faketls` (8444→443); удалён старый `mtproto-proxy`. `docs/archive/vpn-web-migration-fornex-plan.md`.
 
 ## 2026-04-02 — Логические слоты rus1 / rus2 / eu1 / eu2 + recovery EU1+EU2 + ссылка прокси без рестарта
 
-- **Цель:** четыре именованных слота профилей VPN; отдельные peers в `peers.json`; Европа — два AmneziaWG-слота на одном EU-хосте; на странице `/recovery` — два блока выдачи конфига (EU1 и EU2). Имена файлов конфигов включают `server_id` (например `..._eu1_amneziawg.conf`).
-- **`bot/storage.py`:** ключи пиров `"{telegram_id}:{server_id}"`; миграция со старого формата: единственный peer без суффикса → слот **`rus1`** (legacy `main` в логах/каноне — см. `canonical_env_server_id`).
-- **`bot/wireguard_peers.py`:** `canonical_env_server_id` — rus1/rus2 → физическая нода **main**, eu1/eu2 → **eu1** (env/SSH); общий пул IP для rus1+rus2 и отдельно для eu1+eu2 (Amnezia); `get_available_servers()` возвращает четыре слота; Amnezia create/regen с параметром `server_id` в `eu1`|`eu2`.
-- **`bot/main.py`:** `/get_config`, `/regen`, `/server`, `/status` работают с нормализованными `rus1`/`rus2`/`eu1`/`eu2`; WireGuard-классика для RU-слотов, Amnezia — для EU-слотов.
-- **`web/app.py`:** `POST /api/recovery/vpn` — только Amnezia (`server_id`: eu1|eu2), без перезаписи «чужого» слота через preferred_server. `api_servers` / `api_services` / `_get_wg_transfer_for_server` используют канонический id ноды для ping и SSH. **`GET /api/recovery/proxy-link?telegram_id=...`** — та же проверка пользователя, что у `telegram-proxy`, отдаёт актуальный `tg://` как `/proxy`, **без** перезапуска Docker.
-- **Веб recovery:** `recovery.html` / `recovery.js` — два блока VPN (EU1, EU2); блок «Текущая ссылка MTProxy» + кнопка «Показать актуальную ссылку» и «Копировать»; при наличии сохранённого Telegram ID в `localStorage` ссылка подгружается при открытии страницы.
-- **Деплой:** юнит бота на сервере — **`vpn-bot.service`** (не `vpnservice-bot.service`); после `git pull`: `sudo systemctl restart vpn-bot.service` и при необходимости `vpn-web.service`.
+- 4 именованных слота; ключи пиров `{tid}:{server_id}`; rus1/rus2→main, eu1/eu2→eu1 (`canonical_env_server_id`). `/recovery` — 2 блока VPN; `GET /api/recovery/proxy-link` отдаёт `tg://` без рестарта Docker. Юнит бота = `vpn-bot.service`.
 
 ## 2026-04-02 (дополнение) — Spec-08: без нового VPS
 
-- Решение владельца: **второй VPS не оплачивается.** Спека **spec-08** переписана: основной сценарий **B** — только **main + eu1** (несколько способов: WG, AmneziaWG, `/mobile_vpn`, `/proxy`; опц. REALITY на **main**, домен для MTProxy). Сценарий **A** (RU2/EU2 на отдельном VPS) оставлен как опция при появлении бюджета. Обновлены `ROADMAP_VPN.md`, `blocking-bypass-strategy.md`, `README_FOR_NEXT_AGENT.md`, `third-party-vpn-boosters-vs-multi-entry.md`.
+- Решение владельца: второй VPS не оплачивается. spec-08 переписана: сценарий B (только main+eu1); сценарий A (RU2/EU2) — опция при бюджете.
 
 ## 2026-04-02 — Спека вторая нода (RU2/EU2), документ про GearUp/мульти-вход
 
-- **`docs/specs/spec-08-multi-node-redundancy-ru2-eu2.md`** — первоначально план EU2/RU2; затем уточнение «без второго VPS» — см. дополнение выше.
-- **`docs/third-party-vpn-boosters-vs-multi-entry.md`** — что такое GearUp-подобные приложения, чем наш мульти-вход аналогичен и чем клонировать их продукт нецелесообразно.
-- **`docs/blocking-bypass-strategy.md`** — ссылка на spec-08 в блоке MVP; связанные документы дополнены.
-- **`ROADMAP_VPN.md`** — раздел «Второй/резервный сервер» переписан под spec-08 и актуальный приоритет.
-- **`README_FOR_NEXT_AGENT.md`** — ссылки на spec-08 и third-party doc.
+- `docs/specs/spec-08-multi-node-redundancy-ru2-eu2.md` (план EU2/RU2 → потом «без второго VPS»). `third-party-vpn-boosters-vs-multi-entry.md` (GearUp-подобные). Обновлены blocking-bypass, ROADMAP.
 
 ## 2026-03-30 — Сводная документация MTProxy + обновление README
 
-- **`docs/telegram-mtproxy-operators-guide.md`** — единое руководство: `/proxy`, `/proxy_rotate`, recovery, `get_effective_mtproto_proxy_link`, env, деплой через venv-pip, ссылка на альтернативы.
-- **`README_FOR_NEXT_AGENT.md`:** команды `/proxy` и `/proxy_rotate`, URL recovery, правило №5 приведено к текущему коду; раздел «Документация» дополнен ссылками.
-- **`SESSION_SUMMARY_2026-03-30.md`:** дополнение с итогами по MTProxy/recovery/документации pip.
+- `docs/telegram-mtproxy-operators-guide.md` — единое руководство (`/proxy`, `/proxy_rotate`, recovery, env, деплой через venv-pip).
 
 ## 2026-03-30 — Деплой: явный путь к pip в venv (PEP 668 на Ubuntu 24+)
 
-- **`docs/deployment.md`:** установка зависимостей бота и панели через `/opt/vpnservice/venv/bin/pip` (не системный `pip`); блок «Обновление бота» — опциональный `pip install -r requirements.txt` при смене зависимостей; «Обновление панели» — тот же путь к pip; примечание про перезапуск `vpn-bot` при общих изменениях в `bot/`.
-- **`docs/specs/spec-06-web-panel-deploy-and-traffic.md`**, **`web/README.md`:** согласованы команды с venv-pip.
+- `deployment.md`: зависимости через `/opt/vpnservice/venv/bin/pip` (не системный). Согласованы spec-06, web/README.
 
 ## 2026-03-30 — Ротация MTProxy: /proxy_rotate, override-файл, документация
 
-- **Цель:** «обновляемая» ссылка на MTProxy Fake TLS без ручного копирования в `env` при каждой смене секрета; пользователи по-прежнему получают актуальный `tg://` через `/proxy`.
-- **Код бота:** `get_effective_mtproto_proxy_link()` в `bot/config.py` — приоритет `data/mtproto_proxy_link.txt` над `MTPROTO_PROXY_LINK`; fallback читает `env_vars.txt` с диска при каждом вызове; команда `/proxy_rotate` (только владелец) запускает `MTPROXY_ROTATE_SCRIPT`, парсит `MTPROTO_LINK=...`, пишет override; `/proxy` вызывает `load_config()` + эффективная ссылка.
-- **Web:** `web/app.py` — recovery `telegram-proxy` использует эффективную ссылку для определения IP хоста; в JSON-ответ добавлены `mtproto_proxy_link` и `hint` (та же ссылка, что `/proxy`; при ошибке перезапуска контейнера ссылка всё равно отдаётся). `recovery.js` / `recovery.html` — понятный вывод ссылки пользователю.
-- **Репозиторий:** `.gitignore` — `data/mtproto_proxy_link.txt`; `data/.gitkeep`; `env_vars.example.txt` — `MTPROXY_ROTATE_SCRIPT`.
-- **Документация:** `docs/mtproxy-proxy-rotation.md`; `docs/scripts/mtproxy-faketls-rotate.sh.example`; ссылка из `docs/mtproxy-faketls-deploy.md`.
+- `get_effective_mtproto_proxy_link()` (приоритет `data/mtproto_proxy_link.txt` над env); `/proxy_rotate` (owner) запускает `MTPROXY_ROTATE_SCRIPT`, пишет override. `.gitignore` + `docs/mtproxy-proxy-rotation.md` + `mtproxy-faketls-rotate.sh.example`.
 
 ## 2026-03-30 — README: MTProxy Fake TLS vs «голый» MTProto; резюме сессии
 
-- **`README_FOR_NEXT_AGENT.md`:** уточнены таблицы «что не работает на eu1» / «что работает»: обычный MTProto на eu1 — не использовать (блок по сигнатуре); **MTProxy с Fake TLS** на main (Timeweb, `docs/mtproxy-faketls-deploy.md`) — рабочий путь для Telegram; правило №5 приведено в соответствие с `docs/telegram-unblock-algorithm.md` (команда `/proxy` снята, ссылка через `MTPROTO_PROXY_LINK`/вручную).
-- **`SESSION_SUMMARY_2026-03-30.md`:** зафиксированы итоги сессии (ревью плана, согласование документации по прокси).
+- Уточнены таблицы «что работает/нет»: голый MTProto на eu1 — блок по сигнатуре; MTProxy Fake TLS на main — рабочий путь. Правило №5 приведено к `telegram-unblock-algorithm.md`.
 
 ## 2026-03-26 — LTE blackhole, MVP/юнит-экономика (документация)
 
-- **`docs/blocking-bypass-strategy.md`:** дополнение 2026-03-26 — выводы по полевым тестам LTE (недоступность HTTP/HTTPS до main/eu1 IP при рабочем Wi‑Fi; мульти-вход для mobile).
-- **`docs/mvp-unit-economics-and-plan.md`:** новый документ — юнит-экономика (формулы, пример брейк-ивена), риски, фазы MVP, рамка «строить vs покупать сервис».
-- **`SESSION_SUMMARY_2026-03-26.md`:** резюме диагностики и рекомендаций следующим шагам.
+- `blocking-bypass-strategy.md` — выводы по LTE (недоступность HTTP/HTTPS до main/eu1 IP при рабочем Wi-Fi). `docs/mvp-unit-economics-and-plan.md` — юнит-экономика, риски, фазы MVP.
 
 ## 2026-03-25 — Веб recovery: Telegram/VPN + ссылка в боте
 
-- **Веб-панель:** добавлен отдельный маршрут `/recovery`, а recovery-блоки вынесены с главной страницы `/`, чтобы пользователи не путались с мониторингом.
-- **UI recovery:**
-  - добавлены кнопки “Восстановить Telegram” и “Восстановить VPN (конфиг)”;
-  - вход по `Telegram ID`;
-  - опция `Android-safe` для корректного DNS в VPN-конфиге.
-- **Backend recovery (`web/app.py`):**
-  - `POST /api/recovery/telegram-proxy` — перезапуск docker-контейнера Telegram proxy-кандидата (через SSH, по server_id `main`/`eu1`), проверка пользователя через `bot/data/users.json`.
-  - `POST /api/recovery/vpn` — генерация/регенерация peer и выдача клиентского VPN-конфига.
-- **Фронтенд:** вынесена логика recovery в отдельный JS-файл `web/static/recovery.js`.
-- **Telegram-бот:** обновлены тексты `/start` и `/help` — добавлена строка со ссылкой `http://81.200.146.32:5001/recovery`, чтобы пользователи могли восстановить доступ при неработающем Telegram.
-- **UX:** с recovery страницы удалена навигационная ссылка “Назад к мониторингу”, чтобы пользователи не переходили туда.
+- Отдельный маршрут `/recovery` (вынесен с `/`); кнопки «Восстановить Telegram/VPN», вход по Telegram ID, Android-safe. Backend `telegram-proxy`/`vpn`. Ссылка recovery в `/start`.
 
 ## 2026-03-23 (продолжение) — Документация попытки LTE + eu1
 
-- **Файл:** `docs/mobile-lte-eu1-xray-reality-attempt-2026-03.md` — зафиксированы: внедрение Xray REALITY на eu1, Streisand, порты 443/4443, Fragment, tcpdump, Fornex firewall off, вывод о недоступности IP `185.21.8.91` с LTE; план дальше: REALITY на Timeweb (`81.200.146.32`) или другой ASN.
-- **README_FOR_NEXT_AGENT.md** — добавлена ссылка на этот документ в разделе «Документация».
+- `docs/archive/mobile-lte-eu1-xray-reality-attempt-2026-03.md`: Xray REALITY на eu1, Streisand, вывод о недоступности IP `185.21.8.91` с LTE; план — REALITY на Timeweb / другой ASN.
 
 ## 2026-03-23 — Мобильный резерв: VLESS+REALITY и команда /mobile_vpn
 
-- **Контекст:** AmneziaWG и прокси работают по Wi‑Fi, по LTE/5G на разных операторах и устройствах — тайм-ауты; нужен TCP-транспорт с маскировкой под TLS, без отключения AmneziaWG.
-- **Спека:** `docs/specs/spec-07-mobile-fallback-vless-reality.md`.
-- **Развёртывание на eu1 (оператор):** `docs/xray-vless-reality-eu1-deploy.md` — бэкап AmneziaWG → установка Xray → `VLESS_REALITY_SHARE_URL` в `env_vars.txt` на Timeweb.
-- **Код бота:** `bot/config.py` — чтение `VLESS_REALITY_SHARE_URL`; `bot/main.py` — команда `/mobile_vpn` (инструкция + вторая сообщение со ссылкой без HTML); обновлены `/start`, `/help`, `/instruction`.
-- **Тексты:** `docs/bot-instruction-texts/instruction_vless_reality_short.txt`; `env_vars.example.txt`; `docs/backup-restore.md` (бэкап Xray); `docs/deployment.md`; `docs/blocking-bypass-strategy.md`; `README_FOR_NEXT_AGENT.md`.
+- Спека `spec-07-mobile-fallback-vless-reality.md`; деплой `docs/archive/xray-vless-reality-eu1-deploy.md`. `bot/config.py` чтение `VLESS_REALITY_SHARE_URL`; команда `/mobile_vpn`. Тексты + backup-restore (бэкап Xray).
 
 ## 2026-03-15 — Фиксация сторонних альтернатив для Telegram
 
-- **Документация:** создан файл `docs/telegram-proxy-alternatives.md` — отдельный список альтернативных решений для Telegram (локальный SOCKS5 `tg-ws-proxy`, платные SOCKS5-прокси вроде `ru.shopproxy.net/buy-proxy/telegram/`), с пометкой, что это НЕ официальный стек проекта и без гарантий работоспособности.
-- **Цель:** сохранить найденные в интернете и чатах варианты, чтобы не держать их в голове, но при этом явно указать, что основной и рекомендованный путь для Telegram — работа через VPN/AmneziaWG по текущей стратегии обхода блокировок РКН.
-
-## 2026-03-07 — Telegram-прокси с Fake TLS, алгоритм разблокировки, оценка провайдера
-
-- **Уточнения:** в README зафиксировано отсутствие relay-сервера в проекте; сторонний прокси 79.132.138.66:9443 (не работает) зафиксирован в алгоритме.
-- **Документация:** созданы docs/provider-choice-evaluation.md (Fornex vs FirstVDS), docs/telegram-unblock-algorithm.md (алгоритм разблокировки Telegram), docs/mtproxy-faketls-deploy.md (пошаговое развёртывание MTProxy с Fake TLS; добавлен шаг установки Docker).
-- **Развёртывание:** пользователь развернул на Timeweb (81.200.146.32:443) контейнер mtproxy-faketls (nineseconds/mtg:2, маскировка под 1c.ru). Прокси проверен — работает у владельца и у знакомого в Москве, скорость нормальная. Ссылка и секрет не в репо.
+- `docs/telegram-proxy-alternatives.md` — список альтернатив (локальный SOCKS5 `tg-ws-proxy`, платные SOCKS5), помечен «не наш стек, без гарантий».
 
 ## 2026-03-14 — Диагностика тайм-аута AmneziaWG, команда /broadcast, документация
 
-- **Проблема:** на телефоне (AmneziaWG) ошибка «Не удалось установить соединение» (тайм-аут 12 с), на ПК VPN работал. В мониторинге 0 Б по части пользователей.
-- **Диагностика на eu1:** проверка через `docker exec amnezia-awg2 awg show awg0` — один peer без handshake (конфиг на телефоне не совпадал с сервером). Решение: /regen в боте или экспорт рабочего .conf с ПК и импорт на телефон.
-- **Команда /broadcast:** добавлена в бота (только владелец). Рассылает всем пользователям уведомление о проблеме VPN и рекомендацию выполнить /regen, заменить старый конфиг новым. Отчёт владельцу: количество доставленных и не доставленных сообщений.
-- **Документация:** обновлён `docs/client-instructions-amneziawg.md` (раздел «Если перестало работать»); создан `docs/troubleshooting-amneziawg-connection-timeout.md` (симптомы, решение, почему /regen помогает, почему ПК не пострадал).
-- **Деплой:** коммит и push в nikkronos/vpnservice; на Timeweb git stash → git pull → restart vpn-bot.service. Рассылка выполнена (11 доставлено, 1 не доставлено).
+- Тайм-аут на телефоне (конфиг не совпадал с сервером) → решение /regen. Команда `/broadcast` (owner, рассылка + отчёт). `troubleshooting-amneziawg-connection-timeout.md`. Рассылка 11/1.
+
+## 2026-03-07 — Telegram-прокси с Fake TLS, алгоритм разблокировки, оценка провайдера
+
+- Созданы `provider-choice-evaluation.md` (Fornex vs FirstVDS), `telegram-unblock-algorithm.md`, `mtproxy-faketls-deploy.md`. Развёрнут на Timeweb контейнер mtproxy-faketls (маскировка 1c.ru), проверен в Москве.
 
 ## 2026-02-26 — Автоматизация выдачи конфигов AmneziaWG + удаление /proxy
 
-- **Задача 1:** настроить автоматическую выдачу рабочих конфигов VPN через Telegram-бота для сервера eu1 (Европа).
-- **Задача 2:** удалить неработающие функции (команда `/proxy`, отображение Shadowsocks и MTProto на веб-панели).
-
-- **Диагностика eu1:**
-  - AmneziaWG работает в Docker-контейнере `amnezia-awg2`
-  - Порт: 39580/UDP (не 51820)
-  - Подсеть: 10.8.1.0/24 (не 10.1.0.0/24)
-  - Публичный ключ сервера: `pevLcgguoIMDWnbtPgQ3ZsSak73fylprex54Tv65ZyI=`
-
-- **Создан бэкап:** `/root/amnezia-backup-20260226/` на eu1 (конфиг сервера, ключи, clientsTable)
-
-- **Написаны скрипты:**
-  - `/opt/amnezia-add-client.sh` — добавление клиента в Docker-контейнер
-  - `/opt/amnezia-remove-client.sh` — удаление клиента
-
-- **Настроен SSH:** ключ `/root/.ssh/id_ed25519_eu1` на Timeweb добавлен в authorized_keys на eu1
-
-- **Обновлены переменные бота** (`env_vars.txt` на Timeweb):
-  - `WG_EU1_ENDPOINT_PORT=39580`
-  - `WG_EU1_NETWORK_CIDR=10.8.1.0/24`
-  - `AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT=/opt/amnezia-add-client.sh`
-  - `AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT=/opt/amnezia-remove-client.sh`
-  - `AMNEZIAWG_EU1_NETWORK_CIDR=10.8.1.0/24`
-
-- **Очищены старые peers:** удалены все eu1 peers из `peers.json` (имели IP из старой подсети 10.1.0.0/24)
-
-- **Результат (автоматизация):** бот автоматически выдаёт рабочие конфиги AmneziaWG для Европы, проверено на телефоне
-
-**Очистка от неработающих функций (сессия 2):**
-
-- **Удалена команда /proxy из бота:**
-  - Удалён хендлер `cmd_proxy` из `/opt/vpnservice/bot/main.py`
-  - Убрана строка про `/proxy` из команды `/start`
-  - Убрана строка про `/proxy` из команды `/help`
-
-- **Удалены Shadowsocks и MTProto с веб-панели:**
-  - Из `/opt/vpnservice/web/app.py` удалены блоки проверки Shadowsocks (порт 8388) и MTProto (порт 443)
-  - Обновлена подсказка в блоке "Сервисы" в `/opt/vpnservice/web/templates/index.html`
-  - Теперь в блоке "Сервисы" отображаются только: WireGuard (main), WireGuard (eu1), AmneziaWG (eu1)
-
-- **Результат (очистка):** веб-панель показывает только работающие сервисы, бот не предлагает нерабочий MTProto-прокси
-
-- **Обновлена документация:** SESSION_SUMMARY_2026-02-26.md, README_FOR_NEXT_AGENT.md, DONE_LIST_VPN.md
+- **Автоматизация eu1:** AmneziaWG в Docker `amnezia-awg2`, порт **39580/UDP**, подсеть **10.8.1.0/24**, server pubkey `pevLcgguoIMDWnbtPgQ3ZsSak73fylprex54Tv65ZyI=`. Скрипты `/opt/amnezia-add-client.sh`/`-remove-client.sh`, SSH `id_ed25519_eu1`, env `WG_EU1_*`. Старые peers (10.1.0.x) очищены. Бот выдаёт рабочие конфиги.
+- **Очистка:** удалена `/proxy` (блок MTProto), Shadowsocks/MTProto убраны с панели.
 
 ## 2026-02-23 — Восстановление eu1, эксперименты Remnawave/Xray/MTProto (неудачны)
 
-- **Переустановка ОС на eu1:** Сервер eu1 (Fornex) полностью переустановлен (Ubuntu 24.04). Все сервисы были удалены.
-
-- **Попытка Remnawave (неудачна):**
-  - Развёрнут Remnawave (panel + node) на eu1 с доменами `panel.vpnnkrns.ru`, `sub.vpnnkrns.ru`, `node.vpnnkrns.ru`.
-  - ACME выписал сертификаты успешно.
-  - Контейнер `remnanode` падал с ошибкой `Invalid SECRET_KEY payload`.
-  - Ручное добавление `SECRET_KEY` в `.env` проблему не решило.
-  - **Решение:** Remnawave удалён, попытка признана неудачной.
-
-- **Возврат AmneziaWG на eu1:**
-  - Через приложение AmneziaVPN установлен AmneziaWG на eu1.
-  - Конфиги созданы и раздаются **вручную** через «Поделиться VPN».
-  - На ПК и iOS (телефон владельца и друзей) — **работает**.
-
-- **Попытка MTProto-прокси (неудачна):**
-  - Переустановлен MTProto-прокси на порт 443, затем 8443.
-  - На обоих портах Telegram показывает «connecting», но не подключается.
-  - **Вывод:** Мобильный оператор блокирует MTProto по сигнатуре протокола.
-  - **Решение:** Telegram работает **через VPN (AmneziaWG)**.
-
-- **Эксперимент Xray VLESS/TCP (неудачен):**
-  - Установлен Xray (`xray-core`), настроен минимальный inbound VLESS/TCP без TLS (порт 21017).
-  - Xray-служба работает, `curl` с сервера возвращает 200.
-  - На ПК (v2rayN) профиль подключается, в логах видны подключения.
-  - Однако: `ifconfig.me` показывает исходный IP, сайты не открываются.
-  - **Вывод:** VLESS/TCP без TLS не работает (DPI распознаёт или проблемы маршрутизации на клиенте).
-  - **Решение:** Эксперимент остановлен, не продолжать без TLS/Reality.
-
-- **Обновление документации:**
-  - Обновлён `SESSION_SUMMARY_2026-02-23.md` с полным описанием всех экспериментов.
-  - Обновлён `README_FOR_NEXT_AGENT.md` — актуальное состояние, что работает/не работает.
-  - Обновлён `DONE_LIST_VPN.md` (этот файл).
-  - Обновлён `ROADMAP_VPN.md` — скорректированы задачи.
+- Переустановка eu1 (Ubuntu 24.04). Remnawave (`Invalid SECRET_KEY` → удалён). Возврат AmneziaWG (ПК/iOS работают, конфиги вручную). MTProto :443/:8443 не коннектится (блок по сигнатуре). Xray VLESS/TCP без TLS не работает (DPI/маршрутизация). Вывод: Telegram через VPN; VLESS только с TLS/REALITY.
 
 ## 2026-02-22 — Чистый сброс eu1 (Fornex): AmneziaWG, проверка на ПК и iOS
 
-- **Проблема:** на телефоне и у друзей — подключение к eu1 было, интернета не было; на ПК VPN работал через AmneziaWG.
-- **План:** сброс только на eu1 (оставить MTProto и Shadowsocks), остановить и убрать конфиги AmneziaWG и wg0, проверить работу с нуля.
-- **Документы:** созданы `docs/eu1-clean-slate-plan.md`, `docs/eu1-clean-slate-commands.md`; в README_FOR_NEXT_AGENT.md добавлен блок про план чистого сброса.
-- **На eu1:** бэкап в `/root/eu1-backup-20260222`; остановлены и отключены awg-quick@awg0 и wg-quick@wg0; awg0.conf и копия /etc/amnezia перенесены в бэкап. Контейнеры Docker (amnezia-awg2, mtproto-proxy) не трогали.
-- **Проверка:** сервер уже был в AmneziaVPN; экспорт для iOS через «Поделиться VPN»; на телефоне и на ПК подключение и интернет работают. Чистый сброс завершён успешно.
-
-- **Бот — выдача конфигов AmneziaWG (Docker):** на eu1 развёрнуты скрипты amneziawg-add-client-docker.sh и amneziawg-remove-client-docker.sh; конфиг сервера в контейнере — /opt/amnezia/awg/awg0.conf; в скрипт добавлено извлечение обфускации (Jc, Jmin, Jmax, S1–S4, H1–H4) и подстановка в клиентский .conf. На Timeweb в env указаны пути к *-docker.sh; бот по /get_config и /regen выдаёт конфиги. На телефоне с конфигом от бота: handshake есть, трафик не грузится (открытый вопрос — см. SESSION_SUMMARY и docs/eu1-phone-config-open-question.md).
+- Сброс eu1 (бэкап `/root/eu1-backup-20260222`), AmneziaWG через приложение, ПК/iOS работают. Бот-выдача AmneziaWG-конфигов (Docker, скрипты `-docker.sh`, извлечение обфускации Jc/Jmin/.../H1–H4). На телефоне с конфигом бота handshake есть, трафик не грузит (открытый вопрос на тот момент).
 
 ## 2026-02-21 — Веб-панель: деплой, этапы 2–3, подсказки
 
-- **Деплой:** панель развёрнута на Timeweb на порту 5001 (чтобы не конфликтовать с Damir на 5000). Добавлены `web/vpn-web.service.example`, раздел в `docs/deployment.md`, переменная PORT=5001.
-- **Этап 2:** блок «Сервисы» (API `/api/services` — WireGuard, AmneziaWG по пингу; Shadowsocks и MTProto по проверке TCP-портов); блок «Пользователи (сводка)» (без блока «По типам профилей»).
-- **Этап 3:** учёт трафика — `wg show dump` локально для main, по SSH для eu1; API `/api/traffic`, блок «Трафик по пользователям» (по пользователям и по устройствам), обновление раз в 30 сек.
-- **Подсказки:** под каждым блоком панели добавлены короткие пояснения (пользователь vs подключение, онлайн/офлайн по пингу, main/eu1, частота обновления трафика, подключение = конфиг, не устройство).
+- Панель на Timeweb :5001. Блоки «Сервисы» (ping/TCP), «Пользователи», «Трафик» (`wg show dump` локально main / SSH eu1, обновление 30с). Подсказки под блоками.
 
 ## 2026-02-21 — Бот: Европа = AmneziaWG (инструкция + опция выдачи конфига через скрипт)
 
-- **Европа (eu1) в боте:** для сервера «Европа» бот больше не выдаёт WireGuard конфиги. Выдаётся инструкция по AmneziaWG (ПК + iOS через «Поделиться»). При настройке скрипта на eu1 (`AMNEZIAWG_EU1_ADD_CLIENT_SCRIPT`) бот вызывает скрипт по SSH и выдаёт готовый AmneziaWG .conf.
-- **Спецификация и скрипты:** созданы `docs/specs/spec-05-bot-amneziawg-eu1.md`, `docs/scripts/amneziawg-add-client.sh.example`, `docs/amneziawg-eu1-discovery.md` (проверка на eu1). В `env_vars.example.txt` добавлены переменные для AmneziaWG.
-- **Тексты бота:** обновлены /start, /help, /instruction — Европа = AmneziaWG, импорт в AmneziaVPN/AmneziaWG. Добавлен короткий текст `docs/bot-instruction-texts/instruction_amneziawg_short.txt`. Регенерация (/regen) для Европы пока вручную — сообщение «напиши владельцу».
-- **Код:** в `bot/wireguard_peers.py` добавлены `is_amneziawg_eu1_configured()`, `create_amneziawg_peer_and_config_for_user()`, `_remove_amneziawg_peer()`, `regenerate_amneziawg_peer_and_config_for_user()`; в `bot/main.py` — ветка для eu1 (AmneziaWG скрипт или инструкция), автоматическая регенерация (/regen) для Европы при настроенных скриптах.
-- **Автоматизация выдачи и регенерации:** доработаны скрипты add-client и remove-client (`docs/scripts/`); бот поддерживает reuse_ip при создании peer и автоматический /regen для Европы (удаление старого peer на eu1, создание нового с тем же IP). Добавлен пошаговый гайд `docs/amneziawg-bot-automation-setup.md`. Переменные env: AMNEZIAWG_EU1_INTERFACE, AMNEZIAWG_EU1_REMOVE_CLIENT_SCRIPT.
+- Для «Европа» бот выдаёт AmneziaWG (инструкция или скрипт по SSH). Спека `spec-05-bot-amneziawg-eu1.md`, скрипты `docs/scripts/`. Функции `create/regenerate_amneziawg_peer_*` в `wireguard_peers.py`.
 
 ## 2026-02-21 — AmneziaWG на eu1 работает, iOS через «Поделиться», следующие задачи
 
-- **VPN работает:** AmneziaWG на eu1 развёрнут, подключение из России (ПК + iPhone/iPad) работает. На iOS конфиг импортируется через «Поделиться» → AmneziaWG (выбор файла в пикере не срабатывал).
-- **Инструкция для пользователей:** обновлена docs/client-instructions-amneziawg.md — импорт через «Поделиться» на iOS, какой файл использовать (.conf для AmneziaWG).
-- **Решения владельца:** бэкап можно хранить в Git (репозиторий сделать приватным). Второй VPS отложен — без монетизации по бюджету не планируется. Бот — обновить инструкции (выдавать инструкцию по AmneziaWG, при возможности конфиг). Веб-панель — развернуть, получить ссылку, доработать под полный мониторинг (сейчас ссылки нет).
-- **ROADMAP и README:** обновлены: задачи по боту (выдача инструкции/конфига AmneziaWG), веб-панель (деплой + ссылка + доработка мониторинга), второй VPS отложен. В docs/backup-restore.md добавлено про бэкап в Git при приватном репо.
+- AmneziaWG на eu1 работает (ПК + iPhone/iPad; iOS импорт через «Поделиться»). `client-instructions-amneziawg.md`. Решения: бэкап в Git (приватный repo), второй VPS отложен.
 
 ## 2026-02-21 — Стратегия обхода блокировок РКН, выбор AmneziaWG, план развёртывания
 
-- **Документ по стратегии обхода блокировок:**
-  - Создан `docs/blocking-bypass-strategy.md` — контекст (что работает/блокируется в РФ 2026), варианты A/B/C/D (в т.ч. Shadowsocks + V2BOX), совет по провайдерам и доменам.
-  - **Выбран вариант A (AmneziaWG):** один клиент AmneziaVPN на ПК и iOS/iPadOS; понятно пользователю; при блокировке РКН — добавить Xray в том же приложении.
-
-- **РКН: начеку и легко перестраиваться:**
-  - В ROADMAP_VPN.md добавлен раздел «РКН: быть начеку и легко перестраиваться» — документировать шаги, один клиент для пользователя, резерв Xray в Amnezia, при необходимости смена домена/провайдера.
-
-- **Пошаговый план и инструкция развёртывания:**
-  - Обновлён `docs/step-by-step-plan-bypass.md` — зафиксирован выбор A, упрощены шаги под AmneziaWG.
-  - Создан `docs/amneziawg-deploy-instruction.md` — пошаговая инструкция: установка AmneziaVPN на ПК → добавление сервера eu1 по SSH → установка AmneziaWG через приложение → создание подключения → iOS/iPad по тому же приложению; раздел «Если РКН начнёт блокировать».
-
-- **Обновление ROADMAP_VPN.md:**
-  - Блок «Обход блокировок РКН»: выбор A отмечен как выполненный, следующие шаги — развернуть по инструкции, тест из России, при необходимости бот.
-  - Раздел «Проблема eu1» сокращён до ссылок на AmneziaWG и резерв Xray.
-
-- **SESSION_SUMMARY:**
-  - Создан `SESSION_SUMMARY_2026-02-21.md` с контекстом сессии и замечаниями для следующего агента.
+- `blocking-bypass-strategy.md` (варианты A/B/C/D). **Выбран A (AmneziaWG)** — один клиент AmneziaVPN на ПК/iOS, при блокировке РКН — добавить Xray в том же приложении. `docs/archive/amneziawg-deploy-instruction.md`, `SESSION_SUMMARY_2026-02-21.md`.
 
 ## 2026-02-20 — Улучшение UX и решение проблем тестирования
 
-- **Улучшение UX в боте:**
-  - Улучшены объяснения режимов "обычный VPN" и "VPN+GPT" в боте с понятными описаниями и эмодзи
-  - Добавлена команда `/help` с подробной справкой о режимах VPN и типах профилей
-  - Улучшены сообщения при выборе сервера и типа профиля
-  - Добавлены визуальные индикаторы для лучшего понимания
-
-- **Документация по диагностике проблем:**
-  - Создан документ `docs/troubleshooting-multiple-devices.md` — диагностика проблемы с несколькими устройствами (плохо работает интернет при подключении с двух устройств)
-  - Создан документ `docs/troubleshooting-ios-devices.md` — решение проблем VPN на iPhone без SIM и iPad
-  - Создан документ `docs/troubleshooting-telegram-vpn-conflict.md` — решение конфликта VPN и Telegram proxy на iPhone
-  - Создан скрипт `docs/scripts/monitor-server.sh.example` — мониторинг состояния VPN-сервера
-
-- **Спецификация единого профиля:**
-  - Создана спецификация `docs/specs/spec-04-unified-profile-all-services.md` с вариантами решения единого профиля для всех сервисов (YouTube + GPT + Telegram + сайты)
-  - Исследованы 4 варианта решения, рекомендован гибридный вариант (WireGuard + Smart DNS + Shadowsocks)
-  - Описана детальная реализация с чеклистом и рисками
-
-- **Веб-панель мониторинга:**
-  - Создана базовая структура веб-панели в `web/`
-  - Реализовано Flask-приложение с API endpoints для мониторинга серверов, пользователей и статистики
-  - Созданы HTML шаблоны, CSS стили и JavaScript для автообновления
-  - Добавлена документация по установке и деплою
-
-- **Изучение альтернатив:**
-  - Создан документ `docs/vless-alternative.md` — изучение VLESS как альтернативы WireGuard
-  - Сравнение VLESS с WireGuard по различным параметрам
-  - Рекомендации по использованию VLESS в проекте
-
-- **Обновление Roadmap:**
-  - Обновлён `ROADMAP_VPN.md` с учётом всех выполненных задач
-  - Отмечены выполненные задачи с датами
-  - Добавлены новые разделы и обновлены существующие
+- UX бота (объяснения режимов, `/help`). Troubleshooting-доки (multiple-devices, ios-devices, telegram-vpn-conflict). Спека `spec-04-unified-profile` (архив). Базовая веб-панель Flask. `vless-alternative.md` (архив).
 
 ## 2026-02-18 — Настройка WireGuard + Shadowsocks и клиентов
 
-- **Сервер Fornex (Ubuntu 24.04)**
-  - Установлен `shadowsocks-libev` и настроен клиентский конфиг `/etc/shadowsocks-libev/ss-wg.json` для подключения к Shadowsocks‑серверу `185.21.8.91:8388` (метод `aes-256-gcm`).
-  - Запущен `ss-redir` как systemd‑сервис `ss-wg.service` (автозапуск, прослушивает `127.0.0.1:1081`).
-  - В WireGuard‑конфиг `/etc/wireguard/wg0.conf` добавлены новые `Peer`:
-    - Владелец iPhone: `10.1.0.4/32`.
-    - Друг PC: `10.1.0.5/32`.
-    - Друг iPhone: `10.1.0.6/32`.
-    - Друг iPad: `10.1.0.7/32`.
-  - Настроены iptables‑правила:
-    - редирект всего TCP‑трафика на порты 80/443 от выбранных IP (`10.1.0.4/32`, `10.1.0.5/32`, `10.1.0.6/32`, `10.1.0.7/32`) на `127.0.0.1:1081` (Shadowsocks‑клиент);
-    - разрешён форвардинг трафика интерфейса `wg0`.
-  - Создана резервная копия основных конфигов:
-    - `/etc/wireguard/wg0.conf`;
-    - `/etc/wireguard/iphone.conf`;
-    - `/etc/shadowsocks-libev/ss-wg.json`;
-    - бэкапы сохранены в `/root/vpn-backups/2026-02-18/`.
-
-- **Клиенты владельца**
-  - **ПК (Windows)**:
-    - Папка клиента Shadowsocks упорядочена (перенесена в отдельную директорию, например, `VPN.Shadowsocks`), проверено, что `Shadowsocks.exe` и `gui-config.json` работают корректно.
-    - Текущий рабочий профиль WireGuard `client1` (от бота второго аккаунта) продолжает использоваться для обычного VPN.
-  - **iPhone**:
-    - Создан и импортирован новый профиль WireGuard `iphone`:
-      - `Address = 10.1.0.4/32`, `DNS = 8.8.8.8`;
-      - `Endpoint = <публичный IP Fornex>:51820`;
-      - `AllowedIPs = 0.0.0.0/0`, `PersistentKeepalive = 25`.
-    - Проверено, что при подключении профиля `iphone`:
-      - ChatGPT работает;
-      - обычные сайты идут через тот же сервер (с учётом ограничений/блокировок по IP Shadowsocks).
-
-- **Клиенты друга** (по проектному допущению — успешно подключены)
-  - **ПК (Friend PC)**:
-    - Сгенерированы ключи и создан профиль WireGuard `friend-pc.conf`:
-      - `Address = 10.1.0.5/32`, `DNS = 8.8.8.8`;
-      - `Endpoint = <публичный IP Fornex>:51820`;
-      - `AllowedIPs = 0.0.0.0/0`, `PersistentKeepalive = 25`.
-  - **iPhone (Friend iPhone)**:
-    - Профиль `friend-iphone.conf`:
-      - `Address = 10.1.0.6/32`, остальные параметры аналогичны.
-  - **iPad (Friend iPad)**:
-    - Профиль `friend-ipad.conf`:
-      - `Address = 10.1.0.7/32`, остальные параметры аналогичны.
-
-- **Документация**
-  - Создан файл `README_FOR_NEXT_AGENT.md` с описанием:
-    - текущей архитектуры (WireGuard + Shadowsocks);
-    - профилей владельца и друга;
-    - расположения бэкапов конфигов;
-    - ключевых правил безопасности и ограничений.
-  - Создан `ROADMAP_VPN.md`:
-    - зафиксировано текущее состояние (MVP 0.1);
-    - намечены ближайшие и среднесрочные шаги (спеки, Telegram‑proxy, второй сервер, автоматизация через бота).
+- На Fornex: `shadowsocks-libev` + `ss-redir` (`ss-wg.service`, 127.0.0.1:1081); WireGuard wg0 peers (10.1.0.4–7), iptables-редирект TCP 80/443 на ss-redir (VPN+GPT-модель). Клиенты владельца+друзей (ПК/iPhone/iPad). _(Архитектура устарела: ныне AmneziaWG, без Shadowsocks.)_
 
 ## 2026-02-18 — Установка Telegram MTProto Proxy
 
-- **Сервер Fornex (Ubuntu 24.04)**
-  - Установлен Docker (версия 29.2.1) для запуска контейнеров.
-  - Развёрнут MTProto‑прокси через Docker‑контейнер `telegrammessenger/proxy:latest`:
-    - контейнер: `mtproto-proxy` (автозапуск через `--restart=always`);
-    - порт: `443/TCP` (маппинг `0.0.0.0:443->443/tcp`);
-    - секрет: `29d11c61ea1b644d75299dd0706c2da3` (сгенерирован автоматически при запуске);
-    - внешний IP: `185.21.8.91` (тот же, что у WireGuard‑сервера).
-  - Сформирована ссылка подключения:
-    - `tg://proxy?server=185.21.8.91&port=443&secret=29d11c61ea1b644d75299dd0706c2da3`;
-    - альтернативная ссылка: `https://t.me/proxy?server=185.21.8.91&port=443&secret=29d11c61ea1b644d75299dd0706c2da3`;
-    - ссылка сохранена в `/root/vpn-backups/2026-02-18/mtproto-link.txt`.
-  - Проверена работа прокси:
-    - контейнер запущен и работает стабильно;
-    - пинг через прокси: ~45 мс (приемлемо для Telegram);
-    - прокси работает независимо от WireGuard и Shadowsocks.
-
-- **Клиенты**
-  - **Владелец**: протестирован MTProto‑прокси на iPhone, подключение успешно, Telegram работает через прокси.
-  - **Друг**: предоставлена ссылка подключения, прокси успешно настроен и работает на его устройствах.
-
-- **Документация**
-  - Создана спецификация `docs/specs/spec-02-telegram-mtproto-proxy.md`:
-    - архитектура MTProto‑прокси;
-    - требования и этапы реализации;
-    - риски и митигация;
-    - чеклист проверки.
-  - Создана инструкция по установке `docs/mtproto-setup.md`:
-    - пошаговая установка Docker (если не установлен);
-    - запуск контейнера MTProto‑прокси;
-    - получение секрета и формирование ссылки подключения;
-    - настройка systemd (опционально);
-    - тестирование на клиентах;
-    - управление и устранение проблем.
-  - Обновлены основные документы проекта:
-    - `README_FOR_NEXT_AGENT.md`: добавлена информация о MTProto‑прокси в разделы "Серверы" и "Как этим пользоваться";
-    - `ROADMAP_VPN.md`: отмечена выполненная задача по установке MTProto‑прокси.
+- Docker `telegrammessenger/proxy` на Fornex :443, `tg://proxy` ссылка. Спека `spec-02-telegram-mtproto-proxy.md`, `docs/archive/mtproto-setup.md`. _(Голый MTProto позже задавлен по сигнатуре → Fake TLS.)_
 
 ## 2026-02-18 — Интеграция бота: инструкции, MTProto-ссылка, VPN+GPT
 
-- **Команды бота**
-  - Добавлена команда `/instruction` — пошаговая инструкция по подключению (ПК и iPhone/iPad); тексты загружаются из `docs/bot-instruction-texts/instruction_pc_short.txt` и `instruction_ios_short.txt`.
-  - Добавлена команда `/proxy` — отправка ссылки MTProto‑прокси и краткой инструкции из `instruction_mtproto_short.txt`; ссылка читается из переменной окружения `MTPROTO_PROXY_LINK` (на Timeweb добавлена в `env_vars.txt`).
-  - После успешной выдачи конфига по `/get_config` бот автоматически отправляет объединённую инструкцию (ПК + iOS).
-  - В приветствии `/start` добавлены строки про `/instruction` и `/proxy`.
+- `/instruction` (тексты из `bot-instruction-texts/`), `/proxy` (`MTPROTO_PROXY_LINK`). Опция VPN+GPT для eu1 (пул 10.1.0.8–254, `add-ss-redirect.sh`, `profile_type`). Спека `spec-03-bot-integration-instructions.md`.
 
-- **Конфигурация бота**
-  - В `bot/config.py`: добавлены поля `base_dir`, `mtproto_proxy_link`; загрузка `MTPROTO_PROXY_LINK` из env (опционально).
-  - В `docs/deployment.md`: раздел «Обновление бота на Timeweb» — напоминание, что `env_vars.txt` на сервере не в Git и новые переменные нужно добавлять вручную; команды для `git pull`, перезапуска сервиса и просмотра логов.
+## 2026-02-15 — Отладка eu1: WG UDP из РФ к Fornex не работает
 
-- **Опция VPN+GPT для Европы (eu1)**
-  - При выборе сервера «Европа» в `/server` добавлен второй шаг: выбор типа профиля — «Обычный VPN» или «VPN+GPT (обход блокировок ChatGPT)».
-  - Для VPN+GPT: выделение IP из пула **10.1.0.8–10.1.0.254**; после добавления peer в WireGuard бот по SSH на eu1 вызывает скрипт `add-ss-redirect.sh <IP>`, добавляющий iptables‑редирект TCP 80/443 на порт 1081 (ss-redir).
-  - Имя конфига для VPN+GPT: `vpn_<id>_eu1_gpt.conf`; в сообщении бота явно указан тип «VPN+GPT».
-  - В `bot/storage.py`: у `User` — поле `preferred_profile_type` (vpn / vpn_gpt); у `Peer` — поле `profile_type`; при регенерации конфига тип профиля сохраняется.
-  - В `bot/wireguard_peers.py`: функции `_allocate_ip_in_pool()`, `_run_add_ss_redirect()`; в `create_peer_and_config_for_user()` добавлен параметр `profile_type`; опциональная переменная env `WG_EU1_ADD_SS_REDIRECT_SCRIPT` (по умолчанию `/opt/vpnservice/scripts/add-ss-redirect.sh`).
+- Диагностика wg0 на Fornex: сервер настроен корректно (iptables/rp_filter/MTU), но **WireGuard UDP :51820 из России к Fornex не работает** (блокировка/потеря на маршруте РФ↔Fornex). Fornex подтвердил «с нашей стороны ограничений нет». Подготовлены обходные пути (`eu1-workarounds-fornex.md`). → привело к выбору AmneziaWG.
 
-- **Скрипт add-ss-redirect.sh на eu1**
-  - Пример скрипта: `docs/scripts/add-ss-redirect.sh.example`; развёртывание и путь описаны в `docs/deployment.md`.
-  - На сервере eu1 (Fornex) скрипт развёрнут в `/opt/vpnservice/scripts/add-ss-redirect.sh`, выполнен `chmod +x`, проверен вызов с аргументом `10.1.0.8` и наличие правил в iptables.
-  - На Timeweb в `env_vars.txt` добавлена переменная `WG_EU1_ADD_SS_REDIRECT_SCRIPT=/opt/vpnservice/scripts/add-ss-redirect.sh` (опционально, путь по умолчанию совпадает).
+## 2026-02-14 — Вторая нода eu1 (Fornex, Германия)
 
-- **Документация и планы**
-  - Спека `docs/specs/spec-03-bot-integration-instructions.md`: отмечены выполненные пункты (инструкции, MTProto, VPN+GPT, скрипт).
-  - `ROADMAP_VPN.md`: отмечены выполненные задачи (выдача инструкции, команда /proxy, опция VPN+GPT в боте); оставлена задача «На сервере eu1 развернуть add-ss-redirect.sh» как выполненная по факту (скрипт развёрнут).
+- VPS Cloud NVMe 1 (Германия), WireGuard wg0 (10.1.0.0/24, :51820). SSH-ключ бота (Timeweb→eu1), env `WG_EU1_*`. `/server` — 2 опции. Имена конфигов → `vpn_<tid>_<server_id>.conf`.
 
-# DONE_LIST_VPN
+## 2026-02-13 — Лимиты трафика + рабочая /regen
 
-История выполненных задач по проекту VPN.
+- Timeweb: лимитов по трафику нет. `/regen` доведена (remove+recreate с тем же IP, фикс импорта `find_peer_by_telegram_id`). Repo временно публичный для деплоя (вернуть в приватный, проверить отсутствие секретов).
 
-## 2026-02-09
+## 2026-02-11 — Self-service через Telegram-бота
 
-- Создана базовая структура документации для проекта VPN:
-  - добавлен `ROADMAP_VPN.md` с этапами развития (MVP, бот, масштабирование, коммерциализация);
-  - подготовлен шаблон для `SESSION_SUMMARY_2026-02-09.md` (см. файл сессии);
-  - проект VPN интегрирован в центральные документы (`RULES.md`, `PROJECTS.md`, `ROAD_MAP_AI.md`, `QUICK_START_AGENT.md`, `docs/AGENT_PROMPTS.md`).
-- Инициализирован отдельный Git-репозиторий для проекта VPN:
-  - создан локальный репозиторий в папке `VPN/` (`git init`);
-  - привязан к GitHub-репозиторию `nikkronos/vpnservice` (`git remote add origin`);
-  - выполнен первый коммит с базовой структурой документации (`chore: initialize vpnservice repo structure`);
-  - ветка переименована в `main` и отправлена на GitHub (`git push -u origin main`).
-- Определена стратегия развёртывания:
-  - первая нода будет развёрнута на существующем Timeweb-сервере (для тестирования и экономии средств);
-  - в дальнейшем — миграция на отдельный VPS под VPN.
-- Создана детальная инструкция по развёртыванию:
-  - `VPN/docs/deployment.md` — пошаговое руководство по установке и настройке WireGuard на сервере;
-  - включает генерацию ключей, конфигурацию сервера и клиентов, тестирование подключения.
-- Развёрнута первая WireGuard-нода на существующем Timeweb-сервере (81.200.146.32):
-  - установлен WireGuard, сгенерированы ключи сервера и клиента;
-  - настроен интерфейс wg0, IP forwarding, UFW (порт 51820/UDP), systemd автозапуск;
-  - создан конфиг клиента client1.conf, скопирован на Windows через scp.
-- Успешное тестирование на Windows:
-  - туннель «client1» подключён, внешний IP — 81.200.146.32;
-  - ping 8.8.8.8: 0% потерь, ~10–15 мс;
-  - Speedtest: ~91 Мбит/с вниз, ~88 Мбит/с вверх, пинг 10 мс.
-- Успешное тестирование на iOS:
-  - установлен qrencode на сервере, сгенерирован QR-код из client1.conf;
-  - конфиг добавлен в WireGuard на iPhone через сканирование QR-кода;
-  - подключение работает.
+- Модель данных `users.json`/`peers.json`; `bot/storage.py` (dataclass `Peer`), `bot/wireguard_peers.py` (ключи/IP/`wg set`/.conf), `bot/main.py` (`/start`,`/get_config`,`/add_user`,`/users`). env `WG_*`. Друг успешно подключился.
 
-## 2026-02-11
+## 2026-02-09 — Базовая структура + первая WireGuard-нода
 
-- Реализован self-service через Telegram-бота:
-  - спроектирована модель данных для пользователей (`users.json`) и VPN-подключений (`peers.json`);
-  - добавлен модуль `bot/storage.py` с dataclass `Peer` и функциями для работы с peers;
-  - добавлен модуль `bot/wireguard_peers.py` для интеграции с WireGuard (генерация ключей, подбор IP, добавление peer через `wg set`, формирование `.conf`);
-  - переработан `bot/main.py` под сценарий self-service (команды `/start`, `/get_config`, `/my_config`, `/add_user`, `/users` с учётом новой модели данных).
-- Настроены переменные окружения для VPN-проекта:
-  - в `env_vars.txt` добавлены параметры `WG_SERVER_PUBLIC_KEY`, `WG_INTERFACE`, `WG_NETWORK_CIDR`, `WG_ENDPOINT_HOST`, `WG_ENDPOINT_PORT`, `WG_DNS`;
-  - `WG_SERVER_PUBLIC_KEY` получен с помощью `wg show wg0 public-key` на сервере.
-- Настроено обновление кода на сервере `/opt/vpnservice`:
-  - сконфигурирован доступ к GitHub через Personal Access Token для `nikkronos/vpnservice`;
-  - аккуратно разрешён конфликт между старым локальным `bot/storage.py` и новой версией из репозитория (старый файл сохранён как бэкап);
-  - выполнен `git pull`, подтянуты новые файлы (`bot/main.py`, `bot/storage.py`, `bot/wireguard_peers.py`, `bot/__init__.py`, specs), перезапущен `vpn-bot.service`.
-- Протестирован self-service для друзей:
-  - владелец добавляет друга командой `/add_user` (ответом на сообщение или по Telegram ID);
-  - друг пишет боту `/start` и `/get_config`, бот создаёт peer в WireGuard, сохраняет его в `peers.json` и отправляет конфигурационный файл `vpn_<telegram_id>.conf`;
-  - как минимум один друг успешно подключился к VPN: YouTube и Instagram работают через туннель.
-- Обновлены планы по развитию infrastructure и multi-node в `ROADMAP_VPN.md` (добавлены задачи по оценке нагрузки и внедрению нескольких нод/регионов).
-
-## 2026-02-13
-
-- Уточнены лимиты трафика у провайдера Timeweb:
-  - подтверждено, что базовых ограничений по объёму трафика нет;
-  - основное требование — не нарушать правила платформы (отсутствие незаконного контента, DDoS, спама и т.п.);
-  - сделан вывод, что текущий VPS подходит для использования VPN друзьями и коллегами без жёстких лимитов по трафику.
-- Доведена до рабочего состояния команда `/regen` (регенерация ключей и конфига WireGuard):
-  - реализованы функции `_remove_peer_from_wireguard()` и `regenerate_peer_and_config_for_user()` в `bot/wireguard_peers.py`;
-  - обновлён хендлер `/regen` в `bot/main.py`, который удаляет старый peer, создаёт новый с тем же IP и отправляет пользователю обновлённый `.conf`;
-  - исправлена ошибка с отсутствующим импортом `find_peer_by_telegram_id`, из-за которой бот молчал при вызове `/regen`;
-  - протестировано на боевом пользователе: новый конфиг успешно отработал, туннель продолжил работать.
-- GitHub‑репозиторий `nikkronos/vpnservice` временно сделан публичным для упрощения деплоя (без постоянного ввода PAT); зафиксирована необходимость после завершения работ вернуть репозиторий в приватный режим и убедиться в отсутствии секретов в истории коммитов.
-
-## 2026-02-14
-
-- Добавлена вторая VPN-нода **eu1 (Европа)** на Fornex (Германия):
-  - заказан VPS Cloud NVMe 1 (1 ядро, 1 ГБ RAM, 10 ГБ NVMe, безлимитный трафик) в локации Германия;
-  - на сервере 185.21.8.91 установлен WireGuard (Ubuntu 24.04 LTS), настроен интерфейс wg0 в подсети 10.1.0.0/24, порт 51820/UDP, IP forwarding, UFW;
-  - сгенерированы ключи сервера eu1, публичный ключ добавлен в конфигурацию бота.
-- Настроен доступ бота (Timeweb) к ноде eu1 по SSH:
-  - на Timeweb создан отдельный SSH-ключ для доступа к eu1;
-  - публичный ключ добавлен в `authorized_keys` на Fornex (eu1);
-  - в `env_vars.txt` на Timeweb добавлены переменные WG_EU1_* (SERVER_PUBLIC_KEY, INTERFACE, NETWORK_CIDR, ENDPOINT_HOST/PORT, DNS, SSH_HOST/USER/KEY_PATH).
-- Логика бота обновлена ранее: `get_available_servers()` возвращает eu1 только при наличии WG_EU1_SERVER_PUBLIC_KEY и WG_EU1_ENDPOINT_HOST; переменные для нод используют формат `WG_<SERVERID>_*` (см. env_vars.example.txt).
-- Успешная проверка в боте:
-  - в `/server` отображаются две опции: «Россия (Timeweb)» и «Европа»;
-  - пользователь выбрал «Европа», вызвал `/get_config` — бот создал peer на eu1 по SSH и отправил конфиг;
-  - импорт конфига в WireGuard и подключение к ноде Европа работают; доступ к ChatGPT и другим EU-сервисам через eu1 обеспечен.
-- Исправлена путаница с конфигами при переключении серверов:
-  - имена файлов конфигов изменены с `vpn_<telegram_id>.conf` на `vpn_<telegram_id>_<server_id>.conf` (например, `vpn_123_main.conf` и `vpn_123_eu1.conf`);
-  - в `bot/main.py` обновлены вызовы для `/get_config` и `/regen`, чтобы пользователи не перезаписывали и не путали конфиги для РФ и Европы.
-
-## 2026-02-15
-
-- Продолжена отладка ноды eu1 (Fornex): проблема «Получено 0, отправлено ок» не решена с прошлым агентом.
-- Расширена документация по отладке eu1:
-  - добавлены разделы 9–13 в `VPN/docs/eu1-setup-and-troubleshooting.md` (рекомендуемые проверки, обратный путь, финальные тесты, варианты обхода).
-  - создан `VPN/docs/eu1-commands-step-by-step.md` — пошаговые команды для диагностики.
-  - создан `VPN/docs/eu1-workarounds-fornex.md` — инструкции по обходным путям (ShadowSocks, Cloudflared, udp2raw, V2Ray).
-- Добавлена опциональная поддержка MTU в клиентском конфиге:
-  - в `bot/wireguard_peers.py` добавлен параметр `mtu` в конфиг ноды и в `_build_client_config()`.
-  - если задан `WG_EU1_MTU` (например, 1280), в выдаваемый конфиг добавляется строка `MTU = 1280` в `[Interface]`.
-  - обновлён `env_vars.example.txt` с примером `WG_EU1_MTU=1280`.
-- Диагностика на Fornex:
-  - исправлен пир с `AllowedIPs 10.1.0.0/24` → `10.1.0.2/32`.
-  - добавлены правила iptables FORWARD в начало цепочки (wg0↔eth0, eth0→wg0 RELATED,ESTABLISHED).
-  - rp_filter установлен в 0 для all и wg0.
-  - выполнен tcpdump на eth0 (UDP 51820, 45 секунд) — пакетов от клиента к серверу не видно, но `wg show` показывает активный обмен (14.25 KiB received, 33.17 KiB sent).
-- Вывод по eu1:
-  - WireGuard UDP (порт 51820) на Fornex технически не работает для клиентов из России (блокировка/потеря трафика на маршруте Россия ↔ Fornex).
-  - Сервер настроен корректно (все проверки пройдены), проблема вне зоны контроля.
-  - Подготовлены варианты обходных путей для Fornex (ShadowSocks, Cloudflared, udp2raw, V2Ray) — см. `eu1-workarounds-fornex.md`.
-- Обновлён `ROADMAP_VPN.md`: добавлена задача про проблему eu1 и варианты решения (обходные пути или миграция на другой провайдер).
-- Fornex подтвердил: «С нашей стороны, ограничений нет.» — исходящий UDP с VPS до абонентских IP со стороны Fornex не блокируется.
-
+- Старт проекта: docs-структура, Git-repo `nikkronos/vpnservice`. Первая WireGuard-нода на Timeweb (81.200.146.32, wg0 :51820), `client1.conf`. Тест Windows (~91↓/88↑ Мбит) + iOS (QR) — работают. `docs/deployment.md`.
