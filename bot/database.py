@@ -534,6 +534,10 @@ def _migrate_add_subscription_columns() -> None:
             ("test_used", "INTEGER NOT NULL DEFAULT 0"),
             # last_reminder_date: дата последнего ежедневного напоминания (anti-дубль за день).
             ("last_reminder_date", "TEXT"),
+            # churn-опрос: причина отвала/недо-онбординга, когда выбрана, когда спросили (дедуп).
+            ("drop_reason", "TEXT"),
+            ("drop_reason_at", "TEXT"),
+            ("churn_asked_at", "TEXT"),
         ]
         for name, decl in cols:
             if name not in existing:
@@ -952,7 +956,22 @@ def db_users_by_segment(segment: str) -> List[Dict]:
         return []
     with _conn() as con:
         rows = con.execute(
-            f"SELECT telegram_id, email, expires_at, migrated_at FROM users WHERE {where}"
+            f"SELECT telegram_id, email, expires_at, migrated_at, churn_asked_at "
+            f"FROM users WHERE {where}"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def db_users_due_for_churn_survey() -> List[Dict]:
+    """Авто-T+1 churn-опрос (только 3.2 «пользовавшиеся»): доступ истёк РОВНО вчера,
+    сейчас неактивен, онбординг завершён, ещё не спрашивали (churn_asked_at NULL)."""
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            f"SELECT telegram_id, email, expires_at FROM users "
+            f"WHERE {_SEG_BASE} AND NOT {_SEG_ACTIVE} AND {_SEG_ONBOARDED} "
+            f"AND churn_asked_at IS NULL "
+            f"AND expires_at IS NOT NULL AND date(expires_at) = date('now', '-1 day')"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1928,6 +1947,41 @@ def db_mark_test_used(telegram_id: int) -> None:
     with _conn() as con:
         con.execute(
             "UPDATE users SET test_used = 1 WHERE telegram_id = ?", (telegram_id,)
+        )
+
+
+def db_mark_churn_asked(telegram_id: int) -> None:
+    """Помечает, что опрос причин уже задан (дедуп — не спрашиваем повторно)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET churn_asked_at = datetime('now') WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+
+
+def db_set_drop_reason(telegram_id: int, reason: str) -> None:
+    """Сохраняет причину отвала/недо-онбординга (человекочитаемый label)."""
+    _ensure_init()
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET drop_reason = ?, drop_reason_at = datetime('now') "
+            "WHERE telegram_id = ?",
+            ((reason or "").strip()[:300], telegram_id),
+        )
+
+
+def db_append_drop_detail(telegram_id: int, detail: str) -> None:
+    """Дописывает свободный текст к drop_reason (уточнение для 'не работало'/'другое')."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT drop_reason FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        base = (row["drop_reason"] if row and row["drop_reason"] else "")
+        combined = (f"{base}: {detail.strip()}" if base else detail.strip())[:300]
+        con.execute(
+            "UPDATE users SET drop_reason = ? WHERE telegram_id = ?", (combined, telegram_id)
         )
 
 

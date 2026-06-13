@@ -25,10 +25,13 @@ import urllib.error
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from bot.config import load_config  # noqa: E402
+from bot import churn  # noqa: E402
 from bot.database import (  # noqa: E402
     init_db,
     db_users_due_for_daily_reminder,
     db_mark_daily_reminder_sent,
+    db_users_due_for_churn_survey,
+    db_mark_churn_asked,
 )
 
 logging.basicConfig(
@@ -63,6 +66,12 @@ def _message_for(days_left: int) -> str:
 PAY_REMINDER_MARKUP = {"inline_keyboard": [[
     {"text": "💳 Продлить подписку", "callback_data": "pay_show"},
 ]]}
+
+# T-0: + «не планирую продлевать» → опрос причин (callback churn_open в боте).
+PAY_OR_CHURN_MARKUP = {"inline_keyboard": [
+    [{"text": "💳 Продлить подписку", "callback_data": "pay_show"}],
+    [{"text": "🤔 Не планирую продлевать", "callback_data": "churn_open"}],
+]}
 
 
 def send_telegram_message(bot_token: str, chat_id: int, text: str, reply_markup: dict | None = None) -> bool:
@@ -102,16 +111,15 @@ def send_telegram_message(bot_token: str, chat_id: int, text: str, reply_markup:
 
 
 def run_reminder_cycle(bot_token: str) -> None:
-    """Ежедневный прогон: всем, у кого доступ истекает в ближайшие 0..7 дней и
-    кого сегодня ещё не уведомляли. По одному напоминанию в день на юзера."""
+    """Ежедневный прогон: (1) напоминания об окончании (0..7 дней, по одному в день),
+    (2) T+1 churn-опрос (истёк вчера, не оплатил, не спрошен)."""
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).date()
+
+    # 1. Ежедневные напоминания
     users = db_users_due_for_daily_reminder()
-    if not users:
-        logger.info("Daily reminder: nothing to send")
-        return
     logger.info("Daily reminder: %d candidates", len(users))
-    total_sent = 0
+    sent = 0
     for u in users:
         tid = u.get("telegram_id")
         exp = u.get("expires_at")
@@ -124,14 +132,29 @@ def run_reminder_cycle(bot_token: str) -> None:
         days_left = (exp_date - today).days
         if days_left < 0 or days_left > 7:
             continue  # подстраховка (SQL уже фильтрует окно)
-        text = _message_for(days_left)
-        ok = send_telegram_message(bot_token, int(tid), text, reply_markup=PAY_REMINDER_MARKUP)
-        if ok:
+        markup = PAY_OR_CHURN_MARKUP if days_left == 0 else PAY_REMINDER_MARKUP
+        if send_telegram_message(bot_token, int(tid), _message_for(days_left), reply_markup=markup):
             db_mark_daily_reminder_sent(int(tid), today.isoformat())
-            total_sent += 1
+            sent += 1
         else:
             logger.warning("Will retry daily reminder for tid=%s next run", tid)
-    logger.info("Daily reminder: sent %d", total_sent)
+    logger.info("Daily reminder: sent %d", sent)
+
+    # 2. Авто T+1 churn-опрос (только 3.2 «пользовавшиеся»)
+    due_churn = db_users_due_for_churn_survey()
+    logger.info("Churn survey: %d due", len(due_churn))
+    csent = 0
+    for u in due_churn:
+        tid = u.get("telegram_id")
+        if not tid:
+            continue
+        if send_telegram_message(bot_token, int(tid), churn.text_for("churn"),
+                                 reply_markup=churn.inline_keyboard_dict("churn")):
+            db_mark_churn_asked(int(tid))
+            csent += 1
+        else:
+            logger.warning("Will retry churn survey for tid=%s next run", tid)
+    logger.info("Churn survey: sent %d", csent)
 
 
 def main() -> int:

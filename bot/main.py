@@ -15,6 +15,7 @@ from .config import (
     load_config,
 )
 from . import tariffs
+from . import churn
 from .database import (
     db_list_devices,
     db_get_device,
@@ -27,6 +28,9 @@ from .database import (
     db_is_test_used,
     db_mark_test_used,
     db_users_by_segment,
+    db_set_drop_reason,
+    db_mark_churn_asked,
+    db_append_drop_detail,
     db_add_to_whitelist,
     db_get_whitelist,
     db_is_whitelisted,
@@ -326,6 +330,8 @@ def main() -> None:
     _onboarding_state: dict[int, dict] = {}
     # Открытый онбординг-вопрос «для чего VPN»: uid → ждём свободный ответ.
     _use_case_state: dict[int, dict] = {}
+    # Churn-опрос: uid → {kind, code} ждём уточняющий свободный текст (не работало/другое).
+    _drop_detail_state: dict[int, dict] = {}
 
     def _is_authorized(telegram_id: int) -> bool:
         """Пользователь разрешён, если: в whitelist ИЛИ есть запись в базе и active=True."""
@@ -703,6 +709,90 @@ def main() -> None:
             logger.warning("db_set_use_case failed for %s: %s", uid, e)
         bot.send_message(message.chat.id, "Спасибо! 🙌 Учтём.")
         _send_main_menu_for_tid(message.chat.id, uid)
+
+    # ── Churn-опрос: причины отвала (kind=churn, 3.2) / недо-онбординга (kind=onb, 3.1) ──
+    def _send_churn_survey(chat_id: int, kind: str) -> None:
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        for code, label in churn.reasons_for(kind):
+            kb.add(types.InlineKeyboardButton(label, callback_data=f"drop:{kind}:{code}"))
+        bot.send_message(chat_id, churn.text_for(kind), reply_markup=kb)
+
+    def _drop_followup(chat_id: int, kind: str, code: str) -> None:
+        """Win-back / закрытие после выбранной причины (тейлоред по причине)."""
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        if kind == "churn":
+            if code == "expensive":
+                kb.add(
+                    types.InlineKeyboardButton("🧪 Тест 7 дней — 49 ₽", callback_data="paytar:3:0"),
+                    types.InlineKeyboardButton("💳 Тарифы / продлить", callback_data="pay_show"),
+                )
+                bot.send_message(chat_id, "Спасибо! Если дело в цене — есть тест 7 дней за 49 ₽ или обычные тарифы 👇", reply_markup=kb)
+            elif code == "forgot":
+                kb.add(types.InlineKeyboardButton("💳 Продлить", callback_data="pay_show"))
+                bot.send_message(chat_id, "Спасибо! Продлить — пара тапов 👇", reply_markup=kb)
+            elif code == "not_working":
+                kb.add(types.InlineKeyboardButton("🆘 Поддержка", callback_data="menu_support"))
+                bot.send_message(chat_id, "Спасибо! Давай починим — опиши проблему в поддержке, поможем 👇", reply_markup=kb)
+            else:  # not_needed / found_other / other
+                bot.send_message(chat_id, "Спасибо, что попробовал 🙌 Будем рады вернуть.")
+        else:  # onb (не прошли онбординг)
+            if code in ("too_hard", "no_email", "other"):
+                bot.send_message(chat_id, "Спасибо! Закончить настройку — минута: жми /start, поможем.")
+            else:  # changed_mind / just_looking
+                bot.send_message(chat_id, "Спасибо! Передумаешь — жми /start, всё под рукой.")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "churn_open")
+    def callback_churn_open(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if call.from_user:
+            try:
+                db_mark_churn_asked(call.from_user.id)  # дедуп: не дублировать авто-T+1
+            except Exception:
+                pass
+            _send_churn_survey(call.message.chat.id, "churn")
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("drop:"))
+    def callback_drop_reason(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        bot.answer_callback_query(call.id)
+        if not call.from_user:
+            return
+        uid = call.from_user.id
+        try:
+            _, kind, code = call.data.split(":", 2)
+        except ValueError:
+            return
+        label = churn.label_for(kind, code)
+        if not label:
+            return
+        try:
+            db_set_drop_reason(uid, label)
+            db_mark_churn_asked(uid)
+        except Exception as e:
+            logger.warning("db_set_drop_reason failed for %s: %s", uid, e)
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        if churn.needs_free_text(kind, code):
+            _drop_detail_state[uid] = {"kind": kind, "code": code}
+            bot.send_message(call.message.chat.id, "Спасибо! Расскажи в двух словах — что именно? (одним сообщением)")
+            return
+        _drop_followup(call.message.chat.id, kind, code)
+
+    @bot.message_handler(
+        func=lambda msg: (msg.from_user is not None and msg.from_user.id in _drop_detail_state
+                          and bool(getattr(msg, "text", None)) and not msg.text.startswith("/"))
+    )
+    def handle_drop_detail(message: types.Message) -> None:  # type: ignore[override]
+        if not message.from_user:
+            return
+        uid = message.from_user.id
+        st = _drop_detail_state.pop(uid, None) or {}
+        try:
+            db_append_drop_detail(uid, message.text or "")
+        except Exception as e:
+            logger.warning("db_append_drop_detail failed for %s: %s", uid, e)
+        _drop_followup(message.chat.id, st.get("kind", "churn"), st.get("code", "other"))
 
     @bot.callback_query_handler(func=lambda call: call.data == "onb_ack")
     def callback_onb_ack(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -2021,16 +2111,76 @@ def main() -> None:
         if seg not in _SEGMENT_LABELS:
             return
         _broadcast_segment[call.from_user.id] = seg
-        _pending_broadcast.add(call.from_user.id)
+        _pending_broadcast.discard(call.from_user.id)
         try:
             count = len(db_users_by_segment(seg))
         except Exception:  # noqa: BLE001
             count = "?"
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("📝 Обычный текст", callback_data="bcast_send:text"))
+        if seg in ("inactive_used", "test"):
+            kb.add(types.InlineKeyboardButton("❓ Опрос причин отвала", callback_data="bcast_send:churn"))
+        if seg in ("inactive_no_onboarding", "test"):
+            kb.add(types.InlineKeyboardButton("❓ Опрос про онбординг", callback_data="bcast_send:onb"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data="admin_broadcast"))
         bot.edit_message_text(
             f"📢 <b>Рассылка → {_SEGMENT_LABELS[seg]}</b>\n\n"
-            f"Получателей: <b>{count}</b>.\n\n"
-            "Напиши текст — отправлю этому сегменту.\n"
-            "<i>HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
+            f"Получателей: <b>{count}</b>.\n\nЧто отправить?",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=kb,
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("bcast_send:"))
+    def callback_broadcast_send(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        uid = call.from_user.id
+        mode = call.data.split(":", 1)[1]  # text | churn | onb
+        seg = _broadcast_segment.get(uid)
+        if not seg:
+            bot.send_message(call.message.chat.id, "Сегмент не выбран — начни заново через 📢 Рассылка.")
+            return
+        if mode == "text":
+            _pending_broadcast.add(uid)
+            bot.edit_message_text(
+                f"📢 <b>Рассылка → {_SEGMENT_LABELS[seg]}</b>\n\nНапиши текст — отправлю сегменту.\n"
+                "<i>HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
+                call.message.chat.id, call.message.message_id, parse_mode="HTML",
+            )
+            return
+        if mode not in ("churn", "onb"):
+            return
+        # Рассылка опроса по сегменту: дедуп по churn_asked_at, помечаем при отправке.
+        _broadcast_segment.pop(uid, None)
+        try:
+            recipients = db_users_by_segment(seg)
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(call.message.chat.id, f"❌ Ошибка выборки сегмента: {e!r}")
+            return
+        bot.edit_message_text(
+            f"⏳ Рассылаю опрос ({mode}) → «{_SEGMENT_LABELS[seg]}»: {len(recipients)}…",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML",
+        )
+        sent = skipped = failed = 0
+        for u in recipients:
+            tid = u.get("telegram_id")
+            if not tid:
+                continue
+            if u.get("churn_asked_at"):  # уже спрашивали — не дублируем
+                skipped += 1
+                continue
+            try:
+                _send_churn_survey(int(tid), mode)
+                db_mark_churn_asked(int(tid))
+                sent += 1
+                time.sleep(0.05)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Survey broadcast: не отправлено %s: %s", tid, e)
+                failed += 1
+        bot.edit_message_text(
+            f"✅ Опрос ({mode}) → «{_SEGMENT_LABELS[seg]}»: отправлено <b>{sent}</b>, "
+            f"пропущено (уже спрошены) <b>{skipped}</b>, ошибок <b>{failed}</b>.",
             call.message.chat.id, call.message.message_id, parse_mode="HTML",
         )
 
