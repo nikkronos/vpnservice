@@ -956,7 +956,8 @@ def db_users_by_segment(segment: str) -> List[Dict]:
         return []
     with _conn() as con:
         rows = con.execute(
-            f"SELECT telegram_id, email, expires_at, migrated_at FROM users WHERE {where}"
+            f"SELECT telegram_id, email, expires_at, migrated_at, churn_asked_at "
+            f"FROM users WHERE {where}"
         ).fetchall()
     return [dict(r) for r in rows]
 

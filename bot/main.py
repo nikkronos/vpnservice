@@ -2111,16 +2111,76 @@ def main() -> None:
         if seg not in _SEGMENT_LABELS:
             return
         _broadcast_segment[call.from_user.id] = seg
-        _pending_broadcast.add(call.from_user.id)
+        _pending_broadcast.discard(call.from_user.id)
         try:
             count = len(db_users_by_segment(seg))
         except Exception:  # noqa: BLE001
             count = "?"
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(types.InlineKeyboardButton("📝 Обычный текст", callback_data="bcast_send:text"))
+        if seg in ("inactive_used", "test"):
+            kb.add(types.InlineKeyboardButton("❓ Опрос причин отвала", callback_data="bcast_send:churn"))
+        if seg in ("inactive_no_onboarding", "test"):
+            kb.add(types.InlineKeyboardButton("❓ Опрос про онбординг", callback_data="bcast_send:onb"))
+        kb.add(types.InlineKeyboardButton("« Назад", callback_data="admin_broadcast"))
         bot.edit_message_text(
             f"📢 <b>Рассылка → {_SEGMENT_LABELS[seg]}</b>\n\n"
-            f"Получателей: <b>{count}</b>.\n\n"
-            "Напиши текст — отправлю этому сегменту.\n"
-            "<i>HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
+            f"Получателей: <b>{count}</b>.\n\nЧто отправить?",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=kb,
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("bcast_send:"))
+    def callback_broadcast_send(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        uid = call.from_user.id
+        mode = call.data.split(":", 1)[1]  # text | churn | onb
+        seg = _broadcast_segment.get(uid)
+        if not seg:
+            bot.send_message(call.message.chat.id, "Сегмент не выбран — начни заново через 📢 Рассылка.")
+            return
+        if mode == "text":
+            _pending_broadcast.add(uid)
+            bot.edit_message_text(
+                f"📢 <b>Рассылка → {_SEGMENT_LABELS[seg]}</b>\n\nНапиши текст — отправлю сегменту.\n"
+                "<i>HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;code&gt;код&lt;/code&gt;</i>",
+                call.message.chat.id, call.message.message_id, parse_mode="HTML",
+            )
+            return
+        if mode not in ("churn", "onb"):
+            return
+        # Рассылка опроса по сегменту: дедуп по churn_asked_at, помечаем при отправке.
+        _broadcast_segment.pop(uid, None)
+        try:
+            recipients = db_users_by_segment(seg)
+        except Exception as e:  # noqa: BLE001
+            bot.send_message(call.message.chat.id, f"❌ Ошибка выборки сегмента: {e!r}")
+            return
+        bot.edit_message_text(
+            f"⏳ Рассылаю опрос ({mode}) → «{_SEGMENT_LABELS[seg]}»: {len(recipients)}…",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML",
+        )
+        sent = skipped = failed = 0
+        for u in recipients:
+            tid = u.get("telegram_id")
+            if not tid:
+                continue
+            if u.get("churn_asked_at"):  # уже спрашивали — не дублируем
+                skipped += 1
+                continue
+            try:
+                _send_churn_survey(int(tid), mode)
+                db_mark_churn_asked(int(tid))
+                sent += 1
+                time.sleep(0.05)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Survey broadcast: не отправлено %s: %s", tid, e)
+                failed += 1
+        bot.edit_message_text(
+            f"✅ Опрос ({mode}) → «{_SEGMENT_LABELS[seg]}»: отправлено <b>{sent}</b>, "
+            f"пропущено (уже спрошены) <b>{skipped}</b>, ошибок <b>{failed}</b>.",
             call.message.chat.id, call.message.message_id, parse_mode="HTML",
         )
 
