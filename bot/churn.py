@@ -18,11 +18,11 @@ CHURN_TEXT = (
     "Что стало причиной? Один тап — поможет нам стать лучше."
 )
 CHURN_REASONS: List[Tuple[str, str]] = [
-    ("not_needed", "Уже не нужен"),
+    ("not_needed", "Больше не нужно"),
     ("expensive", "Дорого"),
     ("not_working", "Не работало / глючило"),
-    ("found_other", "Нашёл другой сервис"),
-    ("forgot", "Забыл продлить"),
+    ("found_other", "Пользуюсь другим"),
+    ("forgot", "Вылетело из головы"),
     ("other", "Другое"),
 ]
 
@@ -32,9 +32,9 @@ ONB_TEXT = (
 )
 ONB_REASONS: List[Tuple[str, str]] = [
     ("too_hard", "Сложно / долго"),
-    ("changed_mind", "Передумал"),
+    ("changed_mind", "Расхотелось"),
     ("no_email", "Код на email не пришёл"),
-    ("just_looking", "Просто смотрел"),
+    ("just_looking", "Из любопытства"),
     ("other", "Другое"),
 ]
 
