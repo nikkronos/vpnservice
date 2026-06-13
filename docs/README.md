@@ -53,6 +53,7 @@ OneDrive сдвигает mtime). В архив — только после ≥7
 - `plan-phase2B-per-device-impl.md` — ⏳ импл-спека Фазы 2B (**выполнено**; карантин свежести → в архив после 2026-06-17).
 
 ### Бизнес и правовое
+- `monetization-and-payments.md` — **монетизация и платежи** (donation-flow, фазы коммерциализации, выбор провайдера авто-оплаты). Вынесено из ROADMAP 06-13.
 - `competitors-analysis.md` — анализ конкурентов.
 - `mvp-unit-economics-and-plan.md` — юнит-экономика.
 - `provider-choice-evaluation.md` — выбор VPS-провайдера. ⚠ устар. тариф (NVMe1 → NVMe2).
