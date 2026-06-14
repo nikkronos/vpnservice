@@ -75,6 +75,8 @@ async function loadStats() {
         set('act-30d', d.active_30d);
         set('act-email', d.email_verified_users);
         set('act-proxy', d.proxy_requests_30d);
+        set('act-paid', d.active_paid);
+        set('act-trial', d.active_trial);
         // act-traffic не ставим здесь — он считается из total_bytes в loadTraffic
         // (резет-aware lifetime, см. SESSION_SUMMARY_2026-05-29 фикс #6).
 
@@ -144,7 +146,7 @@ function _keyFn(key) {
         case 'total':   return u => u.total_bytes || 0;
         case 'device':  return u => u.platform || '';
         case 'last':    return u => u.last_handshake || 0;
-        case 'vless':   return u => _sqliteTs(u.vless_requested_at);
+        case 'vless':   return u => u.vless_total_bytes || 0;
         case 'proxy':   return u => _sqliteTs(u.proxy_requested_at);
         default:        return () => 0;
     }
@@ -196,6 +198,14 @@ function _bindSortHeaders() {
     });
 }
 
+// Аккаунты владельца — подсвечиваются отдельным цветом (по username или telegram_id).
+const OWNER_USERNAMES = new Set(['nikkronos', 'tosha8686']);
+const OWNER_TIDS = new Set([7033776123, 6133596373]);
+function _isOwner(u) {
+    return (u.username && OWNER_USERNAMES.has(String(u.username).toLowerCase()))
+        || OWNER_TIDS.has(Number(u.telegram_id));
+}
+
 function _renderUsers(users) {
     const tbody = document.getElementById('users-tbody');
     if (!tbody) return;
@@ -208,6 +218,7 @@ function _renderUsers(users) {
         const rowClasses = [];
         if (!u.has_peer) rowClasses.push('row-no-peer');
         else if (sessionBytes === 0) rowClasses.push('row-idle');
+        if (_isOwner(u)) rowClasses.push('row-owner');
         const rowAttr = rowClasses.length ? ` class="${rowClasses.join(' ')}"` : '';
         const traffic = sessionBytes > 0 ? `${fmt(u.rx_bytes)} / ${fmt(u.tx_bytes)}` : '—';
         const totalAll = u.total_bytes ? fmt(u.total_bytes) : '—';
@@ -215,13 +226,20 @@ function _renderUsers(users) {
         const proxy = u.proxy_requested_at
             ? `<span class="hs-recent" title="${u.proxy_requested_at}">✓ ${relDate(u.proxy_requested_at)}</span>`
             : '<span class="hs-never">—</span>';
-        // VLESS: рендер аналогично прокси. Свежий hit (за 24 ч) — ярче.
+        // VLESS: per-user трафик ЧИСЛОМ (точность main/yc; eu1-shared не атрибутируется
+        // по юзеру). Цвет — по свежести последнего захода, дата — в тултипе.
         let vlessHtml = '<span class="hs-never">—</span>';
-        if (u.vless_requested_at) {
-            const ts = _sqliteTs(u.vless_requested_at);
-            const diff = Math.floor(Date.now() / 1000) - ts;
-            const cls = diff < 86400 ? 'hs-now' : (diff < 7 * 86400 ? 'hs-recent' : 'hs-old');
-            vlessHtml = `<span class="${cls}" title="${u.vless_requested_at}">✓ ${relDate(u.vless_requested_at)}</span>`;
+        const vbytes = u.vless_total_bytes || 0;
+        const vseen = u.vless_last_seen || u.vless_requested_at;
+        if (vbytes > 0 || vseen) {
+            let cls = 'hs-old';
+            if (vseen) {
+                const diff = Math.floor(Date.now() / 1000) - _sqliteTs(vseen);
+                cls = diff < 86400 ? 'hs-now' : (diff < 7 * 86400 ? 'hs-recent' : 'hs-old');
+            }
+            const label = vbytes > 0 ? fmt(vbytes) : '✓';
+            const tip = vseen ? `последний заход: ${vseen}` : 'per-user трафик (main/yc)';
+            vlessHtml = `<span class="${cls}" title="${tip}">${label}</span>`;
         }
         const email = u.email_verified
             ? '<span class="hs-now" title="Авторизован по email">✓</span>'

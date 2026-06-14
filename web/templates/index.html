@@ -19,28 +19,25 @@
             </div>
         </header>
 
-        <!-- Статус-бар -->
-        <div class="status-bar">
-            <div id="status-services" style="display:contents">
-                <div class="status-item"><span class="status-dot dot-unknown"></span><span>загрузка…</span></div>
-            </div>
-            <div class="status-sep"></div>
-            <div class="status-item">
-                <span class="stat-num" id="stat-users">—</span>
-                <span class="stat-desc">пользователей</span>
-            </div>
-            <div class="status-item">
-                <span class="stat-num" id="stat-peers">—</span>
-                <span class="stat-desc">конфигов</span>
-            </div>
-        </div>
+        <!-- Верх: сервисы сбоку + активность -->
+        <div class="dash-top">
+            <aside class="services-panel">
+                <div class="section-header"><h2>Сервисы</h2></div>
+                <div id="status-services" class="services-list">
+                    <div class="status-item"><span class="status-dot dot-unknown"></span><span>загрузка…</span></div>
+                </div>
+                <div class="services-counts">
+                    <div class="status-item"><span class="stat-num" id="stat-users">—</span><span class="stat-desc">пользователей</span></div>
+                    <div class="status-item"><span class="stat-num" id="stat-peers">—</span><span class="stat-desc">конфигов</span></div>
+                </div>
+            </aside>
 
-        <!-- Сводная статистика активности -->
-        <section class="activity-section">
-            <div class="section-header">
-                <h2>Активность</h2>
-            </div>
-            <div class="activity-grid">
+            <!-- Сводная статистика активности -->
+            <section class="activity-section">
+                <div class="section-header">
+                    <h2>Активность</h2>
+                </div>
+                <div class="activity-grid">
                 <div class="activity-card">
                     <span class="activity-num" id="act-24h">—</span>
                     <span class="activity-label">за 24 часа</span>
@@ -52,6 +49,14 @@
                 <div class="activity-card">
                     <span class="activity-num" id="act-30d">—</span>
                     <span class="activity-label">за 30 дней</span>
+                </div>
+                <div class="activity-card activity-card-sub">
+                    <span class="activity-num" id="act-paid">—</span>
+                    <span class="activity-label" title="Доступ не истёк И есть успешный платёж">с подпиской</span>
+                </div>
+                <div class="activity-card activity-card-trial">
+                    <span class="activity-num" id="act-trial">—</span>
+                    <span class="activity-label" title="Доступ не истёк, платежей нет (на бесплатном триале)">на триале</span>
                 </div>
                 <div class="activity-card">
                     <span class="activity-num" id="act-email">—</span>
@@ -71,6 +76,7 @@
                 </div>
             </div>
         </section>
+        </div>
 
         <!-- Таблица пользователей -->
         <section class="users-section">
@@ -90,7 +96,7 @@
                             <th class="th-sort" data-sort="total" title="Накопленный трафик за всё время (переживает перезагрузки и обновление конфига)">Всего</th>
                             <th class="th-sort" data-sort="device">Устройство</th>
                             <th class="th-sort" data-sort="last" title="Последний AmneziaWG handshake (для VLESS-юзеров — `никогда`, см. колонку VLESS)">Последний сеанс</th>
-                            <th class="th-sort" data-sort="vless" title="Когда последний раз клиент VLESS дёргал нашу инфру (выдача ссылки в боте/ЛК или авто-refresh subscription URL клиентом HAPP/Streisand)">VLESS</th>
+                            <th class="th-sort" data-sort="vless" title="Per-user VLESS-трафик (lifetime). Точность только main/yc — на eu1 канал общий/релейный, не атрибутируется по юзеру. Дата последнего захода — в тултипе ячейки.">VLESS</th>
                             <th class="th-sort" data-sort="proxy" title="Когда последний раз запрашивал MTProxy">Прокси</th>
                         </tr>
                     </thead>

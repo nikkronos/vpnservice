@@ -2274,6 +2274,33 @@ def db_apply_referral_bonus(telegram_id: int, reward_days: int) -> Optional[int]
     return inviter_tid
 
 
+def db_count_subscription_split() -> Dict[str, int]:
+    """
+    Разбивка доступа для админ-панели (read-only):
+      - active_paid:  доступ не истёк (expires_at > now) И есть успешный платёж
+      - active_trial: доступ не истёк И платежей нет (= на триале)
+      - expired:      expires_at в прошлом
+    'paid' определяем по наличию succeeded-платежа в payments (триал платёж не пишет).
+    """
+    _ensure_init()
+    with _conn() as con:
+        active_paid = con.execute(
+            "SELECT COUNT(*) AS n FROM users u WHERE u.expires_at > datetime('now') "
+            "AND EXISTS (SELECT 1 FROM payments p "
+            "WHERE p.telegram_id = u.telegram_id AND p.status = 'succeeded')"
+        ).fetchone()["n"]
+        active_trial = con.execute(
+            "SELECT COUNT(*) AS n FROM users u WHERE u.expires_at > datetime('now') "
+            "AND NOT EXISTS (SELECT 1 FROM payments p "
+            "WHERE p.telegram_id = u.telegram_id AND p.status = 'succeeded')"
+        ).fetchone()["n"]
+        expired = con.execute(
+            "SELECT COUNT(*) AS n FROM users "
+            "WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')"
+        ).fetchone()["n"]
+    return {"active_paid": active_paid, "active_trial": active_trial, "expired": expired}
+
+
 # ── Donation-flow: payment claims ─────────────────────────────────────────────
 
 def db_get_pending_claim(telegram_id: int) -> Optional[Dict]:

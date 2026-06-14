@@ -54,6 +54,7 @@ from bot.database import (
     db_upsert_user,
     db_get_effective_telegram_id,
     db_get_all_users,
+    db_count_subscription_split,
     db_accumulate_traffic,
     db_get_lifetime_by_user,
     db_get_subscription,
@@ -1005,9 +1006,19 @@ def api_stats():
         except Exception as e:
             logger.warning("vless_summary read failed: %s", e)
 
+        # Разбивка доступа: активные с оплатой / на триале / истёкшие.
+        try:
+            sub_split = db_count_subscription_split()
+        except Exception as e:
+            logger.warning("subscription split read failed: %s", e)
+            sub_split = {"active_paid": None, "active_trial": None, "expired": None}
+
         return jsonify({
             "total_users": len(users),
             "active_users": len(active_users),
+            "active_paid": sub_split.get("active_paid"),
+            "active_trial": sub_split.get("active_trial"),
+            "expired_subs": sub_split.get("expired"),
             "total_peers": len(peers),
             "active_peers": len(active_peers),
             "email_verified_users": email_verified,

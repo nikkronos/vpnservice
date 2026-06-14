@@ -206,6 +206,41 @@ header {
     letter-spacing: 0.05em;
 }
 
+/* Акценты карточек разбивки доступа */
+.activity-card-sub .activity-num   { color: var(--green); }
+.activity-card-trial .activity-num { color: var(--yellow); }
+
+/* ── Верх дашборда: сервисы сбоку + активность ── */
+.dash-top {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 20px;
+    align-items: start;
+    margin-bottom: 28px;
+}
+.services-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+.services-panel .section-header { margin-bottom: 12px; }
+.services-list {
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+.services-list .status-item { font-size: 0.86em; }
+.services-counts {
+    display: flex;
+    gap: 22px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border2);
+}
+.services-counts .status-item { gap: 6px; }
+.dash-top .activity-section { margin-bottom: 0; }
+
 .section-header {
     display: flex;
     align-items: baseline;
@@ -327,6 +362,19 @@ header {
 
 .users-table tbody tr.row-no-peer:hover td {
     opacity: 0.9;
+}
+
+/* Аккаунты владельца — подсветка (перебивает row-idle/row-no-peer затемнение). */
+.users-table tbody tr.row-owner td {
+    background: rgba(0, 229, 255, 0.07);
+    opacity: 1;
+}
+.users-table tbody tr.row-owner:hover td {
+    background: rgba(0, 229, 255, 0.13);
+}
+.users-table tbody tr.row-owner td.td-name {
+    color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* ── Status badges ── */
