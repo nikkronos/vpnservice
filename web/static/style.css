@@ -32,7 +32,7 @@ body {
 
 /* ── Container ── */
 .container {
-    max-width: 1080px;
+    max-width: 1320px;
     margin: 0 auto;
 }
 
@@ -239,7 +239,14 @@ header {
     border-top: 1px solid var(--border2);
 }
 .services-counts .status-item { gap: 6px; }
-.dash-top .activity-section { margin-bottom: 0; }
+/* Правая колонка: два ряда карточек (Активность + Сводка), стопкой */
+.dash-main {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-width: 0;
+}
+.dash-main .activity-section { margin-bottom: 0; }
 
 .section-header {
     display: flex;
