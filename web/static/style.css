@@ -215,20 +215,23 @@ header {
     display: grid;
     grid-template-columns: 240px 1fr;
     gap: 20px;
-    align-items: start;
+    align-items: stretch;
     margin-bottom: 28px;
 }
 .services-panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 14px 16px;
+    padding: 16px 16px;
+    display: flex;
+    flex-direction: column;
 }
-.services-panel .section-header { margin-bottom: 12px; }
 .services-list {
     display: flex;
     flex-direction: column;
     gap: 11px;
+    flex: 1;
+    justify-content: space-between;
 }
 .services-list .status-item { font-size: 0.86em; }
 .services-counts {

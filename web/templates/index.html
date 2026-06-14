@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPN Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260614b">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260614c">
 </head>
 <body>
     <div class="container">
@@ -22,7 +22,6 @@
         <!-- Верх: сервисы слева + два ряда карточек справа -->
         <div class="dash-top">
             <aside class="services-panel">
-                <div class="section-header"><h2>Сервисы</h2></div>
                 <div id="status-services" class="services-list">
                     <div class="status-item"><span class="status-dot dot-unknown"></span><span>загрузка…</span></div>
                 </div>
@@ -31,7 +30,6 @@
             <div class="dash-main">
                 <!-- Блок 1: активность -->
                 <section class="activity-section">
-                    <div class="section-header"><h2>Активность</h2></div>
                     <div class="activity-grid">
                         <div class="activity-card">
                             <span class="activity-num" id="act-24h">—</span>
@@ -66,7 +64,6 @@
 
                 <!-- Блок 2: сводка по аккаунтам -->
                 <section class="activity-section">
-                    <div class="section-header"><h2>Сводка</h2></div>
                     <div class="activity-grid">
                         <div class="activity-card">
                             <span class="activity-num" id="stat-users">—</span>
