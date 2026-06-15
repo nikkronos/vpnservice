@@ -126,7 +126,7 @@
 ## ⏸ Ожидание (нужен тест на реальном устройстве при БС)
 
 - **MTProxy — revival после волны РКН** (06-05). Fake-TLS задавлен ТСПУ на уровне протокола (исчерпали домен/IP/порт чистым тестом). Единственный непроверенный рычаг — порт 443 (занят REALITY, не роняем). eu1-прокси жив (`swcdn.apple.com`), бот редиректит на «Подключить VPN». Перепроверить если вернётся. Память `project_vpn_mtproxy_rkn_block`.
-- **Мегафон при белых списках** (05-22). Whitelist Мегафон ≠ Yota; наш main IP whitelisted у Yota, не у Мегафон (timeout). Нужна разведка через Мегафон-друга при БС (IP-пробы разных РФ-облаков). Кандидаты: Mail.ru Cloud, VK Cloud, Selectel, Sber Cloud. Архив гипотез: `docs/archive/yandex-cdn-xhttp-postmortem.md`.
+- **Мегафон при белых списках** (05-22). Whitelist Мегафон ≠ Yota; наш main IP whitelisted у Yota, не у Мегафон (timeout). Нужна разведка через Мегафон-друга при БС (IP-пробы разных РФ-облаков). Кандидаты: Mail.ru Cloud, VK Cloud, Selectel, Sber Cloud **+ CDNVIDEO и Beeline-подсети** (лид 06-15: публичный агрегатор `igareck/vpn-configs-for-russia` обходит whitelist CIDR-конфигами именно через эти РФ-подсети — `docs/competitors-analysis.md`). Архив гипотез: `docs/archive/yandex-cdn-xhttp-postmortem.md`.
 - **«Волна» (Крым)** (05-28, Unatham). Обход БС не работает (whitelist отдельный). Нужен живой тест: дать vless main+yc, подобрать SNI/relay. Даёт канал в Крыму (у конкурентов вряд ли покрыт).
 
 ---
