@@ -68,7 +68,7 @@ async function loadStats() {
             const el = document.getElementById(id);
             if (el) el.textContent = (val === null || val === undefined) ? '—' : val;
         };
-        set('stat-users', d.active_users);
+        set('stat-users', d.tg_users != null ? d.tg_users : d.active_users);
         set('stat-peers', d.active_peers);
         set('act-24h', d.active_24h);
         set('act-7d', d.active_7d);

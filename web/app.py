@@ -978,6 +978,10 @@ def api_stats():
         # Email-verified
         email_verified = sum(1 for u in db_users if u.get("email_verified"))
 
+        # Реальные юзеры = с привязанным telegram_id (как в таблице /api/traffic).
+        # Без этого карточка считала и email-only заготовки без Telegram (61 vs 58).
+        tg_users = sum(1 for u in db_users if u.get("telegram_id"))
+
         # MTProxy: пользователей нажимавших за 30 дней
         proxy_requests_30d = 0
         for u in db_users:
@@ -1016,6 +1020,7 @@ def api_stats():
         return jsonify({
             "total_users": len(users),
             "active_users": len(active_users),
+            "tg_users": tg_users,
             "active_paid": sub_split.get("active_paid"),
             "active_trial": sub_split.get("active_trial"),
             "expired_subs": sub_split.get("expired"),
