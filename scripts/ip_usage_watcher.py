@@ -33,7 +33,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 PARSE_WINDOW = "11 minutes ago"  # cron */10 + 1 мин overlap
 RETENTION_HOURS = 48
 REPORT_WINDOWS = (15, 60, 1440)  # минуты для distinct-IP отчёта
-ALERT_DISTINCT_15M = 8           # явный шеринг для лога/отчёта (НЕ enforcement)
+ALERT_DISTINCT_15M = 4           # ≥4 distinct /24 за 15м — кандидат на шеринг (observe-only, НЕ enforcement)
 
 SSH_OPTS = ["-o", "ConnectTimeout=8", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"]
 # server_id -> (ssh_argv|None локально, sudo-префикс)
@@ -48,9 +48,29 @@ LINE_RE = re.compile(r"from (\S+):\d+ accepted .*?email: tid_(\d+)@kronos")
 
 
 def norm_ip(ip: str) -> str:
+    ip = ip.strip()
+    # Xray иногда логирует network-префикс: "tcp:1.2.3.4", "udp:[2a00::1]".
+    # Без среза IPv4 с префиксом ошибочно уходил в IPv6-ветку → "tcp:1.2.3.4::/64",
+    # и тот же IP без префикса считался отдельно (двойной счёт). Срезаем префикс.
+    low = ip.lower()
+    for pref in ("tcp:", "udp:", "tcp4:", "tcp6:", "udp4:", "udp6:"):
+        if low.startswith(pref):
+            ip = ip[len(pref):]
+            break
     ip = ip.strip("[]")
     if ":" in ip:  # IPv6 → /64 (приватные адреса в /64 крутятся — один девайс)
         return ":".join(ip.split(":")[:4]) + "::/64"
+    return ip
+
+
+def net_key(ip: str) -> str:
+    """Группировка для distinct-«локаций»: IPv4 → /24 (мобильный churn в пуле =
+    одна локация), IPv6 уже /64 в norm_ip. Цель — считать реальные сети, не 4G-хендоверы."""
+    if ":" in ip or ip.endswith("/64"):
+        return ip  # IPv6 (уже /64)
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3]) + ".0/24"
     return ip
 
 
@@ -110,21 +130,25 @@ def record(entries: List[Tuple[int, str, str]]) -> int:
 def report() -> None:
     from bot.database import _conn, _ensure_init
     _ensure_init()
-    print("distinct IP на юзера (окна по last_seen):")
+    print("distinct сетей (/24 IPv4, /64 IPv6) на юзера — окна по last_seen:")
     with _conn() as con:
         for w in REPORT_WINDOWS:
             rows = con.execute(
-                "SELECT telegram_id, COUNT(DISTINCT ip) AS d FROM ip_usage "
-                "WHERE last_seen > datetime('now', ?) GROUP BY telegram_id "
-                "HAVING d > 1 ORDER BY d DESC LIMIT 15",
+                "SELECT telegram_id, ip FROM ip_usage WHERE last_seen > datetime('now', ?)",
                 (f"-{w} minutes",),
             ).fetchall()
+            nets: Dict[int, Set[str]] = defaultdict(set)
+            for r in rows:
+                nets[r["telegram_id"]].add(net_key(r["ip"]))
+            ranked = sorted(((tid, len(s)) for tid, s in nets.items() if len(s) > 1),
+                            key=lambda x: -x[1])
             label = f"{w}м" if w < 1440 else "24ч"
-            top = ", ".join(f"{r['telegram_id']}:{r['d']}" for r in rows[:15]) or "—"
-            flagged = [r["telegram_id"] for r in rows if w == 15 and r["d"] >= ALERT_DISTINCT_15M]
-            print(f"  [{label}] >1 IP: {len(rows)} юзеров; топ: {top}")
-            if flagged:
-                print(f"      ⚠ ≥{ALERT_DISTINCT_15M} IP/15м (кандидаты на шеринг): {flagged}")
+            top = ", ".join(f"{tid}:{d}" for tid, d in ranked[:15]) or "—"
+            print(f"  [{label}] >1 сети: {len(ranked)} юзеров; топ: {top}")
+            if w == 15:
+                flagged = [tid for tid, d in ranked if d >= ALERT_DISTINCT_15M]
+                if flagged:
+                    print(f"      ⚠ ≥{ALERT_DISTINCT_15M} сетей/15м (кандидаты на шеринг): {flagged}")
         total = con.execute("SELECT COUNT(*) FROM ip_usage").fetchone()[0]
         print(f"  всего строк в ip_usage: {total}")
 
