@@ -122,6 +122,8 @@
 - `logrotate` `/etc/logrotate.d/xray` на 4 (daily / maxsize 100M / rotate 3 / copytruncate).
 - **Эффект:** eu1 journald ~700/мин → ~1/мин; watcher работает из файлов (yc/yc2 события идут). Бэкапы конфигов `*.bak.logfile.*` на серверах.
 
+**uptime (C):** UptimeRobot HTTP-монитор `supportkronos.online:8443` + email-алерт (free) — закрыта дыра «упал сам Fornex → health-check не алертит». Telegram у UptimeRobot платный → отклонён; Healthchecks (free TG) предложен → владельца устраивает текущее (email). Status-page публичную можно удалить/запаролить (маскировка).
+
 ## 2026-06-15 — eu1 переведён на per-user-only (фрод-зона закрыта)
 
 Завершение задачи «eu1-shared» после 6-дневного liveness-аудита (вердикт пришёл в TG 06-15: 9 shared — нулевой трафик, мертвы).
