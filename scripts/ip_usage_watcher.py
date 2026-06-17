@@ -30,7 +30,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-PARSE_WINDOW = "11 minutes ago"  # cron */10 + 1 мин overlap
+ACCESS_LOG = "/var/log/xray/access.log"  # Xray пишет access сюда (не journald) с 2026-06-17
+WINDOW_MIN = 11                  # окно парсинга access-лога (cron */10 + 1 мин overlap)
 RETENTION_HOURS = 48
 REPORT_WINDOWS = (15, 60, 1440)  # минуты для distinct-IP отчёта
 ALERT_DISTINCT_15M = 4           # ≥4 distinct /24 за 15м — кандидат на шеринг (observe-only, НЕ enforcement)
@@ -76,8 +77,14 @@ def net_key(ip: str) -> str:
 
 def fetch_log_lines(server_id: str) -> List[str]:
     ssh_argv, sudo = ENTRY_SERVERS[server_id]
-    remote = (f"{sudo}journalctl -u xray --since '{PARSE_WINDOW}' --no-pager "
-              f"| grep -E 'accepted .*email: tid_'")
+    # Читаем access-лог Xray из ФАЙЛА (с 2026-06-17; раньше journalctl — убрали спам).
+    # Окно: cutoff считаем на самом хосте через `date` (TZ-корректно: main=MSK, прочие=UTC),
+    # сравнение строкой в awk (формат ts фикс-ширины сортируется; работает в mawk без mktime).
+    remote = (
+        f"CUT=$(date -d '{WINDOW_MIN} minutes ago' '+%Y/%m/%d %H:%M:%S'); "
+        f"{sudo}awk -v c=\"$CUT\" 'substr($0,1,19) >= c' {ACCESS_LOG} 2>/dev/null "
+        f"| grep -E 'accepted .*email: tid_'"
+    )
     try:
         if ssh_argv is None:
             r = subprocess.run(["sh", "-c", remote], capture_output=True, text=True, timeout=30)
@@ -163,7 +170,7 @@ def main() -> int:
         report()
         return 0
 
-    print(f"Сбор IP↔юзер за окно '{PARSE_WINDOW}' со всех входов:")
+    print(f"Сбор IP↔юзер за окно {WINDOW_MIN} мин (access-лог файлы) со всех входов:")
     entries = parse_entries()
     uniq_tids = len({t for t, _, _ in entries})
     uniq_ips = len({i for _, i, _ in entries})
