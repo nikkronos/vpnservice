@@ -43,6 +43,7 @@ OneDrive сдвигает mtime). В архив — только после ≥7
 
 ### Стратегия обхода / Telegram
 - `blocking-bypass-strategy.md` — стратегия обхода блокировок.
+- `plan-b-rkn-response-runbook.md` — **runbook реакции на удар РКН** по IP/SNI (диагностика + рычаги + команды).
 - `telegram-mtproxy-operators-guide.md` — **канон** по MTProxy и операторам.
 - `telegram-proxy-alternatives.md` — сторонние альтернативы (park-lot, **не наш стек**).
 
