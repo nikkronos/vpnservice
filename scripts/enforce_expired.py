@@ -101,6 +101,65 @@ def find_revoke_candidates() -> List[Dict]:
     return candidates
 
 
+def find_data_cap_candidates() -> List[Dict]:
+    """
+    Триал-юзеры, превысившие лимит данных (total − baseline ≥ TRIAL_DATA_LIMIT_BYTES).
+    Только АКТИВНЫЕ триалы (plan='trial', expires_at в будущем) с baseline IS NOT NULL
+    (новые триалы; старые до фичи грандфазерятся). Кандидат — если есть active eu1 peer
+    ИЛИ sub_token (есть что отзывать). Тот же soft-revoke, что по сроку, + закрытие гейта.
+    """
+    from bot.database import _conn, _ensure_init, db_get_user_total_bytes
+    from bot.storage import get_all_peers
+    from bot.tariffs import TRIAL_DATA_LIMIT_BYTES
+
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT telegram_id, username, email, expires_at, subscription_status,
+                   sub_token, trial_used, trial_data_baseline
+            FROM users
+            WHERE telegram_id IS NOT NULL
+              AND plan = 'trial'
+              AND trial_data_baseline IS NOT NULL
+              AND expires_at IS NOT NULL
+              AND datetime(expires_at) > datetime('now')
+            """
+        ).fetchall()
+
+    peers_by_uid: Dict[int, List] = {}
+    for peer in get_all_peers():
+        if peer.server_id != "eu1" or not peer.active:
+            continue
+        peers_by_uid.setdefault(peer.telegram_id, []).append(peer)
+
+    candidates: List[Dict] = []
+    for r in rows:
+        tid = int(r["telegram_id"])
+        baseline = int(r["trial_data_baseline"] or 0)
+        used = db_get_user_total_bytes(tid) - baseline
+        if used < TRIAL_DATA_LIMIT_BYTES:
+            continue
+        user_peers = peers_by_uid.get(tid, [])
+        if not user_peers and not r["sub_token"]:
+            continue  # нечего отзывать — доступа уже нет
+        candidates.append({
+            "telegram_id": tid,
+            "username": r["username"],
+            "email": r["email"],
+            "expires_at": r["expires_at"],
+            "subscription_status": r["subscription_status"],
+            "trial_used": bool(r["trial_used"]),
+            "sub_token": r["sub_token"],
+            "used_bytes": used,
+            "peers": [
+                {"platform": p.platform, "wg_ip": p.wg_ip, "public_key": p.public_key}
+                for p in user_peers
+            ],
+        })
+    return candidates
+
+
 def _print_dry_run_report(candidates: List[Dict]) -> None:
     """Читаемый отчёт для проверки владельцем перед --apply."""
     print("=" * 78)
@@ -164,19 +223,29 @@ def _print_dry_run_report(candidates: List[Dict]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Отзыв доступа для истёкших подписок (Soft-revoke)")
     parser.add_argument("--apply", action="store_true", help="Реально отозвать (default — dry-run)")
+    parser.add_argument("--data-cap", action="store_true",
+                        help="Режим лимита трафика триала (вместо срока подписки)")
     args = parser.parse_args()
 
-    candidates = find_revoke_candidates()
+    reason = "data" if args.data_cap else "time"
+    candidates = find_data_cap_candidates() if args.data_cap else find_revoke_candidates()
 
     if not args.apply:
+        if args.data_cap:
+            print(f"DATA-CAP DRY RUN — кандидатов на блок (>20ГБ триала): {len(candidates)}")
+            for c in candidates:
+                print(f"  • {_fmt_user(c['username'], c['telegram_id'])} tid={c['telegram_id']} "
+                      f"исп.={c.get('used_bytes', 0) / 1073741824:.1f} ГБ "
+                      f"peers={len(c['peers'])} sub_token={'да' if c.get('sub_token') else 'нет'}")
+            return 0
         _print_dry_run_report(candidates)
         return 0
 
     # === Production режим: реальный отзыв ===
-    return _apply_revocations(candidates)
+    return _apply_revocations(candidates, reason=reason)
 
 
-def _apply_revocations(candidates: List[Dict]) -> int:
+def _apply_revocations(candidates: List[Dict], reason: str = "time") -> int:
     """
     Выполняет реальный отзыв доступа для каждого кандидата.
     Soft-revoke: peer-credentials в peers.json остаются (active=false) для
@@ -187,7 +256,7 @@ def _apply_revocations(candidates: List[Dict]) -> int:
       2. db_clear_sub_token(tid) — VLESS subscription URL отдаст пустую
       3. TG-уведомление юзеру (best-effort, не падаем если не дошло)
     """
-    from bot.database import db_clear_sub_token, db_find_user_by_telegram_id
+    from bot.database import db_clear_sub_token, db_find_user_by_telegram_id, _conn
     from bot.storage import Peer, upsert_peer
     from bot.wireguard_peers import revoke_amneziawg_peer_soft
     from bot.config import load_config
@@ -198,15 +267,23 @@ def _apply_revocations(candidates: List[Dict]) -> int:
         print("Кандидатов нет — ничего не делаем.")
         return 0
 
-    print(f"=== APPLY REVOCATIONS — {len(candidates)} юзер(ов) ===\n")
+    print(f"=== APPLY REVOCATIONS ({reason}) — {len(candidates)} юзер(ов) ===\n")
 
     cfg = load_config()
     bot_token = getattr(cfg, "bot_token", None) if cfg else None
-    notify_user_text = (
-        "⚠ <b>Срок подписки истёк более 12 ч назад.</b>\n\n"
-        "Доступ временно отозван. Продли подписку — доступ восстановится автоматически, "
-        "твой существующий конфиг снова заработает."
-    )
+    if reason == "data":
+        from bot.tariffs import TRIAL_DATA_LIMIT_GB
+        notify_user_text = (
+            f"⚠ <b>Лимит бесплатного триала исчерпан ({TRIAL_DATA_LIMIT_GB} ГБ).</b>\n\n"
+            "Доступ приостановлен. Оформи подписку — доступ откроется сразу, "
+            "твой существующий конфиг снова заработает."
+        )
+    else:
+        notify_user_text = (
+            "⚠ <b>Срок подписки истёк более 12 ч назад.</b>\n\n"
+            "Доступ временно отозван. Продли подписку — доступ восстановится автоматически, "
+            "твой существующий конфиг снова заработает."
+        )
 
     revoked_count = 0
     failed_count = 0
@@ -245,6 +322,20 @@ def _apply_revocations(candidates: List[Dict]) -> int:
             except Exception as e:
                 print(f"    [FAIL] clear sub_token — {e}")
 
+        # 2b. data-cap: закрываем гейт доступа (иначе юзер пере-запросит конфиг и
+        #     обойдёт лимит). Триал завершён; оплата вернёт доступ (plan станет платным).
+        if reason == "data":
+            try:
+                with _conn() as con:
+                    con.execute(
+                        "UPDATE users SET expires_at = datetime('now'), "
+                        "subscription_status = 'data_capped' WHERE telegram_id = ?",
+                        (tid,),
+                    )
+                print(f"    [OK] access gate closed (expires_at=now, status=data_capped)")
+            except Exception as e:
+                print(f"    [FAIL] close access gate — {e}")
+
         # 3. TG-уведомление юзеру (best-effort через прямой Bot API)
         if bot_token:
             try:
@@ -280,12 +371,20 @@ def _apply_revocations(candidates: List[Dict]) -> int:
         admin_id = getattr(cfg, "admin_id", None) if cfg else None
         if admin_id:
             try:
-                user_list = "\n".join(
-                    f"  • {_fmt_user(c['username'], c['telegram_id'])} (истёк {c['expires_at']})"
-                    for c in candidates
-                )[:1500]
+                if reason == "data":
+                    user_list = "\n".join(
+                        f"  • {_fmt_user(c['username'], c['telegram_id'])} (исп. {c.get('used_bytes', 0) // 1073741824} ГБ)"
+                        for c in candidates
+                    )[:1500]
+                    _hdr = "🔒 <b>enforce: блок триала по лимиту 20ГБ</b>"
+                else:
+                    user_list = "\n".join(
+                        f"  • {_fmt_user(c['username'], c['telegram_id'])} (истёк {c['expires_at']})"
+                        for c in candidates
+                    )[:1500]
+                    _hdr = "🔒 <b>enforce_expired: отзыв доступа (срок)</b>"
                 owner_text = (
-                    f"🔒 <b>enforce_expired: отзыв доступа</b>\n\n"
+                    f"{_hdr}\n\n"
                     f"Отозвано peer'ов: {revoked_count}\n"
                     f"Ошибок: {failed_count}\n\n"
                     f"Юзеры:\n{user_list}\n\n"
