@@ -78,6 +78,7 @@
 **Whitelist-обход (жёсткий БС).** План Б (реакция на удар по IP/SNI) готов: `docs/plan-b-rkn-response-runbook.md` + `scripts/bootstrap-relay-node.sh` + вётнутый запасной SNI ya.ru (DONE_LIST 06-17) — но это про **мягкую** фильтрацию, whitelist им НЕ покрыт.
 - **БС — два режима (не путать):** 🟢 *мягкая фильтрация* (IP-репутация) — Яндекс выживает, сервис работает (06-13 у Ани yc подняла доступ); 🔴 *жёсткий whitelist* (06-19 у Ани «включили БС») — ни прокси, ни один сервер не поднялись, наши IP не в белом списке; Яндекс тут НЕ спасает. Память `project_vpn_rkn_ip_block`.
 - **Механизм пробоя (igareck):** endpoint в whitelisted-CIDR (VK/Yandex/CDNvideo/Beeline) + VLESS+REALITY+xhttp. ⚠ наивный «VPS в облаке» прикрыт в 2026 (регулятор заставил разделить AS). Источники: habr 1021160, anti-malware 2026-01-26.
+- **Кандидат №1 — `vk-turn-proxy`** (github `cacggghp/vk-turn-proxy`, найден 06-21): туннель WG/Hysteria через **whitelisted VK-TURN** (DTLS+STUN ChannelData → VK-релей → наш VPS). Перспективнее CIDR-сквоттинга (бьёт по реальной whitelisted-инфре VK = высокий коллатерал), НО **отдельный стек** (не VLESS/REALITY — новый контур, как AmneziaWG) + гонка (Яндекс-Телемост-аналог уже закрыли) + нужны VK-call креды. Сравнить с igareck когда дойдём (после БС-теста Ани).
 - **План:** Аня тестит igareck white-list subscription на своей БС → сработавший сервер = цель аренды → ставим наш REALITY через bootstrap. Гонка → нужна ротация. **Диагностика жёсткой БС:** что открывается без VPN = содержимое whitelist.
 
 **Ожидание (тест при БС):**
