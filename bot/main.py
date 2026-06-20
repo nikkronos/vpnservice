@@ -233,7 +233,9 @@ def main() -> None:
         """Отправляет ответ; при ошибке логирует и возвращает False.
         Если reply_markup не задан, автоматически использует _back_markup из message (если есть).
         """
-        effective_markup = reply_markup or getattr(message, "_back_markup", None)
+        # Если явный markup не задан и нет _back_markup (callback-путь) — всё равно
+        # даём «Главное меню», чтобы у typed-команд (/status, /proxy и т.п.) не было тупика.
+        effective_markup = reply_markup or getattr(message, "_back_markup", None) or _back_to_menu_markup()
         try:
             bot.reply_to(message, text, reply_markup=effective_markup)
             return True
