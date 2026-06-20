@@ -9,6 +9,7 @@
 ## Оглавление
 
 **2026-06**
+- 2026-06-20 — Клиент → только Happ (убран V2Box) + старт whitelist-обхода (тест у Ани)
 - 2026-06-17 — План Б Фаза A (runbook + bootstrap + вёттинг SNI ya.ru) + ревизия трат серверов
 - 2026-06-17 — iplimit Stage 2 (калибровка: шеринга нет) + journald-спам устранён
 - 2026-06-15 — eu1 → per-user-only (фрод-зона закрыта, 9 shared удалены)
@@ -110,6 +111,14 @@
 - 2026-02-09 — Базовая структура + первая WireGuard-нода
 
 ---
+
+## 2026-06-20 — Клиент стандартизирован на Happ (убран V2Box) + старт whitelist-обхода
+
+**Клиент → только Happ во всех инструкциях (инцидент 06-19: V2Box не поднял подписку, Happ поднял; Москва, МТС).**
+- Причина: наш транспорт VLESS+REALITY+**xhttp (packet-up)** тянут не все клиенты; Happ — референс. Happ сделан единственным рекомендованным: бот-тексты (ios/android/pc/windows + vless_reality/cdn/reality_other), подпись «Подключить VPN» в `bot/main.py`, ЛК `recovery.js`, CLAUDE.md. Убраны V2Box + меню из 3 клиентов. URL `happ.su`. Деплой (scp + restart vpn-bot → active, журнал чист), смоук владельцем ок. Коммит `2258455`. Память `project_vpn_client_happ_reference`.
+
+**Whitelist-обход (жёсткий БС) — расследование начато.**
+- Механизм (igareck): endpoint в **whitelisted-CIDR** (VK/Yandex/CDNvideo/Beeline) + VLESS+REALITY+xhttp (протокол у нас уже есть). Наивный «VPS в облаке» прикрыт в 2026 (регулятор: AS-разделение, YC-VM режется). Тест-перед-покупкой: Ане выдан igareck white-list subscription → проверит на своей БС; рабочий сервер = цель аренды. Детали — ROADMAP (БС-пункт), память `project_vpn_rkn_ip_block` (два режима БС).
 
 ## 2026-06-17 — План Б (Фаза A): runbook + bootstrap + вёттинг SNI + ревизия трат серверов
 
