@@ -495,7 +495,7 @@ def admin_panel():
         
         # Статистика
         active_peers = [p for p in peers if p.active]
-        active_users = [u for u in users if u.active]
+        active_users = [u for u in users if u.active and u.telegram_id]
         
         # Группировка по серверам
         by_server: Dict[str, int] = {}
@@ -524,7 +524,7 @@ def admin_panel():
             })
         
         stats = {
-            "total_users": len(users),
+            "total_users": sum(1 for u in users if u.telegram_id),
             "active_users": len(active_users),
             "total_peers": len(peers),
             "active_peers": len(active_peers),
@@ -912,7 +912,7 @@ def api_stats():
         db_users = db_get_all_users()
 
         active_peers = [p for p in peers if p.active]
-        active_users = [u for u in users if u.active]
+        active_users = [u for u in users if u.active and u.telegram_id]
 
         by_server: Dict[str, int] = {}
         for peer in active_peers:
@@ -1018,7 +1018,7 @@ def api_stats():
             sub_split = {"active_paid": None, "active_trial": None, "expired": None}
 
         return jsonify({
-            "total_users": len(users),
+            "total_users": tg_users,
             "active_users": len(active_users),
             "tg_users": tg_users,
             "active_paid": sub_split.get("active_paid"),
