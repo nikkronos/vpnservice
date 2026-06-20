@@ -3581,7 +3581,7 @@ def main() -> None:
 
         caption = (
             "🔗 <b>Подключить VPN — одна ссылка</b>\n\n"
-            "Импортируй в <b>HAPP / Streisand / V2Box / Hiddify</b>: «+» → по ссылке или из буфера. "
+            "Импортируй в <b>Happ</b> (happ.su): «+» → по ссылке или из буфера. "
             "Приложение само выберет рабочий сервер и подтянет обновления."
         )
         markup = types.InlineKeyboardMarkup(row_width=1)

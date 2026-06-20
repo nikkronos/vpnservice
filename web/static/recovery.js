@@ -400,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
         t.textContent = '🔗 Подключить VPN.';
         const note = document.createElement('p');
         note.className = 'section-hint';
-        note.textContent = 'Одна ссылка для всех устройств. Импортируй в HAPP (или Streisand / V2Box / Hiddify): «+» → по ссылке или из буфера обмена. Приложение само выберет рабочий сервер и подтянет обновления.';
+        note.textContent = 'Одна ссылка для всех устройств. Импортируй в Happ (happ.su): «+» → по ссылке или из буфера обмена. Приложение само выберет рабочий сервер и подтянет обновления.';
         subBlock.appendChild(t);
         subBlock.appendChild(note);
         // Дополнительный пробел над QR для воздуха
@@ -1502,8 +1502,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inst.className = 'section-hint';
         inst.innerHTML = (
           'Скопируй <code>vless://</code>... целиком.<br>' +
-          '<b>Android:</b> v2rayNG или Hiddify → «+» → «Импорт из буфера».<br>' +
-          '<b>iOS:</b> Streisand, FoXray, V2Box или Hiddify — импорт ссылки.'
+          'Импортируй в <b>Happ</b> (happ.su): «+» → «Импорт из буфера».'
         );
         mobileResult.appendChild(inst);
 

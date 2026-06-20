@@ -2,7 +2,5 @@
 
 <b>Шаги:</b>
 1. Бот пришлёт ссылку <code>vless://...</code> вторым сообщением — скопируй её целиком.
-2. Установи любое приложение с поддержкой VLESS:
-   • iOS: <b>Streisand</b>, <b>Happ</b> или <b>V2Box</b> (App Store)
-   • Android: <b>Happ</b>, <b>Hiddify</b> или <b>v2rayNG</b> (Google Play)
+2. Установи <b>Happ</b> (iOS — App Store, Android — Google Play, ПК — <a href="https://happ.su/">happ.su</a>).
 3. В приложении: «+» → «Импорт из буфера» → вставь ссылку → подключись.
