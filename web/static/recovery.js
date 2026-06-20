@@ -358,6 +358,14 @@ document.addEventListener('DOMContentLoaded', () => {
       accountStatus.appendChild(s);
     }
 
+    // Остаток данных триала (если триал под лимитом 20 ГБ).
+    if (d.trial_data) {
+      const td = d.trial_data;
+      const dl = document.createElement('div'); dl.className = 'acc-sub';
+      dl.textContent = `📦 Данные: ${td.used_gb} / ${td.limit_gb} ГБ (осталось ${td.remaining_gb} ГБ)`;
+      accountStatus.appendChild(dl);
+    }
+
     // Inline «Продлить» — когда срок поджимает или истёк (не показываем grandfather).
     if (!d.grandfathered && (d.days_left || 0) <= 3) {
       const renewBtn = document.createElement('button');

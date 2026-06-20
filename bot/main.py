@@ -26,6 +26,7 @@ from .database import (
     db_set_use_case,
     db_get_use_case,
     db_is_test_used,
+    db_get_trial_data_status,
     db_mark_test_used,
     db_users_by_segment,
     db_set_drop_reason,
@@ -2487,7 +2488,17 @@ def main() -> None:
                     f"Нажми «💳 Продлить подписку» в меню."
                 )
 
-        status_text = f"{sub_line}\n\n🌍 <b>Сервер:</b> Германия"
+        data_line = ""
+        try:
+            tds = db_get_trial_data_status(tid)
+            if tds:
+                data_line = (
+                    f"\n📦 <b>Данные триала:</b> {tds['used_gb']} / {tds['limit_gb']} ГБ "
+                    f"(осталось {tds['remaining_gb']} ГБ)"
+                )
+        except Exception as e:
+            logger.debug("trial data status failed: %s", e)
+        status_text = f"{sub_line}{data_line}\n\n🌍 <b>Сервер:</b> Германия"
         safe_reply(message, status_text)
 
     @bot.message_handler(commands=["lk"])

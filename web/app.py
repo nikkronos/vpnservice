@@ -53,6 +53,7 @@ from bot.database import (
     db_find_user_by_email,
     db_upsert_user,
     db_get_effective_telegram_id,
+    db_get_trial_data_status,
     db_get_all_users,
     db_count_subscription_split,
     db_accumulate_traffic,
@@ -1511,6 +1512,7 @@ def api_account_info():
             "subscription_days": SUBSCRIPTION_DAYS_PER_PAYMENT,
             "device_limit": db_get_device_limit(telegram_id),
             "test_used": db_is_test_used(telegram_id),  # разовый тест 49₽/7д уже использован?
+            "trial_data": db_get_trial_data_status(telegram_id),  # {used_gb, limit_gb, remaining_gb} или None (не триал-под-кэпом)
             # Тарифная сетка (единый источник bot/tariffs) — ЛК рендерит из неё,
             # цены на клиенте не хардкодим.
             "tariffs": [

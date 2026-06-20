@@ -1041,6 +1041,29 @@ def db_get_user_total_bytes(telegram_id: int) -> int:
     return int(awg or 0) + int(vless or 0)
 
 
+def db_get_trial_data_status(telegram_id: int) -> Optional[Dict]:
+    """Статус лимита данных триала для юзера. None — если НЕ триал-под-кэпом
+    (платный / старый триал без baseline / grandfather). Иначе dict с used/limit/remaining."""
+    from .tariffs import TRIAL_DATA_LIMIT_BYTES, TRIAL_DATA_LIMIT_GB
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT plan, trial_data_baseline FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+    if not row or row["plan"] != "trial" or row["trial_data_baseline"] is None:
+        return None
+    baseline = int(row["trial_data_baseline"])
+    used = max(0, db_get_user_total_bytes(telegram_id) - baseline)
+    return {
+        "used_bytes": used,
+        "limit_bytes": TRIAL_DATA_LIMIT_BYTES,
+        "limit_gb": TRIAL_DATA_LIMIT_GB,
+        "used_gb": round(used / 1073741824.0, 1),
+        "remaining_gb": round(max(0, TRIAL_DATA_LIMIT_BYTES - used) / 1073741824.0, 1),
+    }
+
+
 # ─── Peers (VPN-слоты) ──────────────────────────────────────────────────────────
 # Источник правды для WG/AmneziaWG peers (раньше — bot/data/peers.json).
 # Нормализация server_id/platform делается в storage.py перед вызовом этих
