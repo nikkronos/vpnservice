@@ -599,8 +599,7 @@ def main() -> None:
                 parse_mode="HTML",
             )
             _send_subscription(call.message.chat.id, tid)  # сразу выдаём подписку (Happ), не оставляем в меню
-        if not _maybe_ask_use_case(call.message.chat.id, tid):
-            _send_main_menu_for_tid(call.message.chat.id, tid)
+        _send_main_menu_for_tid(call.message.chat.id, tid)
 
     @bot.callback_query_handler(func=lambda call: call.data == "onb_trial_skip")
     def callback_onb_trial_skip(call: types.CallbackQuery) -> None:  # type: ignore[override]
@@ -625,8 +624,7 @@ def main() -> None:
             f"⏭ Триал не активирован. Можешь активировать его в любой момент через меню → «🎁 Активировать {tariffs.TRIAL_DAYS} дней».",
         )
         # Вопрос-сегментацию задаём и при пропуске триала (не только при активации).
-        if not _maybe_ask_use_case(call.message.chat.id, tid):
-            _send_main_menu_for_tid(call.message.chat.id, tid)
+        _send_main_menu_for_tid(call.message.chat.id, tid)
 
     # Кнопка активации триала из главного меню бота (если триал доступен).
     @bot.callback_query_handler(func=lambda call: call.data == "menu_trial_activate")
@@ -647,8 +645,6 @@ def main() -> None:
                 parse_mode="HTML",
             )
             _send_subscription(call.message.chat.id, tid)  # сразу выдаём подписку (Happ), не оставляем в меню
-            if _maybe_ask_use_case(call.message.chat.id, tid):
-                return
         else:
             bot.send_message(
                 call.message.chat.id,
