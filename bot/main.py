@@ -596,6 +596,7 @@ def main() -> None:
                 f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
                 parse_mode="HTML",
             )
+            _send_subscription(call.message.chat.id, tid)  # сразу выдаём подписку (Happ), не оставляем в меню
         if not _maybe_ask_use_case(call.message.chat.id, tid):
             _send_main_menu_for_tid(call.message.chat.id, tid)
 
@@ -643,6 +644,7 @@ def main() -> None:
                 f"🎁 Триал активирован. Подписка активна до <b>{exp_str}</b>.",
                 parse_mode="HTML",
             )
+            _send_subscription(call.message.chat.id, tid)  # сразу выдаём подписку (Happ), не оставляем в меню
             if _maybe_ask_use_case(call.message.chat.id, tid):
                 return
         else:
@@ -1722,6 +1724,8 @@ def main() -> None:
         if call.from_user:
             _email_link_state.pop(call.from_user.id, None)
         bot.send_message(call.message.chat.id, "Отменено.")
+        if call.from_user:
+            _send_main_menu_for_tid(call.message.chat.id, call.from_user.id)
 
     @bot.message_handler(
         func=lambda msg: msg.from_user is not None and msg.from_user.id in _email_link_state
@@ -2359,7 +2363,7 @@ def main() -> None:
         _pending_credit_user.discard(message.from_user.id)
         raw = (message.text or "").strip()
         if raw.lower() in ("отмена", "cancel", "/cancel"):
-            safe_reply(message, "Отменено.")
+            safe_reply(message, "Отменено.", reply_markup=_back_to_menu_markup())
             return
         parts = raw.split(maxsplit=2)
         if len(parts) < 2:
@@ -2500,6 +2504,7 @@ def main() -> None:
                 web_app=types.WebAppInfo(url=recovery_url),
             ),
         )
+        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         safe_reply(
             message,
             "🌐 Личный кабинет VPN Kronos — нажми кнопку ниже, чтобы открыть.",
@@ -3264,6 +3269,7 @@ def main() -> None:
             logger.info("Stars payment: tid=%s days=%s new_exp=%s charge=%s", tid, days, new_exp, charge_id)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
+            _send_subscription(message.chat.id, tid)  # выдать подписку — платящий сразу получает подключение
 
             # Реферал-бонус (если есть и ещё не выплачен)
             inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
@@ -3382,6 +3388,7 @@ def main() -> None:
                     logger.warning("db_mark_test_used (claim) failed for %s: %s", tid, e)
             # Auto-restore revoked peers (enforcement gap hook).
             _restore_and_notify(tid)
+            _send_subscription(tid, tid)  # выдать подписку юзеру (claim-оплата → сразу подключение)
             inviter_tid = None
             try:
                 inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
@@ -3546,6 +3553,50 @@ def main() -> None:
             pass
 
     # ── Быстрый VPN: subscription URL + QR-картинка ────────────────────────
+    def _send_subscription(chat_id: int, telegram_id: int) -> bool:
+        """Отдаёт ссылку-подписку (QR + Happ-инструкция + кнопки). Доступ гейтит вызывающий
+        (после активации триала/оплаты доступ уже active). Дублирует тело callback_vpn_quick —
+        дедуп в рефакторе (#3 очереди)."""
+        try:
+            sub_token = db_ensure_sub_token(telegram_id)
+        except Exception as e:
+            logger.exception("db_ensure_sub_token failed for %s: %s", telegram_id, e)
+            sub_token = None
+        if not sub_token:
+            bot.send_message(chat_id, "Не удалось получить ссылку. Напиши @nikkronos.")
+            return False
+        try:
+            db_update_vless_requested_at(telegram_id)
+        except Exception:
+            pass
+        rec_url = getattr(config, "vpn_recovery_url", None) or "https://supportkronos.online:8443/recovery"
+        sub_base = rec_url.rsplit("/recovery", 1)[0]
+        sub_url = f"{sub_base}/sub/{sub_token}"
+        caption = (
+            "🔗 <b>Подключить VPN — одна ссылка</b>\n\n"
+            "Импортируй в <b>Happ</b> (happ.su): «+» → по ссылке или из буфера. "
+            "Приложение само выберет рабочий сервер и подтянет обновления."
+        )
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("🔄 Не работает", callback_data="menu_regen"),
+            types.InlineKeyboardButton("🔌 Другие способы подключения", callback_data="menu_other_connect"),
+            types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
+        )
+        try:
+            import qrcode
+            from io import BytesIO
+            img = qrcode.make(sub_url)
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            bot.send_photo(chat_id, photo=buf, caption=caption, parse_mode="HTML")
+        except Exception as e:
+            logger.exception("send_subscription QR failed: %s", e)
+            bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+        bot.send_message(chat_id, sub_url, reply_markup=markup, disable_web_page_preview=True)
+        return True
+
     @bot.callback_query_handler(func=lambda call: call.data == "vpn_quick")
     def callback_vpn_quick(call: types.CallbackQuery) -> None:  # type: ignore[override]
         bot.answer_callback_query(call.id)
@@ -3746,6 +3797,8 @@ def main() -> None:
         if call.from_user:
             _support_user_state.pop(call.from_user.id, None)
         bot.send_message(call.message.chat.id, "Отменено.")
+        if call.from_user:
+            _send_main_menu_for_tid(call.message.chat.id, call.from_user.id)
 
     def _notify_owner_about_support_message(
         ticket_id: int,
@@ -3939,7 +3992,7 @@ def main() -> None:
         # /cancel — отмена
         if message.content_type == "text" and (message.text or "").strip().lower() in ("/cancel", "отмена"):
             _support_reply_state.pop(admin_id, None)
-            safe_reply(message, "Отменено.")
+            safe_reply(message, "Отменено.", reply_markup=_back_to_menu_markup())
             return
         state = _support_reply_state.pop(admin_id, None) or {}
         ticket_id = state.get("ticket_id")
