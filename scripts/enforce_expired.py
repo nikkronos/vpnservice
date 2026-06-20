@@ -160,6 +160,82 @@ def find_data_cap_candidates() -> List[Dict]:
     return candidates
 
 
+def find_data_warning_candidates() -> List[Dict]:
+    """Триал-юзеры на 80-100% лимита данных (ещё не заблокированы и не предупреждены)."""
+    from bot.database import _conn, _ensure_init, db_get_user_total_bytes
+    from bot.tariffs import TRIAL_DATA_LIMIT_BYTES
+
+    threshold = int(TRIAL_DATA_LIMIT_BYTES * 0.8)
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT telegram_id, username, trial_data_baseline
+            FROM users
+            WHERE telegram_id IS NOT NULL AND plan = 'trial'
+              AND trial_data_baseline IS NOT NULL
+              AND COALESCE(trial_data_warned, 0) = 0
+              AND expires_at IS NOT NULL
+              AND datetime(expires_at) > datetime('now')
+            """
+        ).fetchall()
+    out: List[Dict] = []
+    for r in rows:
+        tid = int(r["telegram_id"])
+        used = db_get_user_total_bytes(tid) - int(r["trial_data_baseline"] or 0)
+        if threshold <= used < TRIAL_DATA_LIMIT_BYTES:
+            out.append({"telegram_id": tid, "username": r["username"], "used_bytes": used})
+    return out
+
+
+def _send_data_warnings(candidates: List[Dict]) -> int:
+    """Разовое предупреждение «осталось ~N ГБ» + ставит trial_data_warned=1 (даже если notify упал — не спамим)."""
+    if not candidates:
+        return 0
+    from bot.database import _conn
+    from bot.config import load_config
+    from bot.tariffs import TRIAL_DATA_LIMIT_BYTES, TRIAL_DATA_LIMIT_GB
+    import json
+    import urllib.request
+
+    cfg = load_config()
+    bot_token = getattr(cfg, "bot_token", None) if cfg else None
+    sent = 0
+    for c in candidates:
+        tid = c["telegram_id"]
+        remaining_gb = round(max(0, TRIAL_DATA_LIMIT_BYTES - c["used_bytes"]) / 1073741824.0, 1)
+        if bot_token:
+            try:
+                api_body = json.dumps({
+                    "chat_id": tid,
+                    "text": (
+                        f"📦 <b>Триал на исходе:</b> осталось ~{remaining_gb} ГБ из {TRIAL_DATA_LIMIT_GB}.\n\n"
+                        "Когда лимит закончится — доступ приостановится. "
+                        "Оформи подписку, чтобы не прерываться."
+                    ),
+                    "parse_mode": "HTML",
+                    "reply_markup": {"inline_keyboard": [[
+                        {"text": "💳 Оформить подписку", "callback_data": "pay_show"},
+                    ]]},
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    data=api_body, headers={"Content-Type": "application/json"}, method="POST",
+                )
+                urllib.request.urlopen(req, timeout=10).read()
+                sent += 1
+            except Exception as e:
+                print(f"[WARN] data-warning notify failed for {tid}: {e}")
+        try:
+            with _conn() as con:
+                con.execute("UPDATE users SET trial_data_warned = 1 WHERE telegram_id = ?", (tid,))
+        except Exception as e:
+            print(f"[WARN] set trial_data_warned failed for {tid}: {e}")
+    if sent:
+        print(f"[OK] data-warnings sent: {sent}")
+    return sent
+
+
 def _print_dry_run_report(candidates: List[Dict]) -> None:
     """Читаемый отчёт для проверки владельцем перед --apply."""
     print("=" * 78)
@@ -242,7 +318,11 @@ def main() -> int:
         return 0
 
     # === Production режим: реальный отзыв ===
-    return _apply_revocations(candidates, reason=reason)
+    rc = _apply_revocations(candidates, reason=reason)
+    if args.data_cap:
+        # Разовые предупреждения «~80% лимита» тем, кто ещё не за кэпом.
+        _send_data_warnings(find_data_warning_candidates())
+    return rc
 
 
 def _apply_revocations(candidates: List[Dict], reason: str = "time") -> int:

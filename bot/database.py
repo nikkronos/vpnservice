@@ -542,6 +542,8 @@ def _migrate_add_subscription_columns() -> None:
             # триала. Кэп триала = (текущий total − baseline) ≥ TRIAL_DATA_LIMIT_BYTES.
             # NULL = старый триал до фичи (грандфазер — кэп по данным не применяется).
             ("trial_data_baseline", "INTEGER"),
+            # trial_data_warned: 0/1 — отправлено ли предупреждение «~80% лимита триала» (anti-дубль).
+            ("trial_data_warned", "INTEGER NOT NULL DEFAULT 0"),
         ]
         for name, decl in cols:
             if name not in existing:
