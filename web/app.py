@@ -1518,7 +1518,7 @@ def api_account_info():
             "tariffs": [
                 {"devices": dd, "months": mm, "days": tt["days"],
                  "price_rub": tt["price_rub"], "price_stars": tt["price_stars"]}
-                for (dd, mm), tt in tariffs.TARIFFS.items()
+                for (dd, mm), tt in tariffs.TARIFFS.items() if mm != 0
             ],
             "referral_code": code,
             "referral_link_path": f"/recovery?ref={code}" if code else None,

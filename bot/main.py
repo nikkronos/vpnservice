@@ -272,11 +272,11 @@ def main() -> None:
         markup = types.InlineKeyboardMarkup(row_width=1)
         if trial_available:
             markup.add(
-                types.InlineKeyboardButton(f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно", callback_data="menu_trial_activate"),
+                types.InlineKeyboardButton(f"🎁 Бесплатно: {tariffs.TRIAL_DAYS} дн / {tariffs.TRIAL_DATA_LIMIT_GB} ГБ", callback_data="menu_trial_activate"),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
             text = (
-                f"🎁 <b>Сначала активируй бесплатный период — {tariffs.TRIAL_DAYS} дней.</b>\n\n"
+                f"🎁 <b>Сначала активируй бесплатный период — {tariffs.TRIAL_DAYS} дней / {tariffs.TRIAL_DATA_LIMIT_GB} ГБ.</b>\n\n"
                 "Нажми кнопку ниже — и VPN сразу заработает. Без оплаты."
             )
         else:
@@ -412,7 +412,7 @@ def main() -> None:
                     if not expires_at or days_left == 0:
                         markup.add(
                             types.InlineKeyboardButton(
-                                f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно",
+                                f"🎁 Бесплатно: {tariffs.TRIAL_DAYS} дн / {tariffs.TRIAL_DATA_LIMIT_GB} ГБ",
                                 callback_data="menu_trial_activate",
                             ),
                         )
@@ -558,13 +558,13 @@ def main() -> None:
         if not sub.get("trial_used") and not sub.get("expires_at"):
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(
-                types.InlineKeyboardButton(f"🎁 Активировать {tariffs.TRIAL_DAYS} дней бесплатно", callback_data="onb_trial_yes"),
+                types.InlineKeyboardButton(f"🎁 Бесплатно: {tariffs.TRIAL_DAYS} дн / {tariffs.TRIAL_DATA_LIMIT_GB} ГБ", callback_data="onb_trial_yes"),
                 types.InlineKeyboardButton("⏭ Пропустить", callback_data="onb_trial_skip"),
             )
             bot.send_message(
                 chat_id,
                 "✅ Email подтверждён.\n\n"
-                f"🎁 Тебе доступна <b>бесплатная подписка на {tariffs.TRIAL_DAYS} дней</b> — активировать сейчас? "
+                f"🎁 Тебе доступно <b>бесплатно: {tariffs.TRIAL_DAYS} дней или {tariffs.TRIAL_DATA_LIMIT_GB} ГБ</b> — активировать сейчас? "
                 "Можно пропустить и активировать позже из меню.",
                 parse_mode="HTML",
                 reply_markup=markup,
@@ -724,10 +724,9 @@ def main() -> None:
         if kind == "churn":
             if code == "expensive":
                 kb.add(
-                    types.InlineKeyboardButton("🧪 Тест 7 дней — 49 ₽", callback_data="paytar:3:0"),
                     types.InlineKeyboardButton("💳 Тарифы / продлить", callback_data="pay_show"),
                 )
-                bot.send_message(chat_id, "Спасибо! Если дело в цене — есть тест 7 дней за 49 ₽ или обычные тарифы 👇", reply_markup=kb)
+                bot.send_message(chat_id, "Спасибо! Если дело в цене — посмотри тарифы 👇", reply_markup=kb)
             elif code == "forgot":
                 kb.add(types.InlineKeyboardButton("💳 Продлить", callback_data="pay_show"))
                 bot.send_message(chat_id, "Спасибо! Продлить — пара тапов 👇", reply_markup=kb)
@@ -3690,8 +3689,6 @@ def main() -> None:
             types.InlineKeyboardButton("📱 3 устройства", callback_data="paytar_dev:3"),
             types.InlineKeyboardButton("📱 5 устройств", callback_data="paytar_dev:5"),
         )
-        if not db_is_test_used(uid):  # разовый тест 49₽/7д — показываем только если не использован
-            kb.add(types.InlineKeyboardButton("🧪 Сначала тест — 7 дней за 49 ₽", callback_data="paytar:3:0"))
         kb.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
         return kb
 
