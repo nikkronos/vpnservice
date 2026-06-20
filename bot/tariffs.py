@@ -37,6 +37,12 @@ DEFAULT_DEVICE_LIMIT = 5
 # REFERRAL_REWARD_DAYS (+14 за реферала — отдельная константа в web/app.py).
 TRIAL_DAYS = 7
 
+# Лимит трафика бесплатного триала (с 2026-06-20): доступ блокируется при
+# исчерпании дней ИЛИ гигабайтов (что раньше). Объединяет бывший free-trial и
+# 49₽-тест в один бесплатный вход. Учёт — суммарно AWG+VLESS (db_get_user_total_bytes).
+TRIAL_DATA_LIMIT_GB = 20
+TRIAL_DATA_LIMIT_BYTES = TRIAL_DATA_LIMIT_GB * 1024 ** 3
+
 
 def get_tariff(devices: int, months: int) -> Optional[Dict[str, int]]:
     """Параметры тарифа по (devices, months) или None, если пара невалидна."""

@@ -538,6 +538,10 @@ def _migrate_add_subscription_columns() -> None:
             ("drop_reason", "TEXT"),
             ("drop_reason_at", "TEXT"),
             ("churn_asked_at", "TEXT"),
+            # trial_data_baseline: суммарный трафик (AWG+VLESS) на момент активации
+            # триала. Кэп триала = (текущий total − baseline) ≥ TRIAL_DATA_LIMIT_BYTES.
+            # NULL = старый триал до фичи (грандфазер — кэп по данным не применяется).
+            ("trial_data_baseline", "INTEGER"),
         ]
         for name, decl in cols:
             if name not in existing:
@@ -1014,6 +1018,27 @@ def db_get_effective_telegram_id(user_row: Dict) -> int:
         return int(tid)
     db_id = user_row.get("id", 0)
     return -int(db_id)
+
+
+def db_get_user_total_bytes(telegram_id: int) -> int:
+    """Суммарный трафик юзера (AWG + VLESS, lifetime rx+tx) в байтах.
+    Для лимита триала (7д/20ГБ): traffic_accounting (AWG per-peer) +
+    vless_user_traffic (VLESS per-server). Триал-юзер новый → lifetime ≈ объём
+    триала, baseline не нужен. NB: eu1-direct VLESS per-user не трекается
+    отдельно → кэп чуть щедрый (в пользу юзера)."""
+    _ensure_init()
+    with _conn() as con:
+        awg = con.execute(
+            "SELECT COALESCE(SUM(lifetime_rx + lifetime_tx), 0) FROM traffic_accounting "
+            "WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()[0]
+        vless = con.execute(
+            "SELECT COALESCE(SUM(lifetime_rx + lifetime_tx), 0) FROM vless_user_traffic "
+            "WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()[0]
+    return int(awg or 0) + int(vless or 0)
 
 
 # ─── Peers (VPN-слоты) ──────────────────────────────────────────────────────────
@@ -2026,9 +2051,13 @@ def db_start_trial(telegram_id: int, days: int) -> Optional[str]:
             return None
     new_exp = db_extend_subscription(telegram_id, days, plan="trial", status="trial")
     if new_exp:
+        # Снимаем baseline трафика на старте триала — кэп считает дельту от него
+        # (для новых триалов ≈0; защищает от учёта прошлого трафика).
+        baseline = db_get_user_total_bytes(telegram_id)
         with _conn() as con:
             con.execute(
-                "UPDATE users SET trial_used = 1 WHERE telegram_id = ?", (telegram_id,)
+                "UPDATE users SET trial_used = 1, trial_data_baseline = ? WHERE telegram_id = ?",
+                (baseline, telegram_id),
             )
     return new_exp
 
