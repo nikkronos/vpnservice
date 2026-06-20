@@ -1057,11 +1057,18 @@ def db_get_trial_data_status(telegram_id: int) -> Optional[Dict]:
         return None
     baseline = int(row["trial_data_baseline"])
     used = max(0, db_get_user_total_bytes(telegram_id) - baseline)
+    # used_human: МБ для мелких объёмов (иначе 32 МБ округляется в «0.0 ГБ» и кажется,
+    # что учёт не работает); ГБ когда ≥1 ГБ.
+    if used < 1073741824:
+        used_human = f"{round(used / 1048576.0)} МБ"
+    else:
+        used_human = f"{round(used / 1073741824.0, 1)} ГБ"
     return {
         "used_bytes": used,
         "limit_bytes": TRIAL_DATA_LIMIT_BYTES,
         "limit_gb": TRIAL_DATA_LIMIT_GB,
-        "used_gb": round(used / 1073741824.0, 1),
+        "used_gb": round(used / 1073741824.0, 2),
+        "used_human": used_human,
         "remaining_gb": round(max(0, TRIAL_DATA_LIMIT_BYTES - used) / 1073741824.0, 1),
     }
 

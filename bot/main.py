@@ -2492,7 +2492,7 @@ def main() -> None:
             tds = db_get_trial_data_status(tid)
             if tds:
                 data_line = (
-                    f"\n📦 <b>Данные триала:</b> {tds['used_gb']} / {tds['limit_gb']} ГБ "
+                    f"\n📦 <b>Данные триала:</b> {tds['used_human']} / {tds['limit_gb']} ГБ "
                     f"(осталось {tds['remaining_gb']} ГБ)"
                 )
         except Exception as e:

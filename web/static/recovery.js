@@ -362,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (d.trial_data) {
       const td = d.trial_data;
       const dl = document.createElement('div'); dl.className = 'acc-sub';
-      dl.textContent = `📦 Данные: ${td.used_gb} / ${td.limit_gb} ГБ (осталось ${td.remaining_gb} ГБ)`;
+      dl.textContent = `📦 Данные: ${td.used_human} / ${td.limit_gb} ГБ (осталось ${td.remaining_gb} ГБ)`;
       accountStatus.appendChild(dl);
     }
 
