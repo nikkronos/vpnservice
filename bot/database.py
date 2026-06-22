@@ -2420,6 +2420,30 @@ def db_get_claim_by_id(claim_id: int) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def db_list_pending_claims(limit: int = 50) -> List[Dict]:
+    """
+    Все ожидающие (pending) payment-заявки + username/email из users.
+    Для панели мониторинга: видеть ожидающие оплаты без Telegram (read-only).
+    Сортировка по времени заявки (старые сверху).
+    """
+    _ensure_init()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT pc.id, pc.telegram_id, pc.days, pc.device_limit,
+                   pc.source, pc.claimed_at,
+                   u.username, u.email
+            FROM payment_claims pc
+            LEFT JOIN users u ON u.telegram_id = pc.telegram_id
+            WHERE pc.status = 'pending'
+            ORDER BY pc.claimed_at ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def db_set_claim_notify_msg(claim_id: int, message_id: int) -> None:
     """Сохраняет message_id уведомления владельцу (для последующего edit_message_text)."""
     _ensure_init()

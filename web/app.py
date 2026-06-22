@@ -76,6 +76,7 @@ from bot.database import (
     db_extend_subscription,
     db_apply_referral_bonus,
     db_get_pending_claim,
+    db_list_pending_claims,
     db_create_payment_claim,
     db_get_claim_by_id,
     db_set_claim_notify_msg,
@@ -1018,6 +1019,14 @@ def api_stats():
             logger.warning("subscription split read failed: %s", e)
             sub_split = {"active_paid": None, "active_trial": None, "expired": None}
 
+        # Ожидающие оплаты (pending payment-claims) — видеть заявки без Telegram
+        # прямо на панели (read-only). Ошибка не должна валить весь ответ.
+        try:
+            pending_claims = db_list_pending_claims(limit=50)
+        except Exception as e:
+            logger.warning("pending claims read failed: %s", e)
+            pending_claims = []
+
         return jsonify({
             "total_users": tg_users,
             "active_users": len(active_users),
@@ -1025,6 +1034,8 @@ def api_stats():
             "active_paid": sub_split.get("active_paid"),
             "active_trial": sub_split.get("active_trial"),
             "expired_subs": sub_split.get("expired"),
+            "pending_claims_count": len(pending_claims),
+            "pending_claims": pending_claims,
             "total_peers": len(peers),
             "active_peers": len(active_peers),
             "email_verified_users": email_verified,

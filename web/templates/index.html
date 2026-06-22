@@ -81,6 +81,10 @@
                             <span class="activity-num" id="act-trial">—</span>
                             <span class="activity-label" title="Доступ не истёк, платежей нет (на бесплатном триале)">на триале</span>
                         </div>
+                        <div class="activity-card activity-card-pending">
+                            <span class="activity-num" id="act-pending">—</span>
+                            <span class="activity-label" id="act-pending-label" title="Оплаты, ждущие подтверждения. Видно без Telegram. Подтвердить — в боте или на /admin/credit.">ждут подтверждения</span>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -120,6 +124,6 @@
         </footer>
     </div>
 
-    <script src="{{ url_for('static', filename='main.js') }}?v=20260614d"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=20260623a"></script>
 </body>
 </html>

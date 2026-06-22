@@ -77,6 +77,18 @@ async function loadStats() {
         set('act-proxy', d.proxy_requests_30d);
         set('act-paid', d.active_paid);
         set('act-trial', d.active_trial);
+        set('act-pending', d.pending_claims_count);
+        // Ожидающие оплаты: подсветка цифры + тултип «кто ждёт» (видно без Telegram).
+        const pendEl = document.getElementById('act-pending');
+        const pendLabel = document.getElementById('act-pending-label');
+        const pend = d.pending_claims || [];
+        if (pendEl) pendEl.style.color = (d.pending_claims_count > 0) ? '#e0a800' : '';
+        if (pendLabel) {
+            pendLabel.title = pend.length
+                ? 'Ждут подтверждения:\n' + pend.map(c =>
+                    `@${c.username || '—'} (id ${c.telegram_id}) · +${c.days}д · ${c.device_limit} устр · ${relDate(c.claimed_at)}`).join('\n')
+                : 'Нет ожидающих оплат';
+        }
         // act-traffic не ставим здесь — он считается из total_bytes в loadTraffic
         // (резет-aware lifetime, см. SESSION_SUMMARY_2026-05-29 фикс #6).
 
