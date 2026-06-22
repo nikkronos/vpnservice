@@ -121,6 +121,7 @@
 Решение владельца по #4: полноценный alt-канал-**пуш** (email/webhook) — **задача масштаба, не сегодня**. Риск «прозевал оплату» есть, проблемы нет: Telegram надёжен, pending-заявка не теряется (висит в БД, юзер пнёт), approve уже имеет веб-путь `/admin/credit`. ~15 платящих ручной поток не роняет; код перед рефактором #3 не плодим. Полный #4 финально гаснет об автооплату (#6, гейт РКН).
 - **Сделано (минимум):** счётчик «ждут подтверждения» на панели мониторинга → видеть pending-оплаты **без Telegram**. `db_list_pending_claims()` (read-only, JOIN users за username) + поля `pending_claims_count`/`pending_claims` в `/api/stats` (try/except, не валит ответ) + карточка в `index.html` (подсветка янтарным при >0, тултип «кто ждёт»: @user/+дни/устройства/когда).
 - **Деплой:** py_compile + import символа ДО рестарта; рестарт vpn-web — active, журнал чист; smoke `/api/stats` → `pending_claims_count:0`, `pending_claims:[]`. Биллинг/enforcement не тронуты. Файлы: `bot/database.py`, `web/app.py`, `web/static/main.js` (cache-bust `v=20260623a`), `web/templates/index.html`.
+- **Фоллоу-ап (тот же заход):** `/admin/credit` теперь закрывает pending-заявку юзера (`db_decide_claim`) → ручная выдача доступа **без Telegram** чистит счётчик (раньше оставляла «призрак»). Выявлено при разборе вопроса владельца «как approve вне TG». + поправлен устаревший URL панели в CLAUDE.md (`supportkronos.online:8443/admin`, не :5001 — Flask на 127.0.0.1).
 
 ## 2026-06-20 — Триал 7д/20ГБ: free-trial + 49₽-тест объединены в один вход
 

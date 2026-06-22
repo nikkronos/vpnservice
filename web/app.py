@@ -77,6 +77,7 @@ from bot.database import (
     db_apply_referral_bonus,
     db_get_pending_claim,
     db_list_pending_claims,
+    db_decide_claim,
     db_create_payment_claim,
     db_get_claim_by_id,
     db_set_claim_notify_msg,
@@ -1988,8 +1989,19 @@ def admin_credit():
             # 3) Реферальный бонус (idempotent)
             inviter_tid = db_apply_referral_bonus(telegram_id, REFERRAL_REWARD_DAYS)
 
+            # 4) Закрываем pending-заявку «я оплатил» (если была) → чистит счётчик
+            #    «ожидающие» на панели: ручная выдача без TG и счётчик согласованы.
+            closed_claim = False
+            try:
+                _pc = db_get_pending_claim(telegram_id)
+                if _pc and db_decide_claim(int(_pc["id"]), "approved"):
+                    closed_claim = True
+            except Exception as e:
+                logger.warning("/admin/credit close pending claim failed: %s", e)
+
             msg_ok = (
                 f"✅ Зачислено: payment_id={pay_id}, +{days} дн (до {new_exp}). "
+                + ("Заявка закрыта. " if closed_claim else "")
                 + (f"Реферальный бонус +{REFERRAL_REWARD_DAYS} дн обоим (inviter tid={inviter_tid})." if inviter_tid else "")
             )
             form = {}  # очистить форму после успеха
