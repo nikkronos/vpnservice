@@ -35,3 +35,12 @@
 3. `python -m py_compile` + import-check → деплой → smoke (`/start` через владельца / `curl`).
 4. ОК → commit+push; не ОК → `git revert` + `scp` `.bak`.
 Порциями, не за один заход.
+
+## Прогресс (трекер)
+- ✅ **Tier-1 #1 — status-line** (06-23, `214603e`): `format_subscription_status()` в новом `bot/formatting.py`; дедуп в `bot/main.py` (claim) + `web/app.py` (claim). Byte-идентично (проверено на сервере), прод ок, `/start` ОК.
+- ⬜ **Tier-1 — notify-inviter** (`bot/main.py:943` ↔ `web/app.py:162`) — сверить тела, вынести.
+- ⬜ **Tier-1 — device-autoname** (`bot/main.py:1602` ↔ `web/app.py:1255`) — сверить, вынести.
+- ⬜ **Tier-1 — vless-персонализация** (`bot/main.py:2706` ↔ `web/app.py:2054/2101`) — сверить, вынести.
+- ⬜ **status-line добить:** `bot/main.py:2476` (cmd_status — иное слово, проверить идентичность) и `:3822` (support-notify `sub_line` — вероятно тот же паттерн).
+- ⬜ **Tier-2 (опц.):** donation-notify билдер (текст+callback_data); `_send_subscription` дедуп тела `callback_vpn_quick`.
+- ⛔ **Tier-3 (распил `main()`):** отложен (оверинжиниринг на масштабе).
