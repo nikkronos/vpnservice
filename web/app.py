@@ -37,6 +37,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from bot.config import get_effective_mtproto_proxy_link, load_config, _parse_env_file
 from bot.storage import Peer, User, get_all_peers, get_all_users, find_user
 from bot import tariffs
+from bot.formatting import format_subscription_status
 from bot.database import (
     db_list_devices,
     db_get_device,
@@ -1698,15 +1699,7 @@ def api_billing_claim_payment():
         sub = db_get_subscription(telegram_id) or {}
         username = (row.get("username") if isinstance(row, dict) else None) or "—"
         email = (row.get("email") if isinstance(row, dict) else None) or "—"
-        days_left = sub.get("days_left", 0) or 0
-        expires_at = (sub.get("expires_at") or "")[:10] or "—"
-        grandfather = sub.get("grandfathered")
-        if grandfather:
-            status_line = "Бессрочный (grandfather)"
-        elif days_left > 0:
-            status_line = f"до {expires_at} (осталось {days_left} дн)"
-        else:
-            status_line = "Подписка неактивна"
+        status_line = format_subscription_status(sub)
         text = (
             f"💳 <b>Новая оплата — {cl_dev} устр., {tariffs.period_label(tariffs.months_from_days(cl_days))} ({cl_price} ₽)</b>\n\n"
             f"👤 @{username} (id: <code>{telegram_id}</code>)\n"

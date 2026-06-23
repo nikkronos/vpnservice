@@ -16,6 +16,7 @@ from .config import (
 )
 from . import tariffs
 from . import churn
+from .formatting import format_subscription_status
 from .database import (
     db_list_devices,
     db_get_device,
@@ -3521,14 +3522,7 @@ def main() -> None:
 
         # Шлём уведомление владельцу (как и в web flow)
         sub = db_get_subscription(tid) or {}
-        days_left = sub.get("days_left", 0) or 0
-        expires_at = (sub.get("expires_at") or "")[:10] or "—"
-        if sub.get("grandfathered"):
-            status_line = "Бессрочный (grandfather)"
-        elif days_left > 0:
-            status_line = f"до {expires_at} (осталось {days_left} дн)"
-        else:
-            status_line = "Подписка неактивна"
+        status_line = format_subscription_status(sub)
         uname = user_row.get("username") or "—"
         email = user_row.get("email") or "—"
         text = (
