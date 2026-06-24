@@ -1191,6 +1191,17 @@ def db_count_devices(telegram_id: int) -> int:
         ).fetchone()[0]
 
 
+def db_device_autoname(telegram_id: int, os: str) -> str:
+    """Имя по умолчанию для нового устройства («ПК 2», «iPhone/iPad 1»).
+
+    Считает уже существующие устройства того же os у юзера.
+    Единый источник для bot и web (рефактор #3, Tier 1).
+    """
+    same = [d for d in db_list_devices(telegram_id) if d["os"] == os]
+    base = {"pc": "ПК", "ios": "iPhone/iPad", "android": "Android"}.get(os, os)
+    return f"{base} {len(same) + 1}"
+
+
 # ─── OTP ──────────────────────────────────────────────────────────────────────
 
 def db_create_otp(email: str, code: str, ttl_minutes: int = 10) -> None:

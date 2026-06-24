@@ -23,6 +23,7 @@ from .database import (
     db_add_device,
     db_delete_device,
     db_count_devices,
+    db_device_autoname,
     db_get_device_limit,
     db_set_use_case,
     db_get_use_case,
@@ -1600,11 +1601,6 @@ def main() -> None:
             "Пока нет устройств. Добавь первое — каждому девайсу свой независимый конфиг."))
         bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
-    def _device_autoname(uid: int, os_: str) -> str:
-        same = [d for d in db_list_devices(uid) if d["os"] == os_]
-        base = {"pc": "ПК", "ios": "iPhone/iPad", "android": "Android"}.get(os_, os_)
-        return f"{base} {len(same) + 1}"
-
     def _add_device_and_deliver(message: types.Message, uid: int, os_: str) -> None:
         if os_ not in ("pc", "ios", "android"):
             return
@@ -1615,7 +1611,7 @@ def main() -> None:
                 f"Достигнут лимит {cap} устройств по твоему тарифу. Удали лишнее"
                 + (" или оформи тариф на 5 устройств." if cap < 5 else "."))
             return
-        name = _device_autoname(uid, os_)
+        name = db_device_autoname(uid, os_)
         device_id = db_add_device(uid, name, os_)
         try:
             _, cfg = create_amneziawg_peer_and_config_for_user(

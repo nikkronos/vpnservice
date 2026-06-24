@@ -45,6 +45,7 @@ from bot.database import (
     db_delete_device,
     db_rename_device,
     db_count_devices,
+    db_device_autoname,
     db_get_device_limit,
     db_is_test_used,
     db_create_otp,
@@ -1253,12 +1254,6 @@ def api_recovery_awg_config_by_email():
 # Лимит устройств — per-user по тарифу (db_get_device_limit; грандфазер/триал = 5).
 
 
-def _device_autoname_web(telegram_id: int, os_: str) -> str:
-    same = [d for d in db_list_devices(telegram_id) if d["os"] == os_]
-    base = {"pc": "ПК", "ios": "iPhone/iPad", "android": "Android"}.get(os_, os_)
-    return f"{base} {len(same) + 1}"
-
-
 def _awg_config_payload(peer, cfg: str, os_: str, name: str = "", device_id: str = "") -> dict:
     resp = {"ok": True, "filename": f"awg_{peer.server_id}.conf", "config": cfg, "os": os_}
     if name:
@@ -1311,7 +1306,7 @@ def api_recovery_device_add():
         cap = db_get_device_limit(telegram_id)
         if db_count_devices(telegram_id) >= cap:
             return jsonify({"error": f"Достигнут лимит {cap} устройств по тарифу."}), 409
-        name = _device_autoname_web(telegram_id, os_)
+        name = db_device_autoname(telegram_id, os_)
         device_id = db_add_device(telegram_id, name, os_)
         try:
             peer, cfg = create_amneziawg_peer_and_config_for_user(
