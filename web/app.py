@@ -6,6 +6,17 @@
 - Количество подключённых устройств
 - Статистику использования
 - Список пользователей (для админа)
+НАВИГАЦИЯ: грепай баннер «# ═══ §N» чтобы прыгнуть в секцию, не читая всё.
+
+  §1 Хелперы + login/logout (тарифы, auth, proxy, server-status, wg-dump)
+  §2 Публичные страницы + /admin (дашборд)
+  §3 API мониторинга: servers/services/users/traffic/stats
+  §4 ЛК: хелперы + recovery API (email-OTP, устройства)
+  §5 ЛК: аккаунт / биллинг (info, trial, Stars, claim)
+  §6 /admin/credit (ручное начисление + approve заявок)
+  §7 Подписка /sub + VLESS-хелперы (+ set-password)
+  §8 Auth API: OTP / пароль / tg-webapp
+  §9 Admin API: users.csv / sync-sheets
 """
 
 import csv
@@ -146,6 +157,7 @@ MANUAL_PAY = {
 }
 
 
+# ═══════ §1 · ХЕЛПЕРЫ + LOGIN/LOGOUT (тарифы, auth, server-status, wg-dump) ═══════
 def _resolve_tariff(body: dict):
     """(devices, months) из тела запроса → запись тарифа (bot/tariffs) или None.
 
@@ -460,6 +472,7 @@ def check_port(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+# ═══════════════════ §2 · ПУБЛИЧНЫЕ СТРАНИЦЫ + /admin (дашборд) ═══════════════════
 @app.route("/")
 def landing():
     """
@@ -550,6 +563,7 @@ def recovery_page():
     return render_template("recovery.html", stats={}, recovery_secret=recovery_secret)
 
 
+# ═══════════ §3 · API МОНИТОРИНГА: servers/services/users/traffic/stats ═══════════
 @app.route("/api/servers")
 def api_servers():
     """API: статус серверов."""
@@ -1058,6 +1072,7 @@ def api_stats():
         return jsonify({"error": str(e)}), 500
 
 
+# ════════════ §4 · ЛК: хелперы + RECOVERY API (email-OTP, устройства) ════════════
 def _qr_datauri(data: str) -> Optional[str]:
     """
     Генерирует QR-код для строки → PNG data-URI (для <img src>).
@@ -1465,6 +1480,7 @@ def api_recovery_mobile_link_by_email():
         return jsonify({"error": str(e)}), 500
 
 
+# ═════════════ §5 · ЛК: АККАУНТ / БИЛЛИНГ (info, trial, Stars, claim) ═════════════
 @app.route("/api/account/info", methods=["POST"])
 def api_account_info():
     """
@@ -1840,6 +1856,7 @@ _ADMIN_CREDIT_TEMPLATE = """<!DOCTYPE html>
 </div></body></html>"""
 
 
+# ════════════════ §6 · /admin/credit (начисление + approve заявок) ════════════════
 @app.route("/admin/credit", methods=["GET", "POST"])
 @_require_admin_auth
 def admin_credit():
@@ -2008,6 +2025,7 @@ def admin_credit():
     )
 
 
+# ══════════════ §7 · ПОДПИСКА /sub + VLESS-ХЕЛПЕРЫ (+ set-password) ══════════════
 @app.route("/api/account/set-password", methods=["POST"])
 def api_account_set_password():
     """
@@ -2201,6 +2219,7 @@ def api_subscription(token):
         return Response("", mimetype="text/plain", status=500)
 
 
+# ════════════════════ §8 · AUTH API: OTP / пароль / tg-webapp ════════════════════
 @app.route("/api/auth/send-otp", methods=["POST"])
 def api_auth_send_otp():
     """Отправляет OTP-код на указанный email. Создаёт пользователя если нет."""
@@ -2372,6 +2391,7 @@ def api_auth_tg_webapp():
         return jsonify({"error": str(e)}), 500
 
 
+# ════════════════════ §9 · ADMIN API: users.csv / sync-sheets ════════════════════
 def _check_admin_secret() -> Optional[tuple]:
     """
     Проверяет ADMIN_SECRET из query-параметра admin_key или заголовка X-Admin-Key.
