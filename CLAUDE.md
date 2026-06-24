@@ -136,6 +136,7 @@ scripts/
 
 ### Ключевые концепции
 
+- **Навигация по монолитам (с 06-24):** `bot/main.py` и `web/app.py` размечены grep-баннерами `# ═══ §N · NAME` + карта секций в докстринге шапки файла. Ищешь зону — грепай `§N` или прочти докстринг, НЕ читай файл целиком (снижает токены/путаницу агентов; детали `docs/plan-refactor-scope.md`).
 - **server_id:** `eu1` (AmneziaWG, Docker), логически был `eu2` — нормализован в `eu1` через `storage.py`
 - **peer key (Фаза 2 B):** `{telegram_id}:{server_id}:{device_id}` (composite-PK `peers`). Раньше `platform` (per-OS) → перешли на **именованные устройства** (таблица `devices`: device_id/telegram_id/name/os). `os` (`pc`/`ios`/`android`) — только формат доставки. **Shim в `storage.py`:** принимает `platform=` (legacy), мапит на device; `Peer.platform` = алиас `Peer.os` → бот/ЛК/wireguard_peers без правок. UX «Мои устройства» (список/добавить/обновить/удалить/переименовать) в боте и ЛК; эндпоинты `/api/recovery/devices|device-add|device-regen|device-delete|device-rename`. Cap по тарифу — `db_get_device_limit` (3/5; грандфазер/триал=5), не хардкод. _(детали внедрения: DONE_LIST 06-10/06-11)_
 - **Платформы/os:** `pc`, `ios`, `android` — Android получает `vpn://` deep link, iOS/PC — `.conf` файл
@@ -327,7 +328,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | Открытые задачи | `ROADMAP_VPN.md` (только открытое) |
 | История изменений | `DONE_LIST_VPN.md` (хронология + оглавление) |
 | Монетизация / платежи | `docs/monetization-and-payments.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-23.md` (Daniil-триаж + #4-минимум + whitelist-трек запаркован) |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-24.md` (рефактор #3 закрыт: дедуп device-autoname + навигация §-баннеры/карта bot+web) |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |

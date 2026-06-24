@@ -2,6 +2,8 @@
 
 > 2026-06-23, read-only анализ. Цель: убрать **дубли и боль** (правишь логику в одном месте, не в двух → меньше багов), НЕ «красивая архитектура». На ~15 платящих полный распил монолитов = оверинжиниринг.
 
+> **ОБНОВЛЕНИЕ 06-24 — #3 ЗАКРЫТ.** Реврейм владельцем: настоящая метрика — **токены на чтение кода + путаница агентов**, не число дублей. Под неё главный выигрыш дала **навигация** (карта-докстринг + grep-баннеры `# ═══ §N`): `bot/main.py` 15 секций (`94cf223`), `web/app.py` 9 (`bad7eb9`). Дедупы device-autoname (`eef5287`)/status-line взяты. Рычаг 2 (физвынос «листьев») ~2% — монолит держится на замыканиях; рычаг 3 (`register()`-распил) отложен как рискованный. Память `feedback_refactor_goal_agent_navigability`. Трекер ниже — фактическое состояние.
+
 ## Карта
 
 **`bot/main.py` (4135 строк).** Почти всё — внутри одной `main()` (с 203) с ~80 вложенными функциями/хендлерами (замыкания над `bot`, `admin_id`, state-словарями). Module-level: только 4 хелпера (111–203). Группы внутри `main()`:
@@ -36,11 +38,12 @@
 4. ОК → commit+push; не ОК → `git revert` + `scp` `.bak`.
 Порциями, не за один заход.
 
-## Прогресс (трекер)
-- ✅ **Tier-1 #1 — status-line** (06-23, `214603e`): `format_subscription_status()` в новом `bot/formatting.py`; дедуп в `bot/main.py` (claim) + `web/app.py` (claim). Byte-идентично (проверено на сервере), прод ок, `/start` ОК.
-- ⬜ **Tier-1 — notify-inviter** (`bot/main.py:943` ↔ `web/app.py:162`) — сверить тела, вынести.
-- ⬜ **Tier-1 — device-autoname** (`bot/main.py:1602` ↔ `web/app.py:1255`) — сверить, вынести.
-- ⬜ **Tier-1 — vless-персонализация** (`bot/main.py:2706` ↔ `web/app.py:2054/2101`) — сверить, вынести.
-- ⬜ **status-line добить:** `bot/main.py:2476` (cmd_status — иное слово, проверить идентичность) и `:3822` (support-notify `sub_line` — вероятно тот же паттерн).
-- ⬜ **Tier-2 (опц.):** donation-notify билдер (текст+callback_data); `_send_subscription` дедуп тела `callback_vpn_quick`.
-- ⛔ **Tier-3 (распил `main()`):** отложен (оверинжиниринг на масштабе).
+## Прогресс (трекер) — #3 ЗАКРЫТ 06-24
+- ✅ **status-line** (06-23, `214603e`): `format_subscription_status()` в `bot/formatting.py`; дедуп claim-флоу бота+ЛК. Byte-идентично.
+- ✅ **device-autoname** (06-24, `eef5287`): byte-identical `_device_autoname`/`_device_autoname_web` → `bot/database.db_device_autoname`; оба call-site. Смоук ок.
+- ✅ **status-line — добито проверкой:** `cmd_status` (свой `days_left`/иконки) и support-notify (`до DATE`, без days_left) — **осознанно разные рендеры, не дубли**; фолд сломал бы → оставлены.
+- ✅ **Навигация** (06-24): карта-докстринг + grep-баннеры `# ═══ §N` — `bot/main.py` 15 секций (`94cf223`), `web/app.py` 9 (`bad7eb9`). Главный выигрыш по метрике владельца.
+- ⏸️ **notify-inviter** — НЕ byte-identical: дедупится только текст (доставка `bot.send_message` vs raw HTTP; бот хардкодит «+14», web берёт `REFERRAL_REWARD_DAYS`). Маргинал — по запросу.
+- ⏸️ **vless-персонализация** — реальный дубль, НО bot `_personalize_vless_for_bot` всегда `sync_xray_users.py`, web ветвит eu1→`sync_eu1_vless.py` = латентный баг бота для eu1 (не срабатывает: мобильный целит yc/main). Сведение = поведенческое изменение + трогает Xray-sync → нужно решение владельца.
+- ⏸️ **Tier-2 (опц.):** donation-notify билдер; `_send_subscription` дедуп.
+- ⛔ **Tier-3 (распил `main()` через `register()`):** отложен — реальный распил, но риск (декораторы/замыкания/стейт, billing/enforcement/peers). Только если зона начнёт болеть, по одной группе, тщательный смоук.
