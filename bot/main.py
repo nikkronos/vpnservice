@@ -1,3 +1,26 @@
+"""Telegram-бот VPN Kronos — хендлеры и UX.
+
+НАВИГАЦИЯ (файл большой, ~4 тыс строк): грепай баннер «# ═══ §N» чтобы
+прыгнуть в нужную секцию, не читая весь файл. Почти вся логика — внутри
+main() как вложенные функции/хендлеры (замыкания над bot и состоянием).
+
+  §0  Модульные хелперы (вне main): proxy-rotate, инструкции
+  §1  Auth / меню / доступ
+  §2  Онбординг / use_case / churn
+  §3  Restore / реферал
+  §4  /start
+  §5  Доставка конфигов (AmneziaWG)
+  §6  Профили / устройства
+  §7  Email-флоу (регистрация/привязка)
+  §8  Admin-панель (inline)
+  §9  Команды: статус/ЛК/инструкции/proxy
+  §10 Мобильный VLESS (под оператора)
+  §11 Owner-команды / обслуживание
+  §12 Платежи (Stars + donation-claim)
+  §13 Support / helpdesk
+  §14 Polling / bootstrap
+"""
+
 import io
 import logging
 import subprocess
@@ -110,6 +133,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# ═════════ §0 · МОДУЛЬНЫЕ ХЕЛПЕРЫ (вне main): proxy-rotate, инструкции ═════════
 def _parse_mtproto_link_from_rotate_stdout(stdout: str) -> str | None:
     """Ищет строку tg://proxy или MTPROTO_LINK=tg://... в выводе скрипта ротации."""
     for raw in stdout.splitlines():
@@ -232,6 +256,7 @@ def main() -> None:
     except Exception as e:
         logger.warning("set_my_commands failed: %s", e)
 
+    # ════════════════════════ §1 · AUTH / МЕНЮ / ДОСТУП ════════════════════════
     def safe_reply(message: types.Message, text: str, reply_markup=None) -> bool:
         """Отправляет ответ; при ошибке логирует и возвращает False.
         Если reply_markup не задан, автоматически использует _back_markup из message (если есть).
@@ -446,6 +471,7 @@ def main() -> None:
         "Важно: торренты не поддерживаются, чтобы не создавать лишнюю нагрузку на каналы."
     )
 
+    # ════════════════════ §2 · ОНБОРДИНГ / USE_CASE / CHURN ════════════════════
     def _onboarding_needed(telegram_id: int) -> bool:
         """
         Запускать ли онбординг при /start.
@@ -892,6 +918,7 @@ def main() -> None:
         # Неизвестный шаг — чистим состояние
         _onboarding_state.pop(tid, None)
 
+    # ══════════════════════════ §3 · RESTORE / РЕФЕРАЛ ══════════════════════════
     def _restore_and_notify(telegram_id: int) -> None:
         """
         Hook после успешного db_extend_subscription: возвращает revoked AWG peer'ы
@@ -970,6 +997,7 @@ def main() -> None:
         except Exception as e:
             logger.exception("notify inviter (bot) failed: %s", e)
 
+    # ═══════════════════════════════ §4 · /START ═══════════════════════════════
     @bot.message_handler(commands=["start"])
     def cmd_start(message: types.Message) -> None:  # type: ignore[override]
         if not message.from_user:
@@ -1034,6 +1062,7 @@ def main() -> None:
             )
             upsert_user(owner)
 
+    # ════════════════════ §5 · ДОСТАВКА КОНФИГОВ (AmneziaWG) ════════════════════
     def _send_config_file(chat_id: int, config_text: str, filename: str) -> None:
         """
         Отправляет текстовый конфиг как файл пользователю.
@@ -1412,6 +1441,7 @@ def main() -> None:
     def cmd_regen(message: types.Message) -> None:  # type: ignore[override]
         _show_platform_keyboard(message.chat.id, "regen")
 
+    # ════════════════════════ §6 · ПРОФИЛИ / УСТРОЙСТВА ════════════════════════
     @bot.callback_query_handler(func=lambda call: call.data in ("profile_eu1_vpn", "profile_eu1_gpt", "profile_eu1_unified"))
     def callback_profile_eu1(call: types.CallbackQuery) -> None:  # type: ignore[override]
         """Обработчик выбора типа профиля для Европы: Обычный VPN, VPN+GPT или Универсальный."""
@@ -1693,6 +1723,7 @@ def main() -> None:
     # Email-авторизация и привязка
     # ──────────────────────────────────────────────────────────────
 
+    # ══════════════════ §7 · EMAIL-ФЛОУ (регистрация/привязка) ══════════════════
     def _start_email_flow(chat_id: int, uid: int, mode: str) -> None:
         """Запускает email-flow (register или link). mode: 'register' | 'link'."""
         _email_link_state[uid] = {"state": "email", "mode": mode}
@@ -1828,6 +1859,7 @@ def main() -> None:
     # Callbacks: админ-панель
     # ──────────────────────────────────────────────────────────────
 
+    # ════════════════════════ §8 · ADMIN-ПАНЕЛЬ (inline) ════════════════════════
     def _send_users_list(chat_id: int) -> None:
         """Отправляет список пользователей в указанный чат."""
         try:
@@ -2440,6 +2472,7 @@ def main() -> None:
             except Exception as e:
                 logger.warning("notify credited user failed: %s", e)
 
+    # ═════════════════ §9 · КОМАНДЫ: статус/ЛК/инструкции/proxy ═════════════════
     @bot.message_handler(commands=["status"])
     def cmd_status(message: types.Message) -> None:  # type: ignore[override]
         """Показывает статус подписки пользователя."""
@@ -2660,6 +2693,7 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             logger.exception("proxy_rotate send link: %s", e)
 
+    # ══════════════════ §10 · МОБИЛЬНЫЙ VLESS (под оператора) ══════════════════
     @bot.message_handler(commands=["mobile_vpn"])
     def cmd_mobile_vpn(message: types.Message) -> None:  # type: ignore[override]
         """Показывает клавиатуру выбора оператора для мобильного VPN."""
@@ -2804,6 +2838,7 @@ def main() -> None:
 
         _send_mobile_vless(call.message.chat.id, url, instruction_key)
 
+    # ════════════════════ §11 · OWNER-КОМАНДЫ / ОБСЛУЖИВАНИЕ ════════════════════
     @bot.message_handler(commands=["server_exec"])
     def cmd_server_exec(message: types.Message) -> None:  # type: ignore[override]
         """Выполняет команду на сервере через SSH (только для владельца)."""
@@ -3197,6 +3232,7 @@ def main() -> None:
     # STARS_MONTHLY_PRICE=150, REFERRAL_REWARD_DAYS=14).
     REFERRAL_REWARD_DAYS = 14
 
+    # ══════════════════ §12 · ПЛАТЕЖИ (Stars + donation-claim) ══════════════════
     @bot.pre_checkout_query_handler(func=lambda q: True)
     def pre_checkout_handler(query: types.PreCheckoutQuery) -> None:
         """Аппрувим pre_checkout (TG требует ответ в 10 сек)."""
@@ -3754,6 +3790,7 @@ def main() -> None:
 
     # ── Support: Variant B — двусторонняя переписка через бот ──────────────────
 
+    # ═════════════════════════ §13 · SUPPORT / HELPDESK ═════════════════════════
     def _open_support_flow(chat_id: int, telegram_id: int) -> None:
         """
         Стартует support-флоу: если есть открытый тикет — просит просто написать сообщение,
@@ -4116,6 +4153,7 @@ def main() -> None:
             pass
         safe_reply(message, f"✅ Тикет #{ticket_id} закрыт.")
 
+    # ════════════════════════ §14 · POLLING / BOOTSTRAP ════════════════════════
     logger.info("Starting VPN Telegram bot (pyTelegramBotAPI)...")
     bot.infinity_polling(skip_pending=True)
 
