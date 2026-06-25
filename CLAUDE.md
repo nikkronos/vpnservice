@@ -328,7 +328,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | Открытые задачи | `ROADMAP_VPN.md` (только открытое) |
 | История изменений | `DONE_LIST_VPN.md` (хронология + оглавление) |
 | Монетизация / платежи | `docs/monetization-and-payments.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-24.md` (рефактор #3 закрыт: дедуп device-autoname + навигация §-баннеры/карта bot+web) |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-25.md` (юнит-экономика после гранта + yc2-сворот июль + Happ/Hiro + Daniil выбит жёстким БС) |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
