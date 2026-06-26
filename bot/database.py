@@ -1964,6 +1964,57 @@ def db_extend_subscription(
     return new_exp
 
 
+def db_count_active_users() -> int:
+    """Сколько юзеров с активным доступом и конечным сроком: expires_at в
+    будущем (active=1). Совпадает с WHERE в db_bulk_extend_active → превью ==
+    числу затронутых. Грандфазеры (expires_at NULL) сюда НЕ входят (бессрочны)."""
+    _ensure_init()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS n FROM users "
+            "WHERE telegram_id IS NOT NULL AND active = 1 "
+            "AND expires_at IS NOT NULL "
+            "AND datetime(expires_at) > datetime('now')"
+        ).fetchone()
+    return int(row["n"] or 0) if row else 0
+
+
+def db_bulk_extend_active(days: int) -> int:
+    """
+    Массовое продление доступа на N дней ВСЕМ юзерам с активным доступом
+    (компенсация простоя сервиса). Хирургично: трогает только expires_at
+    (+N дней от текущего) + сброс notif-флагов (как db_extend_subscription),
+    НЕ меняет status/plan/device_limit — триал остаётся триалом, тариф цел.
+    Грандфазеры (expires_at NULL) пропускаются — доступ и так бессрочный.
+    Возвращает число затронутых строк.
+    """
+    if days <= 0:
+        return 0
+    _ensure_init()
+    delta = timedelta(days=int(days))
+    affected = 0
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT telegram_id, expires_at FROM users "
+            "WHERE telegram_id IS NOT NULL AND active = 1 "
+            "AND expires_at IS NOT NULL "
+            "AND datetime(expires_at) > datetime('now')"
+        ).fetchall()
+        for r in rows:
+            try:
+                new_exp = (datetime.fromisoformat(r["expires_at"]) + delta).isoformat()
+            except (ValueError, TypeError):
+                continue
+            con.execute(
+                "UPDATE users SET expires_at = ?, "
+                "notif_7d_sent = 0, notif_3d_sent = 0, notif_0d_sent = 0 "
+                "WHERE telegram_id = ?",
+                (new_exp, r["telegram_id"]),
+            )
+            affected += 1
+    return affected
+
+
 def db_get_device_limit(telegram_id: int) -> int:
     """Лимит устройств юзера по тарифу. Дефолт 5 (грандфазер/триал) если не задан/NULL."""
     _ensure_init()

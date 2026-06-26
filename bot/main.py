@@ -70,6 +70,8 @@ from .database import (
     db_get_per_user_vless_uuid,
     db_record_payment,
     db_extend_subscription,
+    db_bulk_extend_active,
+    db_count_active_users,
     db_find_payment_by_external_id,
     db_apply_referral_bonus,
     db_set_referred_by,
@@ -340,6 +342,7 @@ def main() -> None:
 
     # Состояние ожидания текста для рассылки
     _pending_broadcast: set[int] = set()
+    _pending_grant_all: set[int] = set()  # admin: ожидание ввода «дать всем N дней»
     # Выбранный сегмент рассылки (owner uid → segment key). См. db_users_by_segment.
     _broadcast_segment: dict[int, str] = {}
     _SEGMENT_LABELS = {
@@ -1937,6 +1940,7 @@ def main() -> None:
             types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
             types.InlineKeyboardButton("🔧 AmneziaWG конфиг", callback_data="admin_awg_conf"),
             types.InlineKeyboardButton("📊 Sync Google Sheets", callback_data="admin_sync_sheets"),
+            types.InlineKeyboardButton("🎁 Дать всем дней", callback_data="admin_grant_all"),
         )
         markup.add(types.InlineKeyboardButton("« Назад", callback_data="admin_back"))
         return markup
@@ -2258,6 +2262,86 @@ def main() -> None:
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             parse_mode="HTML",
+        )
+
+    # === Дать всем активным N дней (компенсация простоя) ===
+    @bot.callback_query_handler(func=lambda call: call.data == "admin_grant_all")
+    def callback_admin_grant_all(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Шаг 1: спросить, сколько дней дать всем активным."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        _pending_grant_all.add(call.from_user.id)
+        try:
+            active_n = db_count_active_users()
+        except Exception:  # noqa: BLE001
+            active_n = "?"
+        bot.edit_message_text(
+            f"🎁 <b>Дать всем активным дней</b>\n\n"
+            f"Сейчас активных (есть доступ, конечный срок): <b>{active_n}</b>.\n\n"
+            f"Напиши <b>число дней</b> — добавлю их к сроку каждому активному "
+            f"(тариф/триал не меняются). Любой другой текст — отмена.",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML",
+        )
+
+    @bot.message_handler(
+        func=lambda msg: msg.from_user is not None and msg.from_user.id in _pending_grant_all
+    )
+    def handle_pending_grant_all(message: types.Message) -> None:  # type: ignore[override]
+        """Шаг 2: принять число дней → показать подтверждение."""
+        if not message.from_user:
+            return
+        uid = message.from_user.id
+        _pending_grant_all.discard(uid)
+        raw = (message.text or "").strip()
+        if not raw.isdigit() or not (1 <= int(raw) <= 365):
+            bot.reply_to(message, "Отменено. Нужно целое число дней 1–365.")
+            return
+        days = int(raw)
+        try:
+            active_n = db_count_active_users()
+        except Exception:  # noqa: BLE001
+            active_n = "?"
+        kb = types.InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            types.InlineKeyboardButton(f"✅ Дать +{days} дн", callback_data=f"grant_all_go:{days}"),
+            types.InlineKeyboardButton("Отмена", callback_data="admin_panel"),
+        )
+        bot.reply_to(
+            message,
+            f"Подтверди: добавить <b>+{days} дн</b> каждому из <b>{active_n}</b> активных?",
+            parse_mode="HTML", reply_markup=kb,
+        )
+
+    @bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("grant_all_go:"))
+    def callback_grant_all_go(call: types.CallbackQuery) -> None:  # type: ignore[override]
+        """Шаг 3: применить массовое продление."""
+        if not call.from_user or not is_owner(call.from_user.id, admin_id):
+            bot.answer_callback_query(call.id, "Только для владельца.")
+            return
+        bot.answer_callback_query(call.id)
+        try:
+            days = int(call.data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        if not (1 <= days <= 365):
+            return
+        try:
+            affected = db_bulk_extend_active(days)
+        except Exception as e:  # noqa: BLE001
+            bot.edit_message_text(
+                f"❌ Ошибка массового продления: {e!r}",
+                call.message.chat.id, call.message.message_id,
+            )
+            return
+        logger.info("Bulk extend: +%d дн → %d активным (by %s)", days, affected, call.from_user.id)
+        bot.edit_message_text(
+            f"✅ Готово: <b>+{days} дн</b> добавлено <b>{affected}</b> активным юзерам.",
+            call.message.chat.id, call.message.message_id, parse_mode="HTML",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("« В админ-панель", callback_data="admin_panel")
+            ),
         )
 
     @bot.callback_query_handler(func=lambda call: call.data == "admin_awg_conf")
