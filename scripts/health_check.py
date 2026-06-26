@@ -2,10 +2,12 @@
 """
 Health-check / alerting для VPN-инфраструктуры (Fornex + main + yc + yc2).
 
-Каждые 15 минут проходит ~32 проверок:
-  * Fornex (13, локально): systemd сервисы, docker контейнеры, AWG peer-count,
-    peers.json/awg consistency, диск, swap, LE сертификат, HTTPS endpoint,
-    vless_config_consistency (БД ↔ config на main/yc/yc2).
+Каждые 15 минут проходит ~33 проверки:
+  * Fornex (14, инициируются локально): systemd сервисы, docker контейнеры,
+    AWG peer-count, peers.json/awg consistency, диск, swap, LE сертификат,
+    HTTPS endpoint, vless_config_consistency (БД ↔ config на main/yc/yc2),
+    vless_traffic_flow (реальный VLESS-трафик на yc+yc2 — детектор сетевого
+    блока транспорта при живом сервисе).
   * main (Timeweb, 7, через SSH): reachable, xray, wg-quick@wg0, fail2ban,
     :443/tcp, :51820/udp, диск.
   * yc (Yandex Cloud, 6, через SSH): reachable, xray, fail2ban, :443/tcp,
@@ -68,6 +70,7 @@ DISK_THRESHOLD_PCT = 85
 SWAP_THRESHOLD_PCT = 80
 CERT_THRESHOLD_DAYS = 7
 AWG_PEER_DROP_THRESHOLD_PCT = 50  # падение > 50% от прошлой проверки = FAIL
+VLESS_TRAFFIC_STALE_SEC = 3 * 3600  # 0 реальных VLESS-коннектов на ОБОИХ воркхорсах (yc+yc2) дольше = FAIL
 CERT_PATH = "/etc/letsencrypt/live/supportkronos.online/cert.pem"
 HTTPS_URL = "https://supportkronos.online:8443/"
 # 401/403 — нормально (Flask отвечает, просто нужна авторизация для /)
@@ -468,6 +471,69 @@ def check_vless_config_consistency() -> CheckResult:
         return CheckResult(name, "FAIL", f"check error: {e}")
 
 
+# Возраст (сек) последней реальной @kronos-строки в access.log (+ротация .1) на узле.
+# Печатает целое (возраст), NOLOG (нет kronos-трафика вовсе) или PARSEFAIL.
+# TZ-safe: и `date -d`, и `date +%s` берут TZ узла → разница TZ сокращается
+# (yc/yc2 логируют в UTC; здесь это и так UTC). access.log под root → sudo.
+_VLESS_AGE_PROBE = (
+    'F=/var/log/xray/access.log; '
+    'L=$(sudo grep -a kronos "$F" 2>/dev/null | tail -1 | cut -c1-19); '
+    '[ -z "$L" ] && L=$(sudo grep -a kronos "$F".1 2>/dev/null | tail -1 | cut -c1-19); '
+    'if [ -z "$L" ]; then echo NOLOG; '
+    'else T=$(date -d "$(echo "$L" | tr / -)" +%s 2>/dev/null); '
+    'if [ -z "$T" ]; then echo PARSEFAIL; else echo $(( $(date +%s) - T )); fi; fi'
+)
+
+
+def check_vless_traffic_flow() -> CheckResult:
+    """
+    Детектор «сервис жив, но реальный VLESS-трафик не идёт» — слепое пятно
+    остальных проверок (порт LISTEN + xray active ≠ юзеры реально подключаются).
+
+    Вскрыто 2026-06-26: РКН/ТСПУ начал резать VLESS-REALITY/443 на уровне
+    потребительских ISP (memory project_vpn_rkn_reality_dpi_block_0625). Весь
+    флот лёг 25.06 ~14:00 МСК, а health-check 26ч был зелёным — порты слушали,
+    xray active. Чек смотрит ВОЗРАСТ последнего реального коннекта (@kronos в
+    access.log) на воркхорс-узлах yc и yc2.
+
+    FAIL только если ОБА (yc И yc2) надёжно прочитаны и ОБА молчат ≥
+    VLESS_TRAFFIC_STALE_SEC — подпись флот-сбоя; одиночный тихий узел (юзеры
+    мигрировали на другой) не алертит. Узел не прочитался по SSH (rc≠0) — НЕ
+    учитываем: reachable-gate сам покроет сетевую проблему, не плодим двойной
+    алерт (ср. memory project_vpn_main_ssh_double_alert).
+    """
+    name = "vless_traffic_flow"
+    try:
+        states: Dict[str, str] = {}   # host -> "fresh" | "stale" (только надёжные)
+        ages: Dict[str, int] = {}
+        for host in ("yc", "yc2"):
+            r = _run_remote_resilient(host, _VLESS_AGE_PROBE)
+            if r.returncode != 0:
+                continue  # SSH-проблема — пропускаем (gate покроет)
+            out = r.stdout.strip()
+            if out == "NOLOG":
+                states[host] = "stale"
+            elif out.isdigit():
+                ages[host] = int(out)
+                states[host] = "stale" if int(out) > VLESS_TRAFFIC_STALE_SEC else "fresh"
+            # PARSEFAIL / мусор — unknown, не учитываем
+
+        def _fmt(h: str) -> str:
+            return f"{h}={ages[h] // 60}м" if h in ages else f"{h}={states.get(h, '?')}"
+        msg = f"{_fmt('yc')} {_fmt('yc2')} (порог {VLESS_TRAFFIC_STALE_SEC // 3600}ч)"
+
+        if states.get("yc") == "stale" and states.get("yc2") == "stale":
+            return CheckResult(
+                name, "FAIL",
+                f"VLESS-трафик не идёт ≥{VLESS_TRAFFIC_STALE_SEC // 3600}ч на yc И yc2 "
+                f"(xray active, но 0 реальных коннектов — вероятен сетевой блок транспорта)",
+                msg,
+            )
+        return CheckResult(name, "OK", msg)
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(name, "FAIL", f"check error: {e}")
+
+
 def check_https_endpoint() -> CheckResult:
     name = "https_endpoint"
     try:
@@ -666,6 +732,7 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results.append(check_le_cert())
     results.append(check_https_endpoint())
     results.append(check_vless_config_consistency())
+    results.append(check_vless_traffic_flow())
 
     # --- Remote (main, yc): batch-вызов на хост, gate по reachable ---
     # Все проверки одного хоста выполняются ОДНИМ SSH-вызовом через
