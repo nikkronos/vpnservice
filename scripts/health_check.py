@@ -485,7 +485,7 @@ _VLESS_AGE_PROBE = (
 )
 
 
-def check_vless_traffic_flow() -> CheckResult:
+def check_vless_traffic_flow() -> Optional[CheckResult]:
     """
     Детектор «сервис жив, но реальный VLESS-трафик не идёт» — слепое пятно
     остальных проверок (порт LISTEN + xray active ≠ юзеры реально подключаются).
@@ -497,10 +497,11 @@ def check_vless_traffic_flow() -> CheckResult:
     access.log) на воркхорс-узлах yc и yc2.
 
     FAIL только если ОБА (yc И yc2) надёжно прочитаны и ОБА молчат ≥
-    VLESS_TRAFFIC_STALE_SEC — подпись флот-сбоя; одиночный тихий узел (юзеры
-    мигрировали на другой) не алертит. Узел не прочитался по SSH (rc≠0) — НЕ
-    учитываем: reachable-gate сам покроет сетевую проблему, не плодим двойной
-    алерт (ср. memory project_vpn_main_ssh_double_alert).
+    VLESS_TRAFFIC_STALE_SEC — подпись флот-сбоя; одиночный тихий узел не алертит.
+    Если ХОТЯ БЫ ОДИН узел не прочитался по SSH (rc≠0) — возвращаем None (SKIP):
+    run_all_checks не трогает статус, reachable-gate сам покроет сетевую проблему,
+    не плодим ложный RESOLVED/ALERT при SSH-блипе к yc/yc2 (инцидент 2026-06-27:
+    13-мин блип yc+yc2 флапнул чек; ср. memory project_vpn_main_ssh_double_alert).
     """
     name = "vless_traffic_flow"
     try:
@@ -518,11 +519,18 @@ def check_vless_traffic_flow() -> CheckResult:
                 states[host] = "stale" if int(out) > VLESS_TRAFFIC_STALE_SEC else "fresh"
             # PARSEFAIL / мусор — unknown, не учитываем
 
+        # Не прочитали ОБА воркхорса надёжно (SSH-блип к yc/yc2 и т.п.) → SKIP
+        # (return None): run_all_checks не добавит в results, прошлый статус
+        # сохранится — нет ложного RESOLVED при SSH-провале + обратного ALERT
+        # (инцидент 2026-06-27: 13-мин SSH-блип yc+yc2 флапнул этот чек).
+        if "yc" not in states or "yc2" not in states:
+            return None
+
         def _fmt(h: str) -> str:
             return f"{h}={ages[h] // 60}м" if h in ages else f"{h}={states.get(h, '?')}"
         msg = f"{_fmt('yc')} {_fmt('yc2')} (порог {VLESS_TRAFFIC_STALE_SEC // 3600}ч)"
 
-        if states.get("yc") == "stale" and states.get("yc2") == "stale":
+        if states["yc"] == "stale" and states["yc2"] == "stale":
             return CheckResult(
                 name, "FAIL",
                 f"VLESS-трафик не идёт ≥{VLESS_TRAFFIC_STALE_SEC // 3600}ч на yc И yc2 "
@@ -732,7 +740,9 @@ def run_all_checks(state: Dict) -> tuple[List[CheckResult], Dict]:
     results.append(check_le_cert())
     results.append(check_https_endpoint())
     results.append(check_vless_config_consistency())
-    results.append(check_vless_traffic_flow())
+    _traffic_res = check_vless_traffic_flow()
+    if _traffic_res is not None:  # None = не смог опросить оба узла → SKIP (статус не трогаем)
+        results.append(_traffic_res)
 
     # --- Remote (main, yc): batch-вызов на хост, gate по reachable ---
     # Все проверки одного хоста выполняются ОДНИМ SSH-вызовом через
