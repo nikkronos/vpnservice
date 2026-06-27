@@ -2672,26 +2672,21 @@ def main() -> None:
 
     @bot.message_handler(commands=["proxy"])
     def cmd_proxy(message: types.Message) -> None:  # type: ignore[override]
-        """Отдаёт MTProto-прокси для Telegram + инструкцию. Кнопка «Подключить VPN» —
-        фолбэк, если прокси у оператора не зайдёт (РКН периодически давит прокси)."""
-        fresh = load_config()
-        link = get_effective_mtproto_proxy_link(fresh)
-        if not link:
-            safe_reply(
-                message,
-                "Ссылка на прокси для Telegram не настроена. Обратись к владельцу бота.",
-            )
-            return
-        try:
-            db_update_proxy_requested_at(message.chat.id)
-        except Exception:
-            pass
-        instr = _load_instruction_text(fresh.base_dir, "mtproto")
+        """Proxy для Telegram временно отключён: MTProxy задавлен фильтрацией
+        (усилена 2026-06). Отдаём честный текст + увод на рабочий путь (VPN)."""
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
-            types.InlineKeyboardButton("🔗 Не зашёл прокси? — Подключить VPN", callback_data="vpn_quick"),
+            types.InlineKeyboardButton("🔗 Подключить VPN", callback_data="vpn_quick"),
         )
-        safe_reply(message, f"{link}\n\n{instr}", reply_markup=markup)
+        safe_reply(
+            message,
+            "📨 Proxy для Telegram временно недоступен.\n\n"
+            "Из-за усиленной фильтрации лёгкий прокси сейчас не работает. "
+            "Чтобы Telegram и остальное работало — подключись через VPN: "
+            "он держится там, где прокси уже не проходит.\n\n"
+            "Нажми «🔗 Подключить VPN» ниже или открой «📲 Получить VPN».",
+            reply_markup=markup,
+        )
 
     @bot.message_handler(commands=["proxy_rotate"])
     def cmd_proxy_rotate(message: types.Message) -> None:  # type: ignore[override]
