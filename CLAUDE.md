@@ -85,7 +85,7 @@ git log --oneline -3
 | VLESS+WS+Cloudflare CDN | ✅ Обычные блокировки | `sub.vpnnkrns.ru:443` |
 | ~~VLESS+XHTTP+Yandex CDN~~ | ❌ снято 06-28 (снос YC; Yandex CDN удалён) | — |
 | **VLESS+REALITY TCP (eu1)** | ✅ **основной** (SNI=ebay.com/fp=firefox с 06-28) | Fornex eu1 `185.21.8.91:443` |
-| **VLESS+REALITY (main)** | ✅ РФ-опция (SNI=deepl.com/fp=qq с 06-28; было cloud.mail.ru) ⚠️ БС-whitelist с deepl не проверен | Timeweb `81.200.146.32:443` |
+| **VLESS+REALITY (main)** | ✅ РФ-опция (SNI=deepl.com/fp=qq с 06-28; было cloud.mail.ru — whitelist-SNI выбирался под Мегафон/Yota-БС, но тот кейс и так не пробивался → менять незачем) | Timeweb `81.200.146.32:443` |
 | MTProxy Fake TLS | ✅ Telegram | eu1 порт `8444` |
 | WireGuard UDP к Fornex | ❌ Заблокирован РФ | — |
 | Голый MTProto на eu1 | ❌ Блок по сигнатуре | — |
