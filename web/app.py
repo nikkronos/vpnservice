@@ -2140,16 +2140,12 @@ def _build_subscription_links(telegram_id: Optional[int] = None) -> List[str]:
     out: List[str] = []
     seen = set()
     # (env_attr, default_label, server_id для per-user UUID)
-    # Порядок = приоритет клиента (первый рабочий = по умолчанию). Яндекс
-    # (Европа/Европа-2) первыми — выживают на фильтрующих сетях (РКН режет по
-    # IP-репутации: немецкий eu1 и Timeweb main блокируются при БС, Яндекс — нет;
-    # см. project_vpn_rkn_ip_block). Германию (быстрая на чистой сети) и Россию
-    # (main = путь для Yota/Мегафон при БС, SNI=cloud.mail.ru) держим ниже как
-    # ниши, но не дефолтом. Реордер авто-разъезжается по клиентам за ~12ч
-    # (Profile-Update-Interval) — без broadcast. Изменено 2026-06-10.
+    # Воскрешение 2026-06-28: блок 25.06 был по SNI (www.microsoft.com флагнут),
+    # НЕ по IP/протоколу (память project_vpn_reality_revival_sni). REALITY ожил на
+    # чистых SNI: eu1=ebay.com (немецкий, flat-rate — основной), main=deepl.com
+    # (РФ-опция). Яндекс yc/yc2 убраны из выдачи (мёртвый microsoft-SNI + метрир.
+    # кост, под снос). Разные SNI на узлах = один флаг не убьёт оба.
     config_list = (
-        ("vless_reality_share_url", "🇪🇺 Европа", "yc"),
-        ("vless_yc2_share_url", "🇪🇺 Европа-2", "yc"),
         ("vless_eu1_share_url", "🇩🇪 Германия", "eu1"),
         ("vless_cdn_tls_share_url", "🇷🇺 Россия", "main"),
     )
