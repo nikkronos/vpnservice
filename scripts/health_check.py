@@ -96,8 +96,7 @@ SSH_OPTS = [
 ]
 REMOTE_HOSTS: Dict[str, List[str]] = {
     "main": ["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"],
-    "yc":   ["ssh"] + SSH_OPTS + ["yc"],
-    "yc2":  ["ssh"] + SSH_OPTS + ["yc2"],  # РФ-резерв, клон yc
+    # yc/yc2 убраны 2026-06-28 (снос YC — VLESS воскрешён на eu1/main, SESSION_SUMMARY_2026-06-28)
 }
 
 # План проверок на каждом удалённом хосте.
@@ -111,20 +110,7 @@ REMOTE_CHECK_PLAN: Dict[str, List[Tuple]] = {
         ("port",    51820, "udp"),
         ("disk",    "/"),
     ],
-    "yc": [
-        ("systemd", "xray.service"),
-        ("systemd", "fail2ban.service"),  # SSH brute-force mitigation (2026-06-11)
-        ("port",    443,   "tcp"),
-        ("port",    8443,  "tcp"),   # socat sub-forward (ЛК/подписка через Яндекс-фронт, 2026-06-10)
-        ("disk",    "/"),
-    ],
-    "yc2": [
-        ("systemd", "xray.service"),
-        ("systemd", "fail2ban.service"),  # SSH brute-force mitigation (2026-06-11)
-        ("port",    443,   "tcp"),
-        ("port",    8443,  "tcp"),   # socat sub-forward
-        ("disk",    "/"),
-    ],
+    # yc/yc2 убраны 2026-06-28 (снос YC)
 }
 
 
@@ -422,49 +408,26 @@ def check_vless_config_consistency() -> CheckResult:
         db_main = (row["db_main"] or 0) if row else 0
         db_yc = (row["db_yc"] or 0) if row else 0
 
-        # SSH к main, yc, yc2 — забираем count(clients) из config.json.
-        # yc2 — клон yc (vless-xhttp), сверяется с db_yc.
-        # _run_remote_resilient: ретрай транзиентных SSH-дропов (ночной brute-force
-        # флуд на yc/yc2 упирает sshd в MaxStartups → rc=255 → раньше был
-        # false-FAIL, инцидент 2026-06-11 02:00 UTC).
+        # SSH к main — count(clients) из config.json. yc/yc2 убраны 2026-06-28
+        # (снос YC). eu1 управляется отдельно (sync_eu1_vless.py) — здесь не сверяется.
         cmd_main = "jq '[.inbounds[] | select(.tag==\"vless-tcp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
-        cmd_yc = "sudo jq '[.inbounds[] | select(.tag==\"vless-xhttp\") | .settings.clients[]] | length' /usr/local/etc/xray/config.json"
-        cmd_yc2 = cmd_yc  # yc2 — тот же inbound-tag vless-xhttp
-
         r_m = _run_remote_resilient("main", cmd_main)
-        r_y = _run_remote_resilient("yc", cmd_yc)
-        r_y2 = _run_remote_resilient("yc2", cmd_yc2)
-
         try:
             cfg_main = int(r_m.stdout.strip()) if r_m.returncode == 0 else -1
         except ValueError:
             cfg_main = -1
-        try:
-            cfg_yc = int(r_y.stdout.strip()) if r_y.returncode == 0 else -1
-        except ValueError:
-            cfg_yc = -1
-        try:
-            cfg_yc2 = int(r_y2.stdout.strip()) if r_y2.returncode == 0 else -1
-        except ValueError:
-            cfg_yc2 = -1
 
-        if cfg_main < 0 or cfg_yc < 0 or cfg_yc2 < 0:
+        if cfg_main < 0:
             return CheckResult(
                 name, "FAIL",
-                f"не удалось прочитать count(clients) на main/yc/yc2",
-                f"main_rc={r_m.returncode} yc_rc={r_y.returncode} yc2_rc={r_y2.returncode}",
+                "не удалось прочитать count(clients) на main",
+                f"main_rc={r_m.returncode}",
             )
 
         diff_main = abs(db_main - cfg_main)
-        diff_yc = abs(db_yc - cfg_yc)
-        diff_yc2 = abs(db_yc - cfg_yc2)  # yc2 = клон yc → сверяем с db_yc
-        msg = (
-            f"db_main={db_main} cfg_main={cfg_main} (diff {diff_main}), "
-            f"db_yc={db_yc} cfg_yc={cfg_yc} (diff {diff_yc}), "
-            f"cfg_yc2={cfg_yc2} (diff {diff_yc2})"
-        )
+        msg = f"db_main={db_main} cfg_main={cfg_main} (diff {diff_main})"
 
-        if diff_main > 2 or diff_yc > 2 or diff_yc2 > 2:
+        if diff_main > 2:
             return CheckResult(name, "FAIL", f"разошлось > 2 ({msg})", msg)
         return CheckResult(name, "OK", msg)
     except Exception as e:  # noqa: BLE001
@@ -477,8 +440,8 @@ def check_vless_config_consistency() -> CheckResult:
 # (yc/yc2 логируют в UTC; здесь это и так UTC). access.log под root → sudo.
 _VLESS_AGE_PROBE = (
     'F=/var/log/xray/access.log; '
-    'L=$(sudo grep -a kronos "$F" 2>/dev/null | tail -1 | cut -c1-19); '
-    '[ -z "$L" ] && L=$(sudo grep -a kronos "$F".1 2>/dev/null | tail -1 | cut -c1-19); '
+    'L=$(grep -a kronos "$F" 2>/dev/null | tail -1 | cut -c1-19); '
+    '[ -z "$L" ] && L=$(grep -a kronos "$F".1 2>/dev/null | tail -1 | cut -c1-19); '
     'if [ -z "$L" ]; then echo NOLOG; '
     'else T=$(date -d "$(echo "$L" | tr / -)" +%s 2>/dev/null); '
     'if [ -z "$T" ]; then echo PARSEFAIL; else echo $(( $(date +%s) - T )); fi; fi'
@@ -488,56 +451,63 @@ _VLESS_AGE_PROBE = (
 def check_vless_traffic_flow() -> Optional[CheckResult]:
     """
     Детектор «сервис жив, но реальный VLESS-трафик не идёт» — слепое пятно
-    остальных проверок (порт LISTEN + xray active ≠ юзеры реально подключаются).
+    порт+сервис-проверок (порт LISTEN + xray active ≠ юзеры реально подключаются;
+    вскрыто инцидентом 25.06, memory project_vpn_rkn_reality_dpi_block_0625).
 
-    Вскрыто 2026-06-26: РКН/ТСПУ начал резать VLESS-REALITY/443 на уровне
-    потребительских ISP (memory project_vpn_rkn_reality_dpi_block_0625). Весь
-    флот лёг 25.06 ~14:00 МСК, а health-check 26ч был зелёным — порты слушали,
-    xray active. Чек смотрит ВОЗРАСТ последнего реального коннекта (@kronos в
-    access.log) на воркхорс-узлах yc и yc2.
+    С воскрешения 2026-06-28 основной узел — **eu1** (vless-tcp REALITY sni=ebay,
+    access.log локально на Fornex), main — слабый РФ-вторичный. yc/yc2 убраны
+    (снос YC) и больше не мониторятся (память project_vpn_reality_revival_sni).
 
-    FAIL только если ОБА (yc И yc2) надёжно прочитаны и ОБА молчат ≥
-    VLESS_TRAFFIC_STALE_SEC — подпись флот-сбоя; одиночный тихий узел не алертит.
-    Если ХОТЯ БЫ ОДИН узел не прочитался по SSH (rc≠0) — возвращаем None (SKIP):
-    run_all_checks не трогает статус, reachable-gate сам покроет сетевую проблему,
-    не плодим ложный RESOLVED/ALERT при SSH-блипе к yc/yc2 (инцидент 2026-06-27:
-    13-мин блип yc+yc2 флапнул чек; ср. memory project_vpn_main_ssh_double_alert).
+    Логика (центр — eu1): eu1 свежий → OK; eu1 НЕ прочитан → None (SKIP, статус
+    не трогаем); eu1 молчит ≥порога → FAIL, но свежий main перекрывает (трафик мог
+    сместиться). Возраст = последний @kronos в access.log; eu1 локально (root),
+    main по SSH (root) — без sudo.
     """
     name = "vless_traffic_flow"
     try:
-        states: Dict[str, str] = {}   # host -> "fresh" | "stale" (только надёжные)
-        ages: Dict[str, int] = {}
-        for host in ("yc", "yc2"):
-            r = _run_remote_resilient(host, _VLESS_AGE_PROBE)
-            if r.returncode != 0:
-                continue  # SSH-проблема — пропускаем (gate покроет)
-            out = r.stdout.strip()
+        def _classify(out: str):
+            out = out.strip()
             if out == "NOLOG":
-                states[host] = "stale"
-            elif out.isdigit():
-                ages[host] = int(out)
-                states[host] = "stale" if int(out) > VLESS_TRAFFIC_STALE_SEC else "fresh"
-            # PARSEFAIL / мусор — unknown, не учитываем
+                return "stale", None
+            if out.isdigit():
+                a = int(out)
+                return ("stale" if a > VLESS_TRAFFIC_STALE_SEC else "fresh"), a
+            return None, None  # PARSEFAIL / мусор — unknown
 
-        # Не прочитали ОБА воркхорса надёжно (SSH-блип к yc/yc2 и т.п.) → SKIP
-        # (return None): run_all_checks не добавит в results, прошлый статус
-        # сохранится — нет ложного RESOLVED при SSH-провале + обратного ALERT
-        # (инцидент 2026-06-27: 13-мин SSH-блип yc+yc2 флапнул этот чек).
-        if "yc" not in states or "yc2" not in states:
-            return None
+        states: Dict[str, str] = {}
+        ages: Dict[str, int] = {}
+        # eu1 — локально (Fornex, root, без sudo)
+        r = _run(["sh", "-c", _VLESS_AGE_PROBE])
+        if r.returncode == 0:
+            st, a = _classify(r.stdout)
+            if st:
+                states["eu1"] = st
+                if a is not None:
+                    ages["eu1"] = a
+        # main — по SSH (root, без sudo)
+        rm = _run_remote_resilient("main", _VLESS_AGE_PROBE)
+        if rm.returncode == 0:
+            st, a = _classify(rm.stdout)
+            if st:
+                states["main"] = st
+                if a is not None:
+                    ages["main"] = a
+
+        if "eu1" not in states:
+            return None  # основной узел не прочитан → SKIP (не трогаем статус)
 
         def _fmt(h: str) -> str:
             return f"{h}={ages[h] // 60}м" if h in ages else f"{h}={states.get(h, '?')}"
-        msg = f"{_fmt('yc')} {_fmt('yc2')} (порог {VLESS_TRAFFIC_STALE_SEC // 3600}ч)"
+        msg = f"{_fmt('eu1')} {_fmt('main')} (порог {VLESS_TRAFFIC_STALE_SEC // 3600}ч)"
 
-        if states["yc"] == "stale" and states["yc2"] == "stale":
-            return CheckResult(
-                name, "FAIL",
-                f"VLESS-трафик не идёт ≥{VLESS_TRAFFIC_STALE_SEC // 3600}ч на yc И yc2 "
-                f"(xray active, но 0 реальных коннектов — вероятен сетевой блок транспорта)",
-                msg,
-            )
-        return CheckResult(name, "OK", msg)
+        if states["eu1"] == "fresh" or states.get("main") == "fresh":
+            return CheckResult(name, "OK", msg)
+        return CheckResult(
+            name, "FAIL",
+            f"VLESS-трафик не идёт ≥{VLESS_TRAFFIC_STALE_SEC // 3600}ч на eu1 (основной) "
+            f"(xray active, но 0 реальных коннектов — проверь блок/SNI/fp)",
+            msg,
+        )
     except Exception as e:  # noqa: BLE001
         return CheckResult(name, "FAIL", f"check error: {e}")
 
