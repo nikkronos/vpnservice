@@ -328,7 +328,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | Открытые задачи | `ROADMAP_VPN.md` (только открытое) |
 | История изменений | `DONE_LIST_VPN.md` (хронология + оглавление) |
 | Монетизация / платежи | `docs/monetization-and-payments.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-26.md` (🔴 флот VLESS-REALITY лёг 25.06 РКН-DPI; health-check `vless_traffic_flow` + компенсация +7д + транспорт-поиск → AWG; открыт трек обхода стены) |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-28.md` (🟢 блок 25.06 РЕШЁН — был `fp=chrome`+microsoft-SNI, не протокол/IP; REALITY воскрешён на ebay/deepl + firefox/qq; yc/yc2 убраны, YC под снос) |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
