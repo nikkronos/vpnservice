@@ -45,7 +45,7 @@ SSH_OPTS = [
 ]
 REMOTE_SSH: Dict[str, List[str]] = {
     "main": ["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"],
-    "yc":   ["ssh"] + SSH_OPTS + ["yc"],
+    # yc убран 2026-06-28 (снос YC)
 }
 
 # Какие серверы пинговать (eu1 — локально, через docker/локальный xray).
@@ -161,7 +161,7 @@ def main() -> int:
     total_rx_tx_this_run = 0
     total_user_samples = 0
 
-    for server in ["eu1", "main", "yc"]:
+    for server in ["eu1", "main"]:  # yc убран 2026-06-28 (снос YC)
         # 1. Per-inbound aggregate (для шапки админки — vless_server_traffic)
         inbound_samples = _query_inbound_samples(server)
         if inbound_samples is None:
@@ -176,20 +176,20 @@ def main() -> int:
         ) or "all-zero"
 
         # 2. Per-user (для статуса VLESS-юзеров — vless_user_traffic).
-        # Только main/yc (eu1 пока на общих UUIDs, телеметрия = inbound-aggregate).
+        # Только main (eu1 пока на общих UUIDs, телеметрия = inbound-aggregate; yc убран 06-28).
         user_count = 0
-        if server in ("main", "yc"):
+        if server == "main":
             user_samples = _query_user_samples(server)
             if user_samples:
                 db_accumulate_vless_user_traffic(server, user_samples)
                 user_count = sum(1 for s in user_samples if (s["rx"] + s["tx"]) > 0)
                 total_user_samples += user_count
 
-        suffix = f", per-user={user_count} active" if server in ("main", "yc") else ""
+        suffix = f", per-user={user_count} active" if server == "main" else ""
         print(f"vless_summary[{server}]: {tags_summary}{suffix}", flush=True)
 
     print(
-        f"vless_summary: done — {servers_processed}/3 servers, "
+        f"vless_summary: done — {servers_processed}/2 servers, "
         f"total rx+tx={total_rx_tx_this_run / 1024**2:.1f} MB, "
         f"per-user samples with traffic={total_user_samples}",
         flush=True,
