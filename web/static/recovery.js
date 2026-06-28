@@ -10,8 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const stepSettings     = document.getElementById('stepSettings');
   const stepPlatform     = document.getElementById('stepPlatform');
   const stepAwgResult    = document.getElementById('stepAwgResult');
-  const stepOperator     = document.getElementById('stepOperator');
-  const stepMobileResult = document.getElementById('stepMobileResult');
   const stepProxy        = document.getElementById('stepProxy');
   const stepDevices       = document.getElementById('stepDevices');
   const stepDeviceResult  = document.getElementById('stepDeviceResult');
@@ -19,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const deviceResult      = document.getElementById('deviceResult');
   const deviceResultTitle = document.getElementById('deviceResultTitle');
   const awgResultTitle    = document.getElementById('awgResultTitle');
-  const mobileResultTitle = document.getElementById('mobileResultTitle');
 
   // Карта родительских шагов — для TG BackButton и наших «« Назад».
   // Шаги без родителя — корни (email/otp/menu) — назад скрывается.
@@ -41,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const verifyResult   = document.getElementById('verifyOtpResult');
 
   const awgResult    = document.getElementById('awgResult');
-  const mobileResult = document.getElementById('mobileResult');
   const proxyResult  = document.getElementById('proxyResult');
 
   const accountStatus    = document.getElementById('accountStatus');
@@ -169,13 +165,12 @@ document.addEventListener('DOMContentLoaded', () => {
     stepEmail, stepOtp, stepMenu,
     stepBilling, stepManualPay, stepConnect, stepReferral, stepSettings,
     stepDevices, stepDeviceResult,
-    stepPlatform, stepAwgResult, stepOperator, stepMobileResult, stepProxy,
+    stepPlatform, stepAwgResult, stepProxy,
   ];
 
   // Иерархия шагов: главное меню — корень, разделы ведут к нему,
-  // выбор канала/платформы/оператора возвращает в stepConnect.
-  // stepAwgResult/stepMobileResult — результат выбора платформы/оператора,
-  // возвращают на step выбора (чтобы можно было выбрать другое устройство/оператора).
+  // выбор канала/платформы возвращает в stepConnect.
+  // stepAwgResult — результат выбора платформы, возвращает на step выбора.
   stepParent.set(stepBilling,      stepMenu);
   stepParent.set(stepManualPay,    stepBilling);
   stepParent.set(stepConnect,      stepMenu);
@@ -183,8 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
   stepParent.set(stepSettings,     stepMenu);
   stepParent.set(stepPlatform,     stepConnect);
   stepParent.set(stepAwgResult,    stepPlatform);
-  stepParent.set(stepOperator,     stepConnect);
-  stepParent.set(stepMobileResult, stepOperator);
   // stepProxy теперь доступен прямо из главного меню (по запросу владельца 2026-05-27),
   // а не через stepConnect — Telegram-прокси логически независим от VPN.
   stepParent.set(stepProxy,        stepMenu);
@@ -1334,9 +1327,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (ch === 'awg') {
         if (awgResult) awgResult.innerHTML = '';
         showStep(stepPlatform);
-      } else if (ch === 'mobile') {
-        if (mobileResult) mobileResult.innerHTML = '';
-        showStep(stepOperator);
       }
     });
   });
@@ -1450,77 +1440,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
       } finally {
         document.querySelectorAll('[data-platform]').forEach(b => b.disabled = false);
-      }
-    });
-  });
-
-  // ── Шаг 4b: Оператор → VLESS ─────────────────────────────────────────────
-  document.querySelectorAll('[data-operator]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const operator = btn.dataset.operator;
-      if (!mobileResult) return;
-
-      // Переход на substep с заголовком по оператору.
-      const _operatorLabels = {
-        yota: 'Yota', megafon: 'Мегафон', mts: 'МТС', beeline: 'Билайн',
-        tele2: 'Т2', tmobile: 'Т-Мобайл', other: 'Другой оператор',
-      };
-      if (mobileResultTitle) {
-        mobileResultTitle.textContent = `📡 VPN при блокировках — ${_operatorLabels[operator] || operator}`;
-      }
-      showStep(stepMobileResult);
-      mobileResult.innerHTML = '';
-      const status = document.createElement('p');
-      status.style.color = 'var(--green)';
-      status.textContent = 'Запрашиваем ссылку…';
-      mobileResult.appendChild(status);
-
-      document.querySelectorAll('[data-operator]').forEach(b => b.disabled = true);
-      try {
-        const resp = await fetch('/api/recovery/mobile-link-by-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: sessionToken, operator }),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          setMsg(status, 'Ошибка: ' + (data.error || resp.statusText), true);
-          return;
-        }
-
-        const link = data.vless_url || '';
-        if (!link) {
-          setMsg(status, 'Сервер не вернул ссылку.', true);
-          return;
-        }
-
-        status.remove();
-        // Унифицированный порядок и тексты для всех операторов:
-        // 1. QR + caption
-        // 2. spacer
-        // 3. инструкция «Скопируй vless://...»
-        // 4. ссылка-блок
-        renderQr(mobileResult, data.qr, 'Сканируй QR в приложении');
-
-        const spacer = document.createElement('div');
-        spacer.style.height = '12px';
-        mobileResult.appendChild(spacer);
-
-        const inst = document.createElement('p');
-        inst.className = 'section-hint';
-        inst.innerHTML = (
-          'Скопируй <code>vless://</code>... целиком.<br>' +
-          'Импортируй в <b>Happ</b> (happ.su): «+» → «Импорт из буфера».'
-        );
-        mobileResult.appendChild(inst);
-
-        renderLinkBlock(mobileResult, link, '', 'Копировать ссылку');
-        lastConfigRetry = () => btn.click();
-        appendRetryButton(mobileResult);
-      } catch (err) {
-        setMsg(status, 'Сетевая ошибка: ' + (err.message || err), true);
-      } finally {
-        document.querySelectorAll('[data-operator]').forEach(b => b.disabled = false);
       }
     });
   });

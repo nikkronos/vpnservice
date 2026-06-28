@@ -14,7 +14,7 @@ main() как вложенные функции/хендлеры (замыкан
   §7  Email-флоу (регистрация/привязка)
   §8  Admin-панель (inline)
   §9  Команды: статус/ЛК/инструкции/proxy
-  §10 Мобильный VLESS (под оператора)
+  §10 (удалён 2026-06-28 — операторский «Мобильный» флоу выпилен)
   §11 Owner-команды / обслуживание
   §12 Платежи (Stars + donation-claim)
   §13 Support / helpdesk
@@ -1517,14 +1517,12 @@ def main() -> None:
             other_markup.add(
                 types.InlineKeyboardButton("💻 AmneziaWG — макс. скорость (ПК / Wi-Fi)", callback_data="menu_get_config"),
                 types.InlineKeyboardButton("🖥 Мои устройства (AmneziaWG)", callback_data="dev_list"),
-                types.InlineKeyboardButton("📡 Мобильный — под оператора", callback_data="menu_mobile_vpn"),
                 types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"),
             )
             other_text = (
                 "Другие способы подключения:\n\n"
                 "💻 <b>AmneziaWG</b> — отдельный конфиг, макс. скорость на ПК / Wi-Fi. "
-                "⚠️ Не работает на мобильном интернете.\n\n"
-                "📡 <b>Мобильный</b> — отдельная ссылка под конкретного оператора."
+                "⚠️ Не работает на мобильном интернете."
             )
             bot.send_message(call.message.chat.id, other_text, parse_mode="HTML", reply_markup=other_markup)
         elif action == "menu_get_config":
@@ -1578,10 +1576,6 @@ def main() -> None:
             cmd_instruction(call.message)
         elif action == "menu_proxy":
             cmd_proxy(call.message)  # MTProxy не гейтим — открыт для всех
-        elif action == "menu_mobile_vpn":
-            if not _check_access_or_block(call.message.chat.id, call.from_user.id):
-                return
-            cmd_mobile_vpn(call.message)
         elif action == "menu_status":
             cmd_status(call.message)
         elif action == "menu_support":
@@ -2771,151 +2765,6 @@ def main() -> None:
             bot.send_message(message.chat.id, link, parse_mode=None)
         except Exception as e:  # noqa: BLE001
             logger.exception("proxy_rotate send link: %s", e)
-
-    # ══════════════════ §10 · МОБИЛЬНЫЙ VLESS (под оператора) ══════════════════
-    @bot.message_handler(commands=["mobile_vpn"])
-    def cmd_mobile_vpn(message: types.Message) -> None:  # type: ignore[override]
-        """Показывает клавиатуру выбора оператора для мобильного VPN."""
-        if not message.from_user:
-            safe_reply(message, "Не удалось определить пользователя.")
-            return
-
-        if not _is_authorized(message.from_user.id):
-            safe_reply(message, "Нет доступа. Войди по email через /start.")
-            return
-
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("Билайн", callback_data="mobile_op_beeline"),
-            types.InlineKeyboardButton("МТС", callback_data="mobile_op_mts"),
-            types.InlineKeyboardButton("Мегафон", callback_data="mobile_op_megafon"),
-            types.InlineKeyboardButton("Yota", callback_data="mobile_op_yota"),
-            types.InlineKeyboardButton("Т-Мобайл", callback_data="mobile_op_tmobile"),
-            types.InlineKeyboardButton("Т2", callback_data="mobile_op_t2"),
-            types.InlineKeyboardButton("Другой", callback_data="mobile_op_other"),
-        )
-        markup.add(types.InlineKeyboardButton("« Главное меню", callback_data="go_main_menu"))
-        safe_reply(
-            message,
-            "📱 <b>Мобильный VPN</b>\n\nВыбери своего оператора:",
-            reply_markup=markup,
-        )
-
-    def _send_mobile_vless(chat_id: int, url: str, instruction_key: str) -> None:
-        """Отправляет инструкцию и VLESS ссылку для мобильного VPN."""
-        import html as _html
-        instr = _load_instruction_text(config.base_dir, instruction_key)
-        bot.send_message(chat_id, instr)
-        try:
-            safe_url = _html.escape(url)
-            bot.send_message(chat_id, f"<code>{safe_url}</code>", parse_mode="HTML")
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Не удалось отправить VLESS ссылку: %s", e)
-            bot.send_message(chat_id, "Не удалось отправить ссылку. Напиши владельцу.")
-
-    def _personalize_vless_for_bot(template_url: str, target_server: str, telegram_id: int) -> str:
-        """
-        Подставляет per-user UUID в vless://-template для бота.
-        Mirror функции _personalize_vless_url в web/app.py. Если UUID только что
-        создан — асинхронно триггерит sync_xray_users (~10 сек до готовности).
-        """
-        if not template_url or "@" not in template_url or not template_url.startswith("vless://"):
-            return template_url
-        try:
-            existing = db_get_per_user_vless_uuid(telegram_id, target_server)
-            per_user_uuid = db_get_or_create_vless_uuid(telegram_id, target_server)
-            if not per_user_uuid:
-                return template_url
-            if not existing:
-                # Только что создан → async sync Xray в фоне
-                import subprocess as _sp
-                import pathlib as _pl
-                script_path = _pl.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
-                try:
-                    _sp.Popen(
-                        [sys.executable, str(script_path), "--server", target_server],
-                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                        start_new_session=True,
-                    )
-                    logger.info("Spawned async sync_xray_users for tid=%s server=%s", telegram_id, target_server)
-                except Exception as e:
-                    logger.warning("Failed to spawn sync: %s", e)
-            head, rest = template_url.split("@", 1)
-            return f"vless://{per_user_uuid}@{rest}"
-        except Exception as e:
-            logger.warning("personalize_vless_for_bot failed for tid=%s: %s", telegram_id, e)
-            return template_url
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("mobile_op_"))
-    def callback_mobile_operator(call: types.CallbackQuery) -> None:  # type: ignore[override]
-        bot.answer_callback_query(call.id)
-        if not call.from_user:
-            return
-        if not _is_authorized(call.from_user.id):
-            bot.send_message(call.message.chat.id, "Нет доступа.")
-            return
-
-        op = call.data  # mobile_op_beeline / mobile_op_megafon / etc.
-
-        # target_server — для подстановки per-user UUID:
-        #   main — REALITY cloud.mail.ru (Мегафон/Yota)
-        #   yc   — REALITY www.microsoft.com (остальные операторы)
-        if op == "mobile_op_yota":
-            # Yota подтверждённо работает через main REALITY (SNI=cloud.mail.ru) при БС.
-            # См. SESSION_SUMMARY_2026-05-21.
-            if config.vless_cdn_tls_share_url:
-                template_url = config.vless_cdn_tls_share_url
-                instruction_key = "vless_cdn"
-                target_server = "main"
-            elif config.vless_cdn_share_url:
-                template_url = config.vless_cdn_share_url
-                instruction_key = "vless_cdn"
-                target_server = "main"
-            else:
-                template_url = config.vless_eu1_share_url
-                instruction_key = "vless_reality"
-                target_server = "eu1"
-        elif op == "mobile_op_megafon":
-            # Мегафон: 2026-05-22 выявлено что у Мегафон IP Timeweb (наш main) НЕ в whitelist
-            # (TCP-таймаут). Пока выдаём то же что Yota, как best-effort.
-            if config.vless_cdn_tls_share_url:
-                template_url = config.vless_cdn_tls_share_url
-                instruction_key = "vless_cdn"
-                target_server = "main"
-            elif config.vless_cdn_share_url:
-                template_url = config.vless_cdn_share_url
-                instruction_key = "vless_cdn"
-                target_server = "main"
-            else:
-                template_url = config.vless_eu1_share_url
-                instruction_key = "vless_reality"
-                target_server = "eu1"
-        elif op == "mobile_op_other":
-            template_url = config.vless_eu1_share_url
-            instruction_key = "vless_reality_other"
-            target_server = "eu1"
-        else:
-            template_url = config.vless_eu1_share_url
-            instruction_key = "vless_reality"
-            target_server = "eu1"
-
-        if not template_url:
-            bot.send_message(
-                call.message.chat.id,
-                "Мобильный профиль пока не настроен. Напиши владельцу.",
-            )
-            return
-
-        # Подстановка per-user UUID (с автосинхронизацией Xray в фоне)
-        url = _personalize_vless_for_bot(template_url, target_server, call.from_user.id)
-
-        # Proof-of-life для VLESS
-        try:
-            db_update_vless_requested_at(call.from_user.id)
-        except Exception:
-            pass
-
-        _send_mobile_vless(call.message.chat.id, url, instruction_key)
 
     # ════════════════════ §11 · OWNER-КОМАНДЫ / ОБСЛУЖИВАНИЕ ════════════════════
     @bot.message_handler(commands=["server_exec"])

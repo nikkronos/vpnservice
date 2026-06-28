@@ -122,10 +122,6 @@
           💻 AmneziaWG — макс. скорость
           <span class="btn-menu-sub">Для ПК / Wi-Fi. Не для мобильного интернета</span>
         </button>
-        <button type="button" class="btn-recovery btn-menu" data-channel="mobile">
-          📡 VPN при блокировках
-          <span class="btn-menu-sub">Если основной не идёт — пробивает строгие блокировки</span>
-        </button>
       </div>
     </section>
 
@@ -184,28 +180,6 @@
       <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
       <h2 id="awgResultTitle">📲 Основной VPN</h2>
       <div id="awgResult" class="recovery-result" aria-live="polite"></div>
-    </section>
-
-    <!-- ── Шаг 4b: Выбор оператора (для мобильного резерва) ───── -->
-    <section class="recovery" id="stepOperator" hidden>
-      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
-      <h2>📡 VPN при блокировках — выбор оператора</h2>
-      <div class="recovery-menu">
-        <button type="button" class="btn-recovery btn-menu" data-operator="yota">📱 Yota</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="megafon">📱 Мегафон</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="mts">📱 МТС</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="beeline">📱 Билайн</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="tele2">📱 Т2 (Tele2)</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="tmobile">📱 Т-Мобайл</button>
-        <button type="button" class="btn-recovery btn-menu" data-operator="other">❓ Другой / не уверен</button>
-      </div>
-    </section>
-
-    <!-- ── Substep: Результат для выбранного оператора (VLESS) ── -->
-    <section class="recovery" id="stepMobileResult" hidden>
-      <button type="button" class="btn-recovery btn-recovery-secondary btn-back" data-back>« Назад</button>
-      <h2 id="mobileResultTitle">📡 VPN при блокировках</h2>
-      <div id="mobileResult" class="recovery-result" aria-live="polite"></div>
     </section>
 
     <!-- ── Шаг 4c: MTProxy ─────────────────────────────────────── -->
