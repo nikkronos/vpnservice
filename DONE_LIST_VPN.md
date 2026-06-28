@@ -9,7 +9,7 @@
 ## Оглавление
 
 **2026-06**
-- 2026-06-28 — 🟢 ИНЦИДЕНТ VLESS-блока РЕШЁН: причина = `fp=chrome`+microsoft-SNI (не протокол/IP, вскрыто конкурент-интелом); REALITY воскрешён на ebay/deepl + firefox/qq, yc/yc2 убраны, YC под снос (`SESSION_SUMMARY_2026-06-28`)
+- 2026-06-28 — 🟢 ИНЦИДЕНТ VLESS-блока РЕШЁН: причина = `fp=chrome`+microsoft-SNI (не протокол/IP, вскрыто конкурент-интелом); REALITY воскрешён на ebay/deepl + firefox/qq; **YC снесён полностью** (−2300₽/мес); операторский «Мобильный» флоу выпилен (`SESSION_SUMMARY_2026-06-28`)
 - 2026-06-26 — 🔴 Флот VLESS-REALITY лёг (РКН-DPI на уровне ISP, 25.06 ~14:00 МСК): диагностика + health-check `vless_traffic_flow` + компенсация +7д (20) + кнопка «🎁 дать всем дней» + транспорт-поиск (REALITY/Hysteria мертвы на мобиле → AWG = ответ, не победа; открыт трек обхода)
 - 2026-06-25 — Юнит-экономика после гранта (убыток ~−2.3к/мес, брейк-ивен 30–50) + решения (yc2→июль, трафик/Timeweb не трогать) · Happ выпилен из РФ App Store · Hiro зафиксирован · Daniil (платящий) выбит жёстким БС
 - 2026-06-24 — Рефактор #3 закрыт: дедуп device-autoname + навигация (§-баннеры/карта) bot+web
@@ -128,7 +128,9 @@
 - **Изоляция (тесты владельца по 1 переменной):** ebay-SNI ожил на ТОМ ЖЕ yc-IP (где microsoft умер) и на eu1; eu1:443 chrome→МЁРТВ, firefox→ОЖИЛ → убийца = fp=chrome.
 - **Воскрешение/раскатка:** eu1 `sni=ebay/fp=firefox`, main `sni=deepl/fp=qq` (разные на узел = анти-флаг), vision-TCP; `/sub` (`_build_subscription_links`) = 2 узла (eu1+main), yc/yc2 убраны. Проверено продукт-путём (mobile+wifi) + 121 коннект на eu1. Коммит `1d2063f` + env-правки на сервере.
 - **Память:** `project_vpn_reality_revival_sni` (🔑); `rkn_reality_dpi_block_0625`/`transport_after_block` помечены неверным/устаревшим.
-- **Остаток:** Этап 3 (репойнт `vless_traffic_flow` на eu1/main, чистка бот-флоу «📡 Мобильный»), Этап 4 (снос YC −2300₽).
+- **Этап 3 (закалка) ✅:** `vless_traffic_flow` репойнтнут на eu1+main (был завис в FAIL на дропнутых yc/yc2).
+- **Этап 4 (снос YC) ✅:** DNS supportkronos→eu1 (185.21.8.91); yc/yc2 убраны из health-check (33→21 проверки)/sync_xray/vless_summary/ip_usage_watcher/бот/ЛК; **владелец удалил ВСЕ YC-ресурсы** (VM+диски+IP+CDN/Backup/Logging) → −2300₽/мес.
+- **Упрощение (финал):** доки (CLAUDE.md+ROADMAP) вычищены от yc/yc2; **операторский «📡 Мобильный» флоу выпилен целиком** из бота+ЛК (−342 стр., коммит `be64702`) → 2 пути: подписка `/sub` + AmneziaWG-резерв. main SNI=deepl подтверждён (cloud.mail.ru-whitelist был под непробиваемый Мегафон-БС → не возвращаем).
 
 ## 2026-06-26 — 🔴 Инцидент: флот VLESS-REALITY лёг (РКН-DPI) + health-check vless_traffic_flow
 
