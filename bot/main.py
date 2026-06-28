@@ -2872,9 +2872,9 @@ def main() -> None:
                 instruction_key = "vless_cdn"
                 target_server = "main"
             else:
-                template_url = config.vless_reality_share_url
+                template_url = config.vless_eu1_share_url
                 instruction_key = "vless_reality"
-                target_server = "yc"
+                target_server = "eu1"
         elif op == "mobile_op_megafon":
             # Мегафон: 2026-05-22 выявлено что у Мегафон IP Timeweb (наш main) НЕ в whitelist
             # (TCP-таймаут). Пока выдаём то же что Yota, как best-effort.
@@ -2887,17 +2887,17 @@ def main() -> None:
                 instruction_key = "vless_cdn"
                 target_server = "main"
             else:
-                template_url = config.vless_reality_share_url
+                template_url = config.vless_eu1_share_url
                 instruction_key = "vless_reality"
-                target_server = "yc"
+                target_server = "eu1"
         elif op == "mobile_op_other":
-            template_url = config.vless_reality_share_url
+            template_url = config.vless_eu1_share_url
             instruction_key = "vless_reality_other"
-            target_server = "yc"
+            target_server = "eu1"
         else:
-            template_url = config.vless_reality_share_url
+            template_url = config.vless_eu1_share_url
             instruction_key = "vless_reality"
-            target_server = "yc"
+            target_server = "eu1"
 
         if not template_url:
             bot.send_message(
