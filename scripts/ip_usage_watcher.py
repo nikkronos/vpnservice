@@ -41,8 +41,7 @@ SSH_OPTS = ["-o", "ConnectTimeout=8", "-o", "BatchMode=yes", "-o", "StrictHostKe
 ENTRY_SERVERS: Dict[str, Tuple[Optional[List[str]], str]] = {
     "eu1":  (None, ""),
     "main": (["ssh", "-i", "/root/.ssh/id_ed25519_main"] + SSH_OPTS + ["root@81.200.146.32"], ""),
-    "yc":   (["ssh"] + SSH_OPTS + ["yc"], "sudo "),
-    "yc2":  (["ssh"] + SSH_OPTS + ["yc2"], "sudo "),
+    # yc/yc2 убраны 2026-06-28 (снос YC)
 }
 
 LINE_RE = re.compile(r"from (\S+):\d+ accepted .*?email: tid_(\d+)@kronos")

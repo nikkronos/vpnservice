@@ -602,9 +602,8 @@ _HEALTH_STATE_PATH = "/var/lib/vpn-health/state.json"
 # main/yc по SSH). Здесь переводим в понятные владельцу сервисы.
 _SERVICE_MAP = [
     ("🛡️ Основной VPN (AmneziaWG)", "amnezia-awg2", "eu1 · основной VPN, обход блокировок из РФ"),
-    ("📲 VLESS · 🇷🇺 Россия",        "main:xray.service", "main (Timeweb) · Мегафон/Yota · REALITY cloud.mail.ru"),
-    ("📲 VLESS · 🇪🇺 Европа",        "yc:xray.service",   "yc (Yandex Cloud) · др. операторы · REALITY www.microsoft.com"),
-    ("🌐 VLESS-WS",                  "xray.service",      "eu1 · обычные блокировки (CDN-канал)"),
+    ("📲 VLESS · 🇷🇺 Россия",        "main:xray.service", "main (Timeweb) · Мегафон/Yota · REALITY deepl.com"),
+    ("📲 VLESS · 🇩🇪 Германия",      "xray.service",      "eu1 · основной REALITY (ebay.com) + WS-канал"),
     ("📎 Telegram-прокси (MTProxy)", "mtproxy-faketls",   "eu1 · Telegram при блокировках"),
 ]
 
@@ -1414,7 +1413,7 @@ def api_recovery_mobile_link_by_email():
 
     Routing:
         - megafon | yota → vless_cdn_tls_share_url (main REALITY, SNI=cloud.mail.ru) — работает при БС
-        - другие → vless_reality_share_url (eu1/yc REALITY, SNI=www.microsoft.com)
+        - другие → vless_eu1_share_url (eu1 REALITY, SNI=ebay.com; yc убран 06-28)
     """
     try:
         body = request.get_json() or {}
@@ -1432,8 +1431,8 @@ def api_recovery_mobile_link_by_email():
             return jsonify({"error": "operator must be one of: megafon, yota, beeline, mts, tele2, tmobile, other"}), 400
 
         fresh_cfg = load_config()
-        # server_id для per-user UUID: megafon/yota → main (REALITY cloud.mail.ru),
-        # остальные операторы → yc (REALITY www.microsoft.com).
+        # server_id для per-user UUID: megafon/yota → main (REALITY deepl.com),
+        # остальные операторы → eu1 (REALITY ebay.com; yc убран 06-28, снос YC).
         if operator in ("megafon", "yota"):
             template_url = (
                 getattr(fresh_cfg, "vless_cdn_tls_share_url", None)
@@ -1446,8 +1445,12 @@ def api_recovery_mobile_link_by_email():
                 "Скопируй vless://... целиком и импортируй в приложение."
             )
         else:
-            template_url = getattr(fresh_cfg, "vless_reality_share_url", None)
-            target_server = "yc"
+            # yc убран 06-28 (снос YC) → eu1 REALITY (ebay/firefox), живой основной узел
+            template_url = (
+                getattr(fresh_cfg, "vless_eu1_share_url", None)
+                or getattr(fresh_cfg, "vless_reality_share_url", None)
+            )
+            target_server = "eu1"
             hint = (
                 "Резервный мобильный VPN. Скопируй vless://... целиком. "
                 "Android: v2rayNG или Hiddify → «+» → «Импорт из буфера». "
@@ -2098,9 +2101,9 @@ def _sync_xray_after_new_uuid(server_id: str) -> None:
 
 # Маппинг VLESS-сервера → ENV-атрибут (для генерации ссылок)
 _VLESS_SERVER_TO_ATTR = {
-    "yc":   "vless_reality_share_url",       # YC REALITY xHTTP (T2/МТС/Билайн)
-    "main": "vless_cdn_tls_share_url",       # Main REALITY (Мегафон/Yota)
-    "eu1":  "vless_eu1_share_url",           # eu1 REALITY TCP (быстрый немецкий)
+    # yc убран 06-28 (снос YC)
+    "main": "vless_cdn_tls_share_url",       # Main REALITY (Мегафон/Yota, SNI=deepl)
+    "eu1":  "vless_eu1_share_url",           # eu1 REALITY TCP (основной, SNI=ebay)
 }
 
 
