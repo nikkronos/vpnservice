@@ -23,9 +23,9 @@
 
 **6. Воскрешение / раскатка.** Узлы: eu1:443 realitySettings serverNames+dest → ebay.com, main:443 → deepl.com. `/sub` (`web/app.py:_build_subscription_links`, коммит `1d2063f`): оставлены **eu1+main**, yc/yc2 убраны; env-шаблоны (на сервере, не в git): eu1 `sni=ebay&fp=firefox`, main `sni=deepl&fp=qq`. Проверено: регенерённая подписка → продукт-путь работает у владельца (mobile+wifi) + 121 реальный коннект на eu1 (`tid_135366416@kronos`).
 
-**7. Закалка (Этап 3).** Разные SNI (ebay/deepl) И fp (firefox/qq) по узлам — один флаг РКН не убьёт оба (моно-chrome нас и убил). **Остаток:** репойнт `vless_traffic_flow` на eu1(локально)+main вместо дропнутых yc/yc2 (сейчас завис в FAIL — следит за мёртвыми узлами, новых алертов не шлёт); чистка бот-флоу «📡 Мобильный» (мёртвые прямые yc-ссылки); список запасных чистых SNI.
+**7. Закалка (Этап 3) ✅.** Разные SNI (ebay/deepl) И fp (firefox/qq) по узлам — один флаг РКН не убьёт оба (моно-chrome нас и убил). **Сделано 06-28:** `vless_traffic_flow` репойнтнут на eu1(локально)+main (был завис в FAIL на дропнутых yc/yc2 → при репойнте ушёл RESOLVED «Был DOWN 1499 мин» = те ~25ч слепоты); бот-флоу «📡 Мобильный» + ЛК-мобрезерв (`web/app.py /api/recovery/mobile-link-by-email`) yc→eu1. Опц. на будущее: health-check «реальный handshake», список запасных чистых SNI.
 
-**8. Косты (Этап 4).** YC (yc/yc2) = корень убытка (метрир. Яндекс-трафик ~−2300₽/мес). REALITY на YC тоже воскрешаем сменой fp/SNI, НО eu1 (Fornex flat-rate) тянет → **YC под снос:** перенос `/sub`-фронта с yc/yc2 (правило #0.1), снятие зависимостей health-check, удаление VM.
+**8. Косты — снос YC (Этап 4) ✅ декаплинг.** YC (yc/yc2) = корень убытка (метрир. Яндекс-трафик ~−2300₽/мес). **Сделано 06-28:** DNS-фронт `supportkronos.online` перенесён с yc/yc2 → eu1 (185.21.8.91, правило #0.1 закрыто; проверено @1.1.1.1/@8.8.8.8 + eu1:8443 отдаёт `/sub` напрямую); yc/yc2 убраны из health-check (REMOTE_HOSTS/PLAN/consistency/traffic_flow), `sync_xray_users`, `vless_summary`, `ip_usage_watcher`, бот-флоу, ЛК. **VM удалены владельцем 06-28.** Остаток у владельца: освободить статич. IP + CDN/Backup/Logging/VPC/cert в YC-консоли (иначе зарезерв. IP продолжают капать).
 
 ## Ключевые уроки (чтоб не повторить)
 1. **НЕ использовать дефолты** `fp=chrome` + `sni=www.microsoft.com` — их юзает пол-рынка VPN, ТСПУ флагает первыми. Брать чистые SNI (ebay/deepl/…) + не-chrome fp (firefox/qq/safari).
@@ -40,7 +40,7 @@
 - `project_vpn_transport_after_block` — устарел (AWG ≠ единственная замена).
 
 ## Состояние на конец сессии
-- ✅ Сервис воскрешён: **eu1=ebay/firefox, main=deepl/qq**, `/sub` = 2 узла, yc/yc2 убраны (под снос).
-- ◀ Остаток Этапа 3: репойнт `vless_traffic_flow`, чистка бот-флоу, запасные SNI.
-- ◀ Этап 4: снос YC (−2300₽).
+- ✅ Сервис воскрешён: **eu1=ebay/firefox, main=deepl/qq**, `/sub` = 2 узла, yc/yc2 убраны.
+- ✅ Этап 3 (закалка): fp разведён, `vless_traffic_flow`→eu1/main (health-check весь зелёный, 21/21), бот + ЛК-мобрезерв yc→eu1.
+- ✅ Этап 4 (декаплинг YC): DNS-фронт→eu1; yc/yc2 убраны из health-check/sync/summary/ip_usage_watcher/бот/ЛК. **VM удалены владельцем 06-28.** Остаток у владельца: освободить 2 статич. IP (158.160.236.147 + 84.252.136.139) + снести CDN/Backup/Logging/VPC/cert в YC-консоли (зарезерв. IP капают даже без VM).
 - ⏳ Параллельно: интел Daniil (жёсткий БС/whitelist — отдельная стена, SNI её НЕ решает).

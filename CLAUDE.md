@@ -54,8 +54,7 @@ git log --oneline -3
 |--------|-----|-----------|
 | **Fornex eu1** (основной) | `185.21.8.91` | Бот, веб-панель, AmneziaWG Docker, MTProxy Fake TLS, Xray VLESS+WS+XHTTP+REALITY (443) |
 | **Timeweb main** (RU + Мегафон/Yota) | `81.200.146.32` | **Xray VLESS+REALITY на 443** (SNI=cloud.mail.ru, для Мегафон/Yota при БС, см. SESSION_SUMMARY_2026-05-21). Также WireGuard wg0 на UDP/51820 для 1 legacy user. SSH: `ssh -i ~/.ssh/id_ed25519_main root@81.200.146.32` (или через Fornex jump) |
-| **Yandex Cloud vrprnt** (yc, T2/МТС/Билайн) | `158.160.236.147` | Xray VLESS+REALITY xHTTP (порт 443, SNI: www.microsoft.com) |
-| **Yandex Cloud yc2** (РФ-резерв, с 2026-06-09) | `84.252.136.139` (static) | Клон yc: Xray VLESS+REALITY xHTTP (443, SNI: www.microsoft.com), те же per-user UUID (`vless_uuid_yc`). Резерв + разгрузка yc. В подписке, в `sync_xray_users --all` и health-check (с 2026-06-10) |
+| ~~**Yandex Cloud** yc / yc2~~ | ~~`158.160.236.147` / `84.252.136.139`~~ | **СНЕСЕНЫ 2026-06-28** (снос YC). Блок 25.06 был по SNI/fp (`microsoft`+`chrome`), НЕ по IP → сервис воскрешён на eu1/main, Яндекс-узлы не нужны. Убраны из `/sub`, health-check, `sync_xray_users`, `vless_summary`, `ip_usage_watcher`, бот/ЛК. История: `SESSION_SUMMARY_2026-06-28` |
 
 **SSH:**
 - Fornex: `ssh fornex` (алиас) или `ssh -i ~/.ssh/id_ed25519_fornex root@185.21.8.91`
@@ -93,7 +92,7 @@ git log --oneline -3
 | Голый MTProto на eu1 | ❌ Блок по сигнатуре | — |
 | Cloudflare на LTE whitelist | ❌ Даже CF IPs не в whitelist | — |
 
-**Подписка `/sub` = 4 узла** (метки в Happ): 🇪🇺 Европа (yc) · 🇪🇺 Европа-2 (yc2) · 🇩🇪 Германия (eu1 direct) · 🇷🇺 Россия (main). yc/yc2 — **фронт-релеи в eu1** (правило #0), не прямые выходы.
+**Подписка `/sub` = 2 узла** (с 06-28, метки в Happ): 🇩🇪 Германия (eu1, REALITY `ebay.com`/firefox — **основной**) · 🇷🇺 Россия (main, REALITY `deepl.com`/qq). yc/yc2 снесены (снос YC); раньше было 4 узла с Яндекс-релеями.
 
 **Покрытие (факт, тест владельца 06-13 на T2):** РКН режет по **IP-репутации, не транспорту** (память `project_vpn_rkn_ip_block`). На мобильных/фильтрующих сетях надёжны только Яндекс-узлы (Европа/Европа-2) + AmneziaWG; eu1 (Германия) и main (Россия) прямым входом могут не подниматься даже без БС. **Мегафон при БС — известный гэп** (ждём тест человека); **Yota** решено 05-21 (БС-ретест ждёт). Покрытие операторов НЕ считать «закрытым».
 
@@ -246,8 +245,8 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 
 ## Важные правила
 
-0. **⛔ yc/yc2 («Европа») — ФРОНТ-РЕЛЕИ, не прямые выходы** (вскрыто 2026-06-10). Их Xray routing шлёт ВЕСЬ трафик в outbound `vless+ws → 185.21.8.91:80/vpn` = **eu1 vless-ws**. Вход через Яндекс-IP (переживает РКН), выход через eu1. Релей-credential `359e23cc-f90c-4e43-97af-bd1b662ff043` (общий yc/yc2) лежит в eu1 vless-ws. У него нет `tid_…@kronos` email → `access_audit` метит «SHARED», но это **несущая инфра, НЕ фрод**. **НЕ удалять shared на eu1** (`sync_eu1_vless.py --no-shared` гейтнут за `--force` + бережёт `RELAY_PRESERVE`) — снос перерубает выход Европы. Память: `project_vpn_yc_relay_topology`, `feedback_no_delete_runtime_blind`.
-0.1. **🌐 supportkronos.online (ЛК + `/sub`) фронтится через Яндекс** (с 2026-06-10, БС-резильентность). DNS A → **yc + yc2** (158.160.236.147 + 84.252.136.139, TTL 60, grey-cloud), там `socat sub-forward.service` :8443 → passthrough на Fornex:8443 (TLS терминируется на Fornex, существующий LE-cert). Смысл: при БС немецкий IP eu1 недоступен → подписка не обновлялась; Яндекс-IP переживает → failover-ротация серверов теперь доходит до БС-юзеров. **eu1:8443 nginx остаётся бэкендом** (не выключать). yc потребовал `ufw allow 8443`. ⚠️ Полная БС-устойчивость (SNI-фильтрация) не доказана — валидировать при БС. health-check мониторит yc/yc2:8443.
+0. **[⛔ ИСТОРИЧЕСКОЕ — yc/yc2 СНЕСЕНЫ 2026-06-28 (снос YC). Правило ниже описывает прошлую топологию.]** **yc/yc2 («Европа») были ФРОНТ-РЕЛЕЯМИ, не прямыми выходами** (вскрыто 2026-06-10). Их Xray routing шлёт ВЕСЬ трафик в outbound `vless+ws → 185.21.8.91:80/vpn` = **eu1 vless-ws**. Вход через Яндекс-IP (переживает РКН), выход через eu1. Релей-credential `359e23cc-f90c-4e43-97af-bd1b662ff043` (общий yc/yc2) лежит в eu1 vless-ws. У него нет `tid_…@kronos` email → `access_audit` метит «SHARED», но это **несущая инфра, НЕ фрод**. **НЕ удалять shared на eu1** (`sync_eu1_vless.py --no-shared` гейтнут за `--force` + бережёт `RELAY_PRESERVE`) — снос перерубает выход Европы. Память: `project_vpn_yc_relay_topology`, `feedback_no_delete_runtime_blind`.
+0.1. **[ОБНОВЛЕНО 2026-06-28: DNS-фронт перенесён yc/yc2 → eu1 (185.21.8.91); socat-релеи сняты со сносом YC. supportkronos.online резолвится в eu1 напрямую (eu1:8443 nginx, проверено @1.1.1.1/@8.8.8.8). Ниже — прошлая схема через Яндекс.]** **🌐 supportkronos.online (ЛК + `/sub`) фронтилась через Яндекс** (с 2026-06-10, БС-резильентность). DNS A → **yc + yc2** (158.160.236.147 + 84.252.136.139, TTL 60, grey-cloud), там `socat sub-forward.service` :8443 → passthrough на Fornex:8443 (TLS терминируется на Fornex, существующий LE-cert). Смысл: при БС немецкий IP eu1 недоступен → подписка не обновлялась; Яндекс-IP переживает → failover-ротация серверов теперь доходит до БС-юзеров. **eu1:8443 nginx остаётся бэкендом** (не выключать). yc потребовал `ufw allow 8443`. ⚠️ Полная БС-устойчивость (SNI-фильтрация) не доказана — валидировать при БС. health-check мониторит yc/yc2:8443.
 1. **Timeweb (main)** — там теперь крутится Xray VLESS+REALITY для Мегафон/Yota (см. SESSION_SUMMARY_2026-05-21). Старый WG (wg0/UDP/51820) тоже остался для 1 legacy user. SSH-ключ к main: `id_ed25519_main` на Fornex.
 2. **eu1 = Docker** — AmneziaWG в `amnezia-awg2`, команды через `docker exec`
 3. **Подсеть eu1 = 10.8.1.0/24**, порт = 39580 (не 51820, не 10.1.0.0/24)
