@@ -1,12 +1,15 @@
 #!/bin/bash
-# vkturn_watch.sh — еженедельный твотчер релизов cacggghp/vk-turn-proxy.
-# Whitelist-обход запаркован 06-23: vk-turn не работает, т.к. VK сменил капчу,
-# а тулза её не парсит (missing captcha_sid). Когда выйдет НОВЫЙ релиз — возможно,
-# в нём фикс капчи → шлём TG-сигнал владельцу «время ретестить vk-turn».
+# vkturn_watch.sh — еженедельный твотчер релизов ФОРКА vk-turn-proxy.
+# История: апстрим cacggghp БРОШЕН (последний пуш 16 апр 2026, issue «Куда пропал Автор»);
+# фикс VK-капчи пришёл ФОРКОМ NikKuz99 v1.8.4 (PR #182/#183) — поэтому смотрим форк, не апстрим
+# (старый вотчер на cacggghp/releases был слеп: автор не релизит → молчал бы вечно).
+# Ретест 06-29 (см. ROADMAP / память hard_whitelist_unbeaten): капча СНЯТА, токен+TURN получены,
+# НО трек запаркован по АНТИ-МАСШТАБУ (9-мин cred-TTL + ручная капча = боутик), не по технике.
+# Сигнал = форк выпустил новый релиз → актуально ТОЛЬКО если есть конкретный жёсткий-БС юзер под Phase B.
 # Cron (Fornex root, еженедельно): 0 12 * * 1  /opt/vpnservice/scripts/vkturn_watch.sh
-# Состояние: /var/lib/vpn-health/vkturn_watch.state (последний виденный тег).
+# Состояние: /var/lib/vpn-health/vkturn_watch.state (последний виденный тег; seed v1.8.4).
 set -u
-REPO="cacggghp/vk-turn-proxy"
+REPO="NikKuz99/vk-turn-proxy"
 STATE_DIR="/var/lib/vpn-health"
 STATE="$STATE_DIR/vkturn_watch.state"
 ENV="/opt/vpnservice/env_vars.txt"
@@ -23,7 +26,7 @@ PREV=$(cat "$STATE" 2>/dev/null || echo "")
 
 # Алертим только если тег сменился И это не самый первый запуск (PREV не пуст).
 if [ -n "$PREV" ] && [ "$LATEST" != "$PREV" ]; then
-  MSG="🛰️ vk-turn-proxy: новый релиз ${LATEST} (был ${PREV}). Whitelist-обход запаркован 06-23 из-за VK-капчи — возможно, в этом релизе фикс. Время ретестить vk-turn: скажи Claude «ретест vk-turn». github.com/${REPO}/releases"
+  MSG="🛰️ vk-turn форк ${REPO}: новый релиз ${LATEST} (был ${PREV}). Капча уже снята ретестом 06-29 (тех-часть закрыта), трек запаркован по АНТИ-МАСШТАБУ. Релиз актуален ТОЛЬКО при конкретном жёстком-БС юзере под боутик-Phase B. github.com/${REPO}/releases"
   if [ -n "$BOT_TOKEN" ] && [ -n "$ADMIN_ID" ]; then
     curl -s --max-time 15 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
       --data-urlencode "chat_id=${ADMIN_ID}" \
