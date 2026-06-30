@@ -326,7 +326,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | Открытые задачи | `ROADMAP_VPN.md` (только открытое) |
 | История изменений | `DONE_LIST_VPN.md` (хронология + оглавление) |
 | Монетизация / платежи | `docs/monetization-and-payments.md` |
-| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-29.md` (vk-turn ретест: капча СНЯТА форком v1.8.4 — токен+TURN на резид. IP; но 9-мин TTL + ручная капча = боутик → парк по анти-масштабу; вотчер переключён на форк). Пред.: `SESSION_SUMMARY_2026-06-28.md` (блок 25.06 РЕШЁН, YC снесён) |
+| Последняя сессия | `docs/sessions/SESSION_SUMMARY_2026-06-30.md` (vk-turn Phase B ВАЛИДИРОВАН — полный тоннель end-to-end 1.7МБ; жёсткий-БС тест Ани сорвался по топологии (БС на iOS-only); план self-test когда БС введут, dormant-kit на eu1 `up.sh\|down.sh`). Пред.: `SESSION_SUMMARY_2026-06-29.md` (капча снята форком v1.8.4) |
 | Yota/Мегафон решение | `docs/sessions/SESSION_SUMMARY_2026-05-21.md` + `DONE_LIST_VPN.md` (2026-05-21) |
 | Деплой чеклист | `docs/deployment.md` |
 | MTProxy операции | `docs/telegram-mtproxy-operators-guide.md` |
