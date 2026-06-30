@@ -336,6 +336,7 @@ ENFORCEMENT_ENABLED=1    # гейт «Получить VPN» по db_is_access_a
 | ~~Yandex Cloud REALITY~~ (историч., YC снесён 06-28) | `docs/yandex-cloud-reality-setup.md` |
 | Бэкап/восстановление | `docs/backup-restore.md` |
 | Стратегия обхода блокировок | `docs/blocking-bypass-strategy.md` |
+| **vk-turn (обход жёсткого whitelist)** | `docs/vk-turn-whitelist-bypass.md` — полный разбор + runbook теста на реальном БС + dormant-kit (на standby) |
 | Конкуренты | `docs/competitors-analysis.md` |
 
 Старые сессии (Feb–Mar 2026): `docs/sessions/old/` — история, не читать для работы.
