@@ -949,8 +949,9 @@ def main() -> None:
                 import subprocess as _sp
                 import pathlib as _pl
                 script_path = _pl.Path(__file__).resolve().parent.parent / "scripts" / "sync_xray_users.py"
+                import sys as _sys
                 _sp.Popen(
-                    [sys.executable, str(script_path), "--all", "--no-shared"],
+                    [_sys.executable, str(script_path), "--all", "--no-shared"],
                     stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
                     start_new_session=True,
                 )
@@ -3356,8 +3357,17 @@ def main() -> None:
                 except Exception as e:
                     logger.warning("db_mark_test_used (claim) failed for %s: %s", tid, e)
             # Auto-restore revoked peers (enforcement gap hook).
-            _restore_and_notify(tid)
-            _send_subscription(tid, tid)  # выдать подписку юзеру (claim-оплата → сразу подключение)
+            # Доставка юзеру НЕ должна рушить approve: site-only юзер мог не открывать
+            # бота → send падает 'chat not found'. Ловим, чтобы карточка/попап отработали.
+            try:
+                _restore_and_notify(tid)
+            except Exception as e:
+                logger.warning("restore_and_notify (claim %s) failed: %s", claim_id, e)
+            delivered = False
+            try:
+                delivered = bool(_send_subscription(tid, tid))  # claim-оплата → сразу подключение
+            except Exception as e:
+                logger.warning("send_subscription (claim %s) failed: %s", claim_id, e)
             inviter_tid = None
             try:
                 inviter_tid = db_apply_referral_bonus(tid, REFERRAL_REWARD_DAYS)
@@ -3408,11 +3418,16 @@ def main() -> None:
             admin_extra = (
                 f" + {REFERRAL_REWARD_DAYS} реф-бонус" if inviter_tid else ""
             )
+            delivery_note = (
+                "" if delivered
+                else "\n⚠️ Юзер не открывал бота — подписку заберёт в ЛК"
+            )
             try:
                 bot.edit_message_text(
                     f"✅ <b>ОДОБРЕНО</b> — @{uname} (id: <code>{tid}</code>)\n"
                     f"📧 {email}\n"
-                    f"+{days} дн{admin_extra}, активна до {exp_str}",
+                    f"+{days} дн{admin_extra}, активна до {exp_str}"
+                    f"{delivery_note}",
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
                     parse_mode="HTML",
@@ -3554,9 +3569,19 @@ def main() -> None:
             buf.seek(0)
             bot.send_photo(chat_id, photo=buf, caption=caption, parse_mode="HTML")
         except Exception as e:
-            logger.exception("send_subscription QR failed: %s", e)
-            bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
-        bot.send_message(chat_id, sub_url, reply_markup=markup, disable_web_page_preview=True)
+            logger.warning("send_subscription QR failed for %s: %s", chat_id, e)
+            try:
+                bot.send_message(chat_id, caption, parse_mode="HTML", disable_web_page_preview=True)
+            except Exception as e2:
+                # Чат недоступен (юзер не открывал бота) — доставка невозможна.
+                # Подписка активна, юзер заберёт её в ЛК. Не бросаем — вызывающий решает.
+                logger.warning("send_subscription unreachable chat %s: %s", chat_id, e2)
+                return False
+        try:
+            bot.send_message(chat_id, sub_url, reply_markup=markup, disable_web_page_preview=True)
+        except Exception as e:
+            logger.warning("send_subscription url send failed for %s: %s", chat_id, e)
+            return False
         return True
 
     @bot.callback_query_handler(func=lambda call: call.data == "vpn_quick")
